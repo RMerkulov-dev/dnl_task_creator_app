@@ -3,12 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "scripts": {
-    "dev": "concurrently \"vite\" \"node server.js\"",
-    "build": "vite build",
-    "start": "NODE_ENV=production node server.js",
-    "preview": "vite preview"
-  },
+"scripts": {
+  "dev": "concurrently \"vite\" \"node api/index.js\"",
+  "build": "vite build",
+  "preview": "vite preview"
+},
   "dependencies": {
     "dotenv": "^16.6.1",
     "express": "^5.2.1",

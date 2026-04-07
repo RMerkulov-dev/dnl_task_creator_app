@@ -71,7 +71,7 @@ async function proxyTo(req, res, upstreamUrl, authHeader) {
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Azure DevOps proxy
-app.all('/api/azure-devops/:key/*', async (req, res) => {
+app.use('/api/azure-devops/:key', async (req, res) => {
   const key = req.params.key;
   const org = AZURE_ORGS[key];
   
@@ -88,7 +88,7 @@ app.all('/api/azure-devops/:key/*', async (req, res) => {
 });
 
 // Jira proxy
-app.all('/api/jira/*', async (req, res) => {
+app.use('/api/jira', async (req, res) => {
   const prefix = `/api/jira`;
   const suffix = req.originalUrl.substring(req.originalUrl.indexOf(prefix) + prefix.length);
   
@@ -103,6 +103,13 @@ app.get('/api/health', (req, res) => {
     jira: { hasToken: !!jiraToken }
   });
 });
+
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`[Server] Running locally on http://localhost:${PORT}`);
+  });
+}
 
 // Обязательно экспортируем app для бессерверной среды Vercel
 export default app;
