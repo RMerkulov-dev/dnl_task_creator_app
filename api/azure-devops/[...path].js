@@ -56,6 +56,8 @@ export default async function handler(req, res) {
   const target = buildTarget(org.orgUrl);
   const url    = `${target}${suffix}${qs}`;
 
+  console.log(`[Azure proxy] req.url=${req.url} → upstream=${url}`);
+
   try {
     const isBody = !['GET', 'HEAD'].includes(req.method);
     const body   = isBody ? await readBody(req) : undefined;
@@ -65,6 +67,9 @@ export default async function handler(req, res) {
 
     const upstream = await fetch(url, { method: req.method, headers, body });
     const text     = await upstream.text();
+    if (!upstream.ok) {
+      console.error(`[Azure proxy] ${upstream.status} from ${url} — body: ${text.substring(0, 300)}`);
+    }
     res.status(upstream.status)
        .setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json')
        .send(text);

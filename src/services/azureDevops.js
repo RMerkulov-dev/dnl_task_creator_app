@@ -8,7 +8,7 @@ async function parse(res, label) {
     throw new Error(`Azure DevOps returned HTML (${res.status}) — check proxy & PAT.`);
   }
   let data;
-  try { data = JSON.parse(text); } catch { throw new Error(`${label}: invalid response (${res.status})`); }
+  try { data = JSON.parse(text); } catch { throw new Error(`${label}: invalid response (${res.status}) — ${text.substring(0, 200)}`); }
   if (!res.ok) throw new Error(data.message || data.error || data.value?.Message || `Azure DevOps error ${res.status}`);
   return data;
 }
