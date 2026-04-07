@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>DNL Tasks Creator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080d14;--surface:#0d1420;--card:rgba(255,255,255,.04);--card-h:rgba(255,255,255,.06);
+  --input:rgba(255,255,255,.05);--input-f:rgba(91,99,254,.07);
+  --border:rgba(255,255,255,.08);--border-f:rgba(91,99,254,.55);
+  --a1:#5b63fe;--a2:#8b5cf6;--grad:linear-gradient(135deg,#5b63fe,#8b5cf6);
+  --t1:#e8ecf0;--t2:#8892a4;--t3:#4a5568;
+  --green:#10b981;--red:#ef4444;
+  --r:12px;--rl:16px;--rxl:24px;
+  --glow:0 0 60px rgba(91,99,254,.12);
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t1);-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(ellipse 60% 50% at 15% 10%,rgba(91,99,254,.09) 0%,transparent 100%),
+  radial-gradient(ellipse 50% 40% at 85% 85%,rgba(139,92,246,.09) 0%,transparent 100%);
+  background-attachment:fixed}
+/* ── layout ── */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.login-card{background:var(--card);border:1px solid var(--border);border-radius:var(--rxl);
+  padding:48px 40px;width:100%;max-width:400px;backdrop-filter:blur(24px);text-align:center;
+  box-shadow:var(--glow);animation:rise .45s cubic-bezier(.16,1,.3,1)}
+.login-logo img{height:36px;object-fit:contain;margin-bottom:28px}
+.login-title{font-size:22px;font-weight:700;letter-spacing:-.02em;background:var(--grad);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:6px}
+.login-sub{font-size:14px;color:var(--t2);margin-bottom:36px}
+/* ── form ── */
+.field{margin-bottom:16px;text-align:left}
+.label{display:block;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--t2);margin-bottom:8px}
+input,textarea,select{width:100%;background:var(--input);border:1px solid var(--border);
+  border-radius:var(--r);color:var(--t1);font-family:var(--font);font-size:15px;
+  padding:11px 14px;outline:none;transition:border-color .18s,background .18s,box-shadow .18s}
+input::placeholder,textarea::placeholder{color:var(--t3)}
+input:focus,textarea:focus,select:focus{border-color:var(--border-f);background:var(--input-f);
+  box-shadow:0 0 0 4px rgba(91,99,254,.12)}
+textarea{resize:vertical;min-height:130px;line-height:1.6}
+select{cursor:pointer;appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238892a4' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 14px center;padding-right:38px}
+/* ── buttons ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font);
+  font-size:15px;font-weight:600;border:none;border-radius:var(--r);cursor:pointer;
+  transition:opacity .18s,transform .12s,box-shadow .18s;padding:13px 22px}
+.btn:active{transform:scale(.985)}.btn:disabled{opacity:.38;cursor:not-allowed;pointer-events:none}
+.btn-primary{width:100%;background:var(--grad);color:#fff;box-shadow:0 4px 20px rgba(91,99,254,.3)}
+.btn-primary:hover:not(:disabled){opacity:.9;box-shadow:0 6px 24px rgba(91,99,254,.45)}
+.btn-ms{width:100%;background:rgba(255,255,255,.06);border:1px solid var(--border);color:var(--t1);
+  font-size:15px;padding:13px 22px}
+.btn-ms:hover:not(:disabled){background:rgba(255,255,255,.1)}
+.btn-ghost{background:transparent;border:1px solid var(--border);color:var(--t2);
+  padding:8px 14px;font-size:13px;font-weight:500}
+.btn-ghost:hover{background:var(--card-h);color:var(--t1)}
+/* ── segment ── */
+.segment{display:flex;background:var(--input);border:1px solid var(--border);
+  border-radius:var(--r);padding:4px;gap:4px}
+.seg{flex:1;padding:9px 12px;border:none;border-radius:9px;background:transparent;
+  color:var(--t2);font-family:var(--font);font-size:14px;font-weight:500;cursor:pointer;transition:all .18s}
+.seg.active{background:var(--grad);color:#fff;box-shadow:0 2px 10px rgba(91,99,254,.35)}
+/* ── header ── */
+.app-shell{display:flex;flex-direction:column;min-height:100vh}
+.header{height:60px;display:flex;align-items:center;padding:0 28px;gap:14px;
+  border-bottom:1px solid var(--border);backdrop-filter:blur(12px);
+  position:sticky;top:0;z-index:10;background:rgba(8,13,20,.7)}
+.header img{height:24px;object-fit:contain}
+.sep{width:1px;height:18px;background:var(--border)}
+.hd-title{font-size:15px;font-weight:600;color:var(--t1)}
+.spacer{flex:1}
+.hd-user{font-size:12px;color:var(--t2)}
+/* ── main / card ── */
+.main{flex:1;display:flex;flex-direction:column;align-items:center;padding:48px 24px 64px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--rxl);
+  padding:40px;width:100%;max-width:580px;backdrop-filter:blur(24px);animation:rise .4s cubic-bezier(.16,1,.3,1)}
+.card-title{font-size:20px;font-weight:700;letter-spacing:-.02em;margin-bottom:4px}
+.card-sub{font-size:13px;color:var(--t2);margin-bottom:32px}
+/* ── modal ── */
+.overlay{position:fixed;inset:0;background:rgba(8,13,20,.75);backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;z-index:100;padding:24px;animation:fadeIn .2s ease}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:var(--rxl);
+  padding:40px;width:100%;max-width:460px;box-shadow:0 24px 80px rgba(0,0,0,.5),var(--glow);
+  animation:rise .35s cubic-bezier(.16,1,.3,1)}
+.modal-title{font-size:18px;font-weight:700;letter-spacing:-.02em;margin-bottom:28px}
+.steps{list-style:none;display:flex;flex-direction:column;gap:18px;margin-bottom:32px}
+.step{display:flex;align-items:flex-start;gap:14px}
+.si{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;font-size:13px;margin-top:1px}
+.si.idle{background:var(--input);border:1px solid var(--border);color:var(--t3)}
+.si.pending{background:rgba(91,99,254,.15);border:1px solid var(--a1)}
+.si.done{background:rgba(16,185,129,.15);border:1px solid var(--green);color:var(--green)}
+.si.error{background:rgba(239,68,68,.15);border:1px solid var(--red);color:var(--red)}
+.sn{font-size:14px;font-weight:600;margin-bottom:3px}
+.sd{font-size:12px;color:var(--t2);line-height:1.5}
+.se{font-size:12px;color:var(--red);margin-top:3px}
+.sl{color:var(--a1);text-decoration:none;font-size:12px;display:inline-flex;align-items:center;
+  gap:4px;margin-top:4px}
+.sl:hover{text-decoration:underline}
+.result-box{display:flex;flex-direction:column;gap:10px;padding:20px;background:var(--card);
+  border:1px solid var(--border);border-radius:var(--rl);margin-bottom:24px}
+.rl{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.rl-label{font-size:12px;font-weight:600;color:var(--t2);letter-spacing:.04em;text-transform:uppercase}
+.rl-a{font-size:13px;color:var(--a1);text-decoration:none;display:flex;align-items:center;gap:5px}
+.rl-a:hover{text-decoration:underline}
+/* ── misc ── */
+.spinner{width:14px;height:14px;border:2px solid rgba(91,99,254,.3);
+  border-top-color:var(--a1);border-radius:50%;animation:spin .7s linear infinite}
+.err{font-size:12px;color:var(--red);margin-top:6px}
+.inline-row{display:flex;gap:8px}
+.inline-row input{flex:1}
+/* ── animations ── */
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+.shake{animation:shake .4s ease}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+
+// ─── CONFIG ──────────────────────────────────────────────────────────────────
+const APP_PASSWORD  = '2552';
+const PROXY_BASE    = 'http://localhost:3001';  // Change this to your deployed server URL
+const LOGO          = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
+
+const PROJECTS = [
+  {
+    id: 'HT', label: 'HT — Hydrotec',
+    azure: { project: 'Hydrotec', workItemType: 'Epic', jiraIdField: 'Custom.JiraID' },
+    jira:  { cloudId: 'ede50bd6-614f-4723-b64b-76ef4be362d5', projectKey: 'HTH',
+             issueTypeId: '10035', clientRequestIdField: 'customfield_10034' },
+  },
+];
+
+// ─── API SERVICES ─────────────────────────────────────────────────────────────
+function patchBody(fields) {
+  return JSON.stringify(
+    Object.entries(fields).map(([path, value]) => ({ op:'add', path:`/fields/${path}`, value }))
+  );
+}
+
+async function parseRes(res, label) {
+  const text = await res.text();
+  if (text.trimStart().startsWith('<'))
+    throw new Error(res.status === 503
+      ? 'Proxy server not reachable — start the server with: npm run dev'
+      : `${label} returned HTML (status ${res.status}). Check proxy & credentials.`);
+  let data; try { data = JSON.parse(text); } catch { throw new Error(`${label}: bad response (${res.status})`); }
+  if (!res.ok) throw new Error(data.message || data.value?.Message || `${label} error ${res.status}`);
+  return data;
+}
+
+async function azureCreate(project, type, fields) {
+  const res = await fetch(
+    `${PROXY_BASE}/api/azure-devops/${encodeURIComponent(project)}/_apis/wit/workitems/$${encodeURIComponent(type)}?api-version=7.0`,
+    { method:'POST', headers:{'Content-Type':'application/json-patch+json'}, body:patchBody(fields) }
+  );
+  return parseRes(res, 'Azure Create');
+}
+
+async function azureUpdate(project, id, fields) {
+  const res = await fetch(
+    `${PROXY_BASE}/api/azure-devops/${encodeURIComponent(project)}/_apis/wit/workitems/${id}?api-version=7.0`,
+    { method:'PATCH', headers:{'Content-Type':'application/json-patch+json'}, body:patchBody(fields) }
+  );
+  return parseRes(res, 'Azure Update');
+}
+
+async function azureGet(project, id) {
+  const res = await fetch(`${PROXY_BASE}/api/azure-devops/${encodeURIComponent(project)}/_apis/wit/workitems/${id}?api-version=7.0`);
+  return parseRes(res, 'Azure Get');
+}
+
+function toAdfWithLink(desc, epicId, epicUrl) {
+  return { type:'doc', version:1, content:[
+    { type:'paragraph', content:[{ type:'text', text:desc }] },
+    { type:'paragraph', content:[{ type:'text', text:`Azure DevOps Epic ID: ${epicId}`, marks:[{type:'strong'}] }] },
+    { type:'paragraph', content:[{ type:'text', text:epicUrl, marks:[{type:'link',attrs:{href:epicUrl}}] }] },
+  ]};
+}
+
+function toAdf(text) {
+  return { type:'doc', version:1, content:[{ type:'paragraph', content:[{ type:'text', text }] }] };
+}
+
+async function jiraCreate(cloudId, projectKey, issueTypeId, summary, desc, epicId, epicUrl, field) {
+  const res = await fetch(`${PROXY_BASE}/api/jira/ex/jira/${cloudId}/rest/api/3/issue`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ fields:{
+      project:{key:projectKey}, issuetype:{id:issueTypeId}, summary,
+      description: toAdfWithLink(desc, epicId, epicUrl), [field]: epicId,
+    }}),
+  });
+  return parseRes(res, 'Jira Create');
+}
+
+async function jiraUpdate(cloudId, issueKey, summary, desc) {
+  const res = await fetch(`${PROXY_BASE}/api/jira/ex/jira/${cloudId}/rest/api/3/issue/${issueKey}`, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ fields:{ summary, description: toAdf(desc) } }),
+  });
+  if (res.status === 204) return {};
+  return parseRes(res, 'Jira Update');
+}
+
+// ─── SYNC LOGIC ───────────────────────────────────────────────────────────────
+async function createTask(proj, title, desc, onStep) {
+  const { azure, jira } = proj;
+  onStep(0,'pending');
+  const epic = await azureCreate(azure.project, azure.workItemType,
+    {'System.Title':title,'System.Description':desc}).catch(e => { onStep(0,'error',e.message); throw e; });
+  const epicId  = epic.id;
+  const epicUrl = epic._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${epicId}`;
+  onStep(0,'done',null,{epicId,epicUrl});
+
+  onStep(1,'pending');
+  const issue = await jiraCreate(jira.cloudId,jira.projectKey,jira.issueTypeId,title,desc,epicId,epicUrl,jira.clientRequestIdField)
+    .catch(e => { onStep(1,'error',e.message); throw e; });
+  const jiraKey = issue.key;
+  const jiraUrl = `https://dynamicalabs.atlassian.net/browse/${jiraKey}`;
+  onStep(1,'done',null,{jiraKey,jiraUrl});
+
+  onStep(2,'pending');
+  await azureUpdate(azure.project, epicId, {[azure.jiraIdField]:jiraKey})
+    .catch(e => { onStep(2,'error',e.message); throw e; });
+  onStep(2,'done');
+
+  return {epicId,epicUrl,jiraKey,jiraUrl};
+}
+
+async function loadEpic(proj, epicId) {
+  const item  = await azureGet(proj.azure.project, epicId);
+  const title = item.fields?.['System.Title'] ?? '';
+  const desc  = (item.fields?.['System.Description'] ?? '').replace(/<[^>]+>/g,'');
+  const jiraKey = item.fields?.[proj.azure.jiraIdField] ?? null;
+  return {title, desc, jiraKey};
+}
+
+async function updateTask(proj, epicId, title, desc, jiraKey, onStep) {
+  const { azure, jira } = proj;
+  onStep(0,'pending');
+  await azureUpdate(azure.project, epicId, {'System.Title':title,'System.Description':desc})
+    .catch(e => { onStep(0,'error',e.message); throw e; });
+  const epicUrl = `https://dev.azure.com/${azure.project}/_workitems/edit/${epicId}`;
+  onStep(0,'done',null,{epicId,epicUrl});
+
+  if (jiraKey) {
+    onStep(1,'pending');
+    await jiraUpdate(jira.cloudId, jiraKey, title, desc)
+      .catch(e => { onStep(1,'error',e.message); throw e; });
+    const jiraUrl = `https://dynamicalabs.atlassian.net/browse/${jiraKey}`;
+    onStep(1,'done',null,{jiraKey,jiraUrl});
+    return {epicId,epicUrl,jiraKey,jiraUrl};
+  }
+  onStep(1,'skipped');
+  return {epicId,epicUrl,jiraKey:null,jiraUrl:null};
+}
+
+// ─── COMPONENTS ───────────────────────────────────────────────────────────────
+const { useState, useRef } = React;
+
+function MsIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 21 21" fill="none">
+      <rect x="1"  y="1"  width="9" height="9" fill="#F25022"/>
+      <rect x="11" y="1"  width="9" height="9" fill="#7FBA00"/>
+      <rect x="1"  y="11" width="9" height="9" fill="#00A4EF"/>
+      <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+    </svg>
+  );
+}
+
+function Spinner({size=14}) {
+  return <span className="spinner" style={{width:size,height:size}}/>;
+}
+
+function StepIcon({status}) {
+  const cls = `si ${status||'idle'}`;
+  if (status==='pending') return <span className={cls}><Spinner/></span>;
+  if (status==='done')    return <span className={cls}>✓</span>;
+  if (status==='error')   return <span className={cls}>✕</span>;
+  if (status==='skipped') return <span className={cls}>—</span>;
+  return <span className={cls}>·</span>;
+}
+
+function SyncModal({mode, steps, result, onClose}) {
+  const defs = mode==='edit'
+    ? [{label:'Updating Azure DevOps Epic'},{label:'Updating Jira Request'}]
+    : [{label:'Creating Azure DevOps Epic'},{label:'Creating Jira Request'},{label:'Linking records'}];
+  const allDone = steps.length > 0 && steps.every(s => s?.status==='done'||s?.status==='skipped');
+  const hasErr  = steps.some(s => s?.status==='error');
+
+  return (
+    <div className="overlay">
+      <div className="modal">
+        <p className="modal-title">
+          {hasErr ? '⚠ Sync Error' : allDone ? '✓ Sync Complete' : 'Syncing task…'}
+        </p>
+        <ul className="steps">
+          {defs.map((d,i) => {
+            const s = steps[i]||{};
+            return (
+              <li className="step" key={d.label}>
+                <StepIcon status={s.status}/>
+                <div>
+                  <p className="sn">{d.label}</p>
+                  {s.data?.epicId && <a className="sl" href={s.data.epicUrl} target="_blank" rel="noreferrer">Epic #{s.data.epicId} ↗</a>}
+                  {s.data?.jiraKey && <a className="sl" href={s.data.jiraUrl} target="_blank" rel="noreferrer">{s.data.jiraKey} ↗</a>}
+                  {s.error && <p className="se">{s.error}</p>}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        {allDone && result && (
+          <div className="result-box">
+            {result.epicUrl && (
+              <div className="rl">
+                <span className="rl-label">Azure DevOps</span>
+                <a className="rl-a" href={result.epicUrl} target="_blank" rel="noreferrer">Epic #{result.epicId} ↗</a>
+              </div>
+            )}
+            {result.jiraUrl && (
+              <div className="rl">
+                <span className="rl-label">Jira</span>
+                <a className="rl-a" href={result.jiraUrl} target="_blank" rel="noreferrer">{result.jiraKey} ↗</a>
+              </div>
+            )}
+          </div>
+        )}
+        {(allDone||hasErr) && (
+          <button className="btn btn-primary" onClick={onClose}>{hasErr?'Close':'Done'}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LoginScreen({onLogin}) {
+  const [pw,setPw]       = useState('');
+  const [err,setErr]     = useState('');
+  const [loading,setLoading] = useState(false);
+  const [shake,setShake] = useState(false);
+  const ref = useRef();
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!pw) return;
+    setLoading(true); setErr('');
+    await new Promise(r=>setTimeout(r,400));
+    if (!onLogin(pw)) {
+      setErr('Incorrect password. Please try again.');
+      setPw(''); setShake(true);
+      setTimeout(()=>setShake(false),500);
+      ref.current?.focus();
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <div className="login-logo"><img src={LOGO} alt="Dynamica Labs"/></div>
+        <h1 className="login-title">DNL Tasks Creator</h1>
+        <p className="login-sub">Enter your password to continue</p>
+        <form onSubmit={submit}>
+          <div className={`field ${shake?'shake':''}`}>
+            <input ref={ref} type="password" placeholder="Password" value={pw}
+              onChange={e=>{setPw(e.target.value);setErr('');}} autoFocus autoComplete="current-password"/>
+            {err && <p className="err">⚠ {err}</p>}
+          </div>
+          <button type="submit" className="btn btn-primary" style={{marginTop:8}} disabled={loading||!pw}>
+            {loading ? <><Spinner/> Signing in…</> : 'Sign In →'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({onLogout}) {
+  const [proj,   setProj]   = useState(PROJECTS[0]);
+  const [mode,   setMode]   = useState('create');
+  const [title,  setTitle]  = useState('');
+  const [desc,   setDesc]   = useState('');
+  const [epicId, setEpicId] = useState('');
+  const [jiraKey,setJiraKey]= useState(null);
+  const [fetchingEpic, setFetchingEpic] = useState(false);
+  const [fetchErr,     setFetchErr]     = useState('');
+  const [syncing,  setSyncing]  = useState(false);
+  const [steps,    setSteps]    = useState([]);
+  const [result,   setResult]   = useState(null);
+  const [showModal,setShowModal]= useState(false);
+
+  function updStep(i,status,error=null,data=null) {
+    setSteps(prev=>{ const n=[...prev]; n[i]={status,error,data}; return n; });
+  }
+
+  function reset() { setTitle('');setDesc('');setEpicId('');setJiraKey(null);setFetchErr(''); }
+
+  function changeMode(m) { setMode(m); reset(); }
+
+  async function loadEpicData() {
+    const id = epicId.trim(); if (!id) return;
+    setFetchingEpic(true); setFetchErr('');
+    try {
+      const d = await loadEpic(proj, id);
+      setTitle(d.title); setDesc(d.desc); setJiraKey(d.jiraKey);
+    } catch(e) { setFetchErr(e.message); }
+    finally { setFetchingEpic(false); }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!title.trim()) return;
+    const count = mode==='create'?3:2;
+    setSteps(Array(count).fill({status:'idle'}));
+    setResult(null); setSyncing(true); setShowModal(true);
+    try {
+      const res = mode==='create'
+        ? await createTask(proj, title.trim(), desc.trim(), updStep)
+        : await updateTask(proj, epicId.trim(), title.trim(), desc.trim(), jiraKey, updStep);
+      setResult(res);
+      if (mode==='create') reset();
+    } catch {}
+    finally { setSyncing(false); }
+  }
+
+  const canSubmit = title.trim() && (mode==='create'||epicId.trim());
+
+  return (
+    <div className="app-shell">
+      <header className="header">
+        <img src={LOGO} alt="Dynamica Labs"/>
+        <div className="sep"/>
+        <span className="hd-title">DNL Tasks Creator</span>
+        <div className="spacer"/>
+        <button className="btn btn-ghost" onClick={onLogout}>Sign out</button>
+      </header>
+      <main className="main">
+        <div className="card">
+          <h2 className="card-title">{mode==='create'?'New Task':'Edit Task'}</h2>
+          <p className="card-sub">
+            {mode==='create'
+              ? 'Creates a linked Azure DevOps Epic + Jira Request'
+              : 'Updates the existing Epic and linked Jira Request'}
+          </p>
+          <form onSubmit={handleSubmit}>
+            <div className="field" style={{marginBottom:24}}>
+              <label className="label">Event</label>
+              <div className="segment">
+                <button type="button" className={`seg ${mode==='create'?'active':''}`} onClick={()=>changeMode('create')}>Create</button>
+                <button type="button" className={`seg ${mode==='edit'?'active':''}`}   onClick={()=>changeMode('edit')}>Edit</button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label className="label">Select Project</label>
+              <select value={proj.id} onChange={e=>setProj(PROJECTS.find(p=>p.id===e.target.value))}>
+                {PROJECTS.map(p=><option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+            </div>
+
+            {mode==='edit' && (
+              <div className="field">
+                <label className="label">Azure DevOps Epic ID</label>
+                <div className="inline-row">
+                  <input type="number" placeholder="e.g. 154" value={epicId} min={1}
+                    onChange={e=>{setEpicId(e.target.value);setFetchErr('');}}/>
+                  <button type="button" className="btn btn-ghost" onClick={loadEpicData}
+                    disabled={!epicId.trim()||fetchingEpic} style={{flexShrink:0}}>
+                    {fetchingEpic?<Spinner/>:'Load'}
+                  </button>
+                </div>
+                {fetchErr && <p className="err">⚠ {fetchErr}</p>}
+              </div>
+            )}
+
+            <div className="field">
+              <label className="label">Task Title</label>
+              <input type="text" placeholder="e.g. HT. Customer portal redesign"
+                value={title} onChange={e=>setTitle(e.target.value)} required/>
+            </div>
+
+            <div className="field" style={{marginBottom:28}}>
+              <label className="label">Description</label>
+              <textarea placeholder="Describe the task in detail…"
+                value={desc} onChange={e=>setDesc(e.target.value)}/>
+            </div>
+
+            <button type="submit" className="btn btn-primary" disabled={!canSubmit||syncing}>
+              {syncing
+                ? <><Spinner size={16}/> Syncing…</>
+                : mode==='create' ? 'Create Task ↗' : 'Save Changes ↗'}
+            </button>
+          </form>
+        </div>
+      </main>
+      {showModal && (
+        <SyncModal mode={mode} steps={steps} result={result}
+          onClose={()=>{setShowModal(false);setSteps([]);setResult(null);}}/>
+      )}
+    </div>
+  );
+}
+
+function App() {
+  const [authed, setAuthed] = useState(false);
+  return authed
+    ? <Dashboard onLogout={()=>setAuthed(false)}/>
+    : <LoginScreen onLogin={pw=>{ if(pw===APP_PASSWORD){setAuthed(true);return true;} return false; }}/>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

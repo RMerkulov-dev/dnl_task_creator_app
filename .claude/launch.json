@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "DNL Tasks Creator",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["node_modules/.bin/vite", "--port", "3000"],
+      "port": 3000
+    },
+    {
+      "name": "Proxy Server only",
+      "runtimeExecutable": "/usr/local/bin/node",
+      "runtimeArgs": ["server.js"],
+      "port": 3001
+    }
+  ]
+}

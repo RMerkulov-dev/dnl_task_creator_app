@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/usr/local/bin/npm install:*)",
+      "Bash(/opt/homebrew/bin/npm --version)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//Users/romario/.nvm/versions/**)",
+      "Bash(bash -c 'ls /opt/homebrew/bin/npm 2>&1; ls ~/.nvm/versions/node/ 2>&1; ls /usr/local/bin/npm 2>&1')",
+      "Bash(zsh -c 'source ~/.zshrc 2>/dev/null; which npm; npm --version')",
+      "Bash(zsh -c 'which npm; npm --version')",
+      "Bash(/usr/local/bin/node --version)",
+      "Read(//usr/local/lib/node_modules/.bin/**)",
+      "Read(//usr/local/lib/node_modules/npm/bin/**)",
+      "Bash(/usr/local/bin/node /usr/local/lib/node_modules/npm/bin/npm install)",
+      "Bash(/usr/bin/git init:*)",
+      "Bash(/usr/bin/git status:*)",
+      "Bash(/bin/sh -c 'cd \"\"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\"\" && /usr/bin/git init 2>&1 && echo \"\"GIT_INIT_OK\"\"')",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
