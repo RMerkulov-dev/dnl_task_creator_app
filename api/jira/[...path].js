@@ -13,11 +13,18 @@ function readBody(req) {
 }
 
 export default async function handler(req, res) {
-  const parts = req.query.path;
-  const segments = Array.isArray(parts) ? parts : [parts];
-  const qs  = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
-  // Vercel URL-decodes path segments — re-encode before forwarding
-  const url = `https://api.atlassian.com/${segments.map(s => encodeURIComponent(s)).join('/')}${qs}`;
+  // Parse req.url directly to preserve original percent-encoding.
+  // req.url example: /api/jira/ex/jira/cloud-id/rest/api/3/issue
+  const rawUrl   = req.url;
+  const qIdx     = rawUrl.indexOf('?');
+  const fullPath = qIdx === -1 ? rawUrl : rawUrl.substring(0, qIdx);
+  const qs       = qIdx === -1 ? '' : rawUrl.substring(qIdx);
+
+  // Strip /api/jira prefix to get the Atlassian path
+  const BASE    = '/api/jira';
+  const suffix  = fullPath.startsWith(BASE) ? fullPath.substring(BASE.length) : fullPath;
+
+  const url = `https://api.atlassian.com${suffix}${qs}`;
 
   const email = process.env.JIRA_EMAIL      || '';
   const token = process.env.JIRA_API_TOKEN  || '';

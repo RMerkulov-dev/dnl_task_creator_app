@@ -32,9 +32,19 @@ function readBody(req) {
 }
 
 export default async function handler(req, res) {
-  const parts = req.query.path; // [...path] catch-all — array of segments
-  const segments = Array.isArray(parts) ? parts : [parts];
-  const [key, ...rest] = segments;
+  // Parse req.url directly to preserve original percent-encoding.
+  // req.url example: /api/azure-devops/abs/ABS%20-%20Dynamics%20365/_apis/wit/...?api-version=7.0
+  const rawUrl = req.url;
+  const qIdx     = rawUrl.indexOf('?');
+  const fullPath  = qIdx === -1 ? rawUrl : rawUrl.substring(0, qIdx);
+  const qs        = qIdx === -1 ? '' : rawUrl.substring(qIdx);
+
+  const BASE = '/api/azure-devops/';
+  const afterBase = fullPath.startsWith(BASE) ? fullPath.substring(BASE.length) : fullPath.substring(1);
+
+  const slashIdx = afterBase.indexOf('/');
+  const key      = decodeURIComponent(slashIdx === -1 ? afterBase : afterBase.substring(0, slashIdx));
+  const suffix   = slashIdx === -1 ? '' : afterBase.substring(slashIdx); // e.g. /ABS%20-%20Dynamics%20365/_apis/...
 
   const org = ORGS[key];
   if (!org?.orgUrl) {
@@ -44,9 +54,7 @@ export default async function handler(req, res) {
   }
 
   const target = buildTarget(org.orgUrl);
-  const qs = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
-  // Vercel URL-decodes path segments — re-encode them before forwarding to Azure DevOps
-  const url = `${target}/${rest.map(s => encodeURIComponent(s)).join('/')}${qs}`;
+  const url    = `${target}${suffix}${qs}`;
 
   try {
     const isBody = !['GET', 'HEAD'].includes(req.method);
