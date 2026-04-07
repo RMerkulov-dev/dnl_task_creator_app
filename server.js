@@ -1,9 +1,11 @@
 import { serve }       from '@hono/node-server'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono }        from 'hono'
+import { handle }      from 'hono/vercel' // Адаптер для работы на Vercel
 import dotenv          from 'dotenv'
 import path            from 'path'
 import { fileURLToPath } from 'url'
+import fs              from 'fs' // Нужен для чтения index.html
 
 dotenv.config()
 
@@ -63,9 +65,9 @@ async function proxyTo(c, upstreamUrl, authHeader) {
 
 // ─── Extract raw path+qs from Hono request URL ────────────────────────────────
 function rawPathAndQs(c) {
-  const full  = c.req.raw.url;                          // https://host/path?qs
-  const start = full.indexOf('/', full.indexOf('//') + 2); // index of first '/' after scheme://host
-  return full.substring(start);                         // /path?qs  (encoding preserved)
+  const full  = c.req.raw.url;                          
+  const start = full.indexOf('/', full.indexOf('//') + 2); 
+  return full.substring(start);                         
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -82,7 +84,7 @@ app.all('/api/azure-devops/:key/*', async (c) => {
   const qIdx   = raw.indexOf('?');
   const path_  = qIdx === -1 ? raw : raw.substring(0, qIdx);
   const qs     = qIdx === -1 ? '' : raw.substring(qIdx);
-  const suffix = path_.substring(`/api/azure-devops/${key}`.length); // /ABS%20-.../...
+  const suffix = path_.substring(`/api/azure-devops/${key}`.length); 
   const auth   = `Basic ${Buffer.from(`:${org.pat || ''}`).toString('base64')}`;
   return proxyTo(c, `${org.target}${suffix}${qs}`, auth);
 });
@@ -104,24 +106,37 @@ app.get('/api/health', (c) => c.json({
   jira: { email: jiraEmail, hasToken: !!jiraToken },
 }));
 
-// Production: serve Vite build
-if (process.env.NODE_ENV === 'production') {
-  app.use('/*', serveStatic({ root: './dist' }));
-  app.use('/*', serveStatic({ path: './dist/index.html' }));
+// Production: serve Vite build (для локального запуска сборки)
+if (process.env.NODE_ENV === 'production' && !process.env.VERCEL) {
+  app.use('/assets/*', serveStatic({ root: './dist' }));
+  app.get('*', (c) => {
+    try {
+      const index = fs.readFileSync(path.resolve('./dist/index.html'), 'utf-8');
+      return c.html(index);
+    } catch (e) {
+      return c.text('index.html not found. Build the project first.', 404);
+    }
+  });
 }
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-serve({ fetch: app.fetch, port: PORT }, async (info) => {
-  console.log(`[Server] Running on :${info.port}`);
-  // Quick connectivity test for HT
-  const { target, pat } = AZURE_ORGS.ht;
-  if (!target) return;
-  try {
-    const r = await fetch(`${target}/_apis/projects?api-version=7.0`, {
-      headers: { Authorization: `Basic ${Buffer.from(`:${pat || ''}`).toString('base64')}`, Accept: 'application/json' },
-    });
-    console.log(`[Server] HT connectivity: ${r.ok ? `✓ OK (${r.status})` : `✗ Failed (${r.status})`}`);
-  } catch (err) {
-    console.error(`[Server] HT unreachable: ${err.message}`);
-  }
-});
+
+// 1. Запуск для локальной разработки (не Vercel)
+if (process.env.NODE_ENV !== 'production' || process.env.RUN_LOCAL) {
+  serve({ fetch: app.fetch, port: PORT }, async (info) => {
+    console.log(`[Server] Running locally on http://localhost:${info.port}`);
+    const { target, pat } = AZURE_ORGS.ht;
+    if (!target) return;
+    try {
+      const r = await fetch(`${target}/_apis/projects?api-version=7.0`, {
+        headers: { Authorization: `Basic ${Buffer.from(`:${pat || ''}`).toString('base64')}`, Accept: 'application/json' },
+      });
+      console.log(`[Server] HT connectivity: ${r.ok ? `✓ OK (${r.status})` : `✗ Failed (${r.status})`}`);
+    } catch (err) {
+      console.error(`[Server] HT unreachable: ${err.message}`);
+    }
+  });
+}
+
+// 2. Экспорт для бессерверных функций Vercel
+export default handle(app);
