@@ -15,7 +15,13 @@
       "Bash(/usr/bin/git init:*)",
       "Bash(/usr/bin/git status:*)",
       "Bash(/bin/sh -c 'cd \"\"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\"\" && /usr/bin/git init 2>&1 && echo \"\"GIT_INIT_OK\"\"')",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__list_teams",
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__list_projects",
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_runtime_logs",
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_project",
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__list_deployments",
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_deployment_build_logs"
     ]
   }
 }
