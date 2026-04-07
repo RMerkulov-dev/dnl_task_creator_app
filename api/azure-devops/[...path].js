@@ -45,7 +45,8 @@ export default async function handler(req, res) {
 
   const target = buildTarget(org.orgUrl);
   const qs = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
-  const url = `${target}/${rest.join('/')}${qs}`;
+  // Vercel URL-decodes path segments — re-encode them before forwarding to Azure DevOps
+  const url = `${target}/${rest.map(s => encodeURIComponent(s)).join('/')}${qs}`;
 
   try {
     const isBody = !['GET', 'HEAD'].includes(req.method);

@@ -16,7 +16,8 @@ export default async function handler(req, res) {
   const parts = req.query.path;
   const segments = Array.isArray(parts) ? parts : [parts];
   const qs  = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
-  const url = `https://api.atlassian.com/${segments.join('/')}${qs}`;
+  // Vercel URL-decodes path segments — re-encode before forwarding
+  const url = `https://api.atlassian.com/${segments.map(s => encodeURIComponent(s)).join('/')}${qs}`;
 
   const email = process.env.JIRA_EMAIL      || '';
   const token = process.env.JIRA_API_TOKEN  || '';
