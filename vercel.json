@@ -3,8 +3,6 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
-    { "source": "/api/azure-devops/:key/:path*", "destination": "/api/azure-devops/[...path]" },
-    { "source": "/api/jira/:path*",              "destination": "/api/jira/[...path]" },
-    { "source": "/(.*)",                         "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
