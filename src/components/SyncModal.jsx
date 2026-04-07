@@ -1,16 +1,25 @@
-// Progress modal shown during Create / Edit operations
+import { getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
 
-const CREATE_STEPS = [
-  { label: 'Creating Azure DevOps Epic' },
-  { label: 'Creating Jira Request' },
-  { label: 'Linking records' },
-];
+// ─── Step definitions — derived from project config ───────────────────────────
+function buildStepDefs(mode, project) {
+  const type = project?.azure?.workItemType ?? 'Item';
+  const hasJira = !!project?.jira;
+  const hasLinkBack = !!project?.azure?.jiraIdField;
 
-const EDIT_STEPS = [
-  { label: 'Updating Azure DevOps Epic' },
-  { label: 'Updating Jira Request' },
-];
+  if (mode === 'edit') {
+    return [
+      { label: `Updating Azure DevOps ${type}` },
+      ...(hasJira ? [{ label: 'Updating Jira Request' }] : []),
+    ];
+  }
+  return [
+    { label: `Creating Azure DevOps ${type}` },
+    ...(hasJira ? [{ label: 'Creating Jira Request' }] : []),
+    ...(hasJira && hasLinkBack ? [{ label: 'Linking records' }] : []),
+  ];
+}
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
 function StepIcon({ status }) {
   if (status === 'pending') return <span className="step-icon pending"><span className="spinner" /></span>;
   if (status === 'done')    return <span className="step-icon done">✓</span>;
@@ -19,43 +28,34 @@ function StepIcon({ status }) {
   return <span className="step-icon idle">·</span>;
 }
 
-export default function SyncModal({ mode, steps, result, onClose }) {
-  const definitions = mode === 'edit' ? EDIT_STEPS : CREATE_STEPS;
-  const allDone = steps.every(s => s.status === 'done' || s.status === 'skipped');
-  const hasError = steps.some(s => s.status === 'error');
+// ─── Main component ───────────────────────────────────────────────────────────
+export default function SyncModal({ mode, project, steps, result, onClose }) {
+  const defs    = buildStepDefs(mode, project);
+  const allDone = steps.length > 0 && steps.every(s => s?.status === 'done' || s?.status === 'skipped');
+  const hasErr  = steps.some(s => s?.status === 'error');
 
   return (
     <div className="overlay">
       <div className="modal">
         <p className="modal-title">
-          {hasError ? '⚠ Sync Error' : allDone ? '✓ Sync Complete' : 'Syncing task…'}
+          {hasErr ? '⚠ Sync Error' : allDone ? '✓ Sync Complete' : 'Syncing task…'}
         </p>
 
         <ul className="step-list">
-          {definitions.map((def, i) => {
+          {defs.map((def, i) => {
             const s = steps[i] ?? {};
             return (
               <li className="step-item" key={def.label}>
-                <StepIcon status={s.status ?? 'idle'} />
+                <StepIcon status={s.status} />
                 <div className="step-body">
                   <p className="step-name">{def.label}</p>
                   {s.data?.epicId && (
-                    <a
-                      className="step-link"
-                      href={s.data.epicUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Epic #{s.data.epicId} ↗
+                    <a className="step-link" href={s.data.epicUrl} target="_blank" rel="noreferrer">
+                      #{s.data.epicId} ↗
                     </a>
                   )}
                   {s.data?.jiraKey && (
-                    <a
-                      className="step-link"
-                      href={s.data.jiraUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
+                    <a className="step-link" href={s.data.jiraUrl} target="_blank" rel="noreferrer">
                       {s.data.jiraKey} ↗
                     </a>
                   )}
@@ -71,25 +71,15 @@ export default function SyncModal({ mode, steps, result, onClose }) {
             {result.epicUrl && (
               <div className="result-link-row">
                 <span className="result-link-label">Azure DevOps</span>
-                <a
-                  className="result-link-anchor"
-                  href={result.epicUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Epic #{result.epicId} ↗
+                <a className="result-link-anchor" href={result.epicUrl} target="_blank" rel="noreferrer">
+                  #{result.epicId} ↗
                 </a>
               </div>
             )}
             {result.jiraUrl && (
               <div className="result-link-row">
                 <span className="result-link-label">Jira</span>
-                <a
-                  className="result-link-anchor"
-                  href={result.jiraUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
+                <a className="result-link-anchor" href={result.jiraUrl} target="_blank" rel="noreferrer">
                   {result.jiraKey} ↗
                 </a>
               </div>
@@ -97,9 +87,9 @@ export default function SyncModal({ mode, steps, result, onClose }) {
           </div>
         )}
 
-        {(allDone || hasError) && (
+        {(allDone || hasErr) && (
           <button className="btn btn-primary" onClick={onClose}>
-            {hasError ? 'Close' : 'Done'}
+            {hasErr ? 'Close' : 'Done'}
           </button>
         )}
       </div>

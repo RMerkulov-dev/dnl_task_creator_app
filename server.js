@@ -9,24 +9,25 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ─── Config ──────────────────────────────────────────────────────────────────
-const azurePat   = process.env.AZURE_DEVOPS_PAT   || '';
-const jiraEmail  = process.env.JIRA_EMAIL          || '';
-const jiraToken  = process.env.JIRA_API_TOKEN      || '';
-
-const rawOrg     = (process.env.AZURE_DEVOPS_ORG_URL || process.env.AZURE_DEVOPS_ORG || '')
-  .trim().replace(/[,/\s]+$/, '');
-const azureTarget = rawOrg.startsWith('http') ? rawOrg : `https://dev.azure.com/${rawOrg}`;
-
-const azureAuth  = Buffer.from(`:${azurePat}`).toString('base64');
-const jiraAuth   = Buffer.from(`${jiraEmail}:${jiraToken}`).toString('base64');
-
-console.log('[Server] Azure target :', azureTarget);
-console.log('[Server] Jira email   :', jiraEmail);
-console.log('[Server] PAT set      :', !!azurePat);
-console.log('[Server] Jira token   :', !!jiraToken);
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+function buildAzureTarget(raw) {
+  if (!raw) return '';
+  const clean = raw.trim().replace(/[,/\s]+$/, '');
+  if (!clean) return '';
+  if (clean.startsWith('http')) {
+    // Already a full URL — if it's NOT dev.azure.com style, convert it
+    // e.g. https://dynamicalabsdevops → https://dev.azure.com/dynamicalabsdevops
+    if (clean.includes('dev.azure.com')) return clean;
+    const orgName = clean.replace(/^https?:\/\//, '');
+    return `https://dev.azure.com/${orgName}`;
+  }
+  return `https://dev.azure.com/${clean}`;
+}
+
+function azureAuth(pat) {
+  return `Basic ${Buffer.from(`:${pat || ''}`).toString('base64')}`;
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -36,74 +37,103 @@ function readBody(req) {
   });
 }
 
-function buildHeaders(authValue, contentType, bodyBuf) {
-  const h = {
-    Authorization: authValue,
-    Accept: 'application/json',
-  };
-  if (contentType)            h['Content-Type']   = contentType;
-  if (bodyBuf?.length)        h['Content-Length']  = String(bodyBuf.length);
-  return h;
-}
-
-async function proxy(req, res, targetBase, authValue) {
+async function proxyRequest(req, res, targetBase, authHeader) {
   const suffix = req.originalUrl.replace(req.baseUrl, '');
   const url    = `${targetBase}${suffix}`;
-
   try {
-    const isBodyMethod = !['GET', 'HEAD'].includes(req.method);
-    const body         = isBodyMethod ? await readBody(req) : undefined;
-    const headers      = buildHeaders(authValue, req.headers['content-type'], body);
+    const isBody = !['GET', 'HEAD'].includes(req.method);
+    const body   = isBody ? await readBody(req) : undefined;
+    const headers = { Authorization: authHeader, Accept: 'application/json' };
+    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+    if (body?.length)                headers['Content-Length'] = String(body.length);
 
     const upstream = await fetch(url, { method: req.method, headers, body });
     const text     = await upstream.text();
-
-    res
-      .status(upstream.status)
-      .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
-      .send(text);
+    res.status(upstream.status)
+       .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+       .send(text);
   } catch (err) {
-    console.error('[Proxy error]', err.message);
+    console.error(`[Proxy error] ${url}:`, err.message);
     res.status(503).json({ error: err.message });
   }
 }
 
-// ─── Routes ──────────────────────────────────────────────────────────────────
-app.use('/api/azure-devops', (req, res) => proxy(req, res, azureTarget, `Basic ${azureAuth}`));
-app.use('/api/jira',         (req, res) => proxy(req, res, 'https://api.atlassian.com', `Basic ${jiraAuth}`));
+// ─── Azure org registry ───────────────────────────────────────────────────────
+// Each key maps to a .env variable pair: AZURE_<KEY>_ORG_URL + AZURE_<KEY>_PAT
+// Add new projects here by adding a new key + env vars — no other server changes needed.
+const AZURE_ORGS = {
+  ht: {
+    target: buildAzureTarget(process.env.AZURE_DEVOPS_ORG_URL || process.env.AZURE_DEVOPS_ORG),
+    auth:   azureAuth(process.env.AZURE_DEVOPS_PAT),
+  },
+  nsmg: {
+    target: buildAzureTarget(process.env.AZURE_NSMG_ORG_URL),
+    auth:   azureAuth(process.env.AZURE_NSMG_PAT),
+  },
+  abs: {
+    target: buildAzureTarget(process.env.AZURE_ABS_ORG_URL),
+    auth:   azureAuth(process.env.AZURE_ABS_PAT),
+  },
+};
 
+const jiraEmail = process.env.JIRA_EMAIL       || '';
+const jiraToken = process.env.JIRA_API_TOKEN   || '';
+const jiraAuth  = `Basic ${Buffer.from(`${jiraEmail}:${jiraToken}`).toString('base64')}`;
+
+// Log startup config
+Object.entries(AZURE_ORGS).forEach(([key, cfg]) => {
+  const status = cfg.target ? `✓ ${cfg.target}` : '✗ (not configured)';
+  console.log(`[Server] Azure [${key.toUpperCase()}]: ${status}`);
+});
+console.log(`[Server] Jira: ${jiraEmail || '(not configured)'}`);
+
+// ─── Routes ───────────────────────────────────────────────────────────────────
+
+// Register one proxy route per Azure org — path: /api/azure-devops/<orgKey>/...
+Object.entries(AZURE_ORGS).forEach(([key, cfg]) => {
+  app.use(`/api/azure-devops/${key}`, (req, res) => {
+    if (!cfg.target) {
+      return res.status(503).json({
+        error: `Azure org "${key.toUpperCase()}" is not configured. Add AZURE_${key.toUpperCase()}_ORG_URL and AZURE_${key.toUpperCase()}_PAT to .env`,
+      });
+    }
+    proxyRequest(req, res, cfg.target, cfg.auth);
+  });
+});
+
+// Jira proxy (shared across all projects)
+app.use('/api/jira', (req, res) => proxyRequest(req, res, 'https://api.atlassian.com', jiraAuth));
+
+// Health check — useful for debugging
 app.get('/api/health', (_req, res) => res.json({
   ok: true,
-  azureTarget,
-  jiraEmail,
-  hasAzurePat:   !!azurePat,
-  hasJiraToken:  !!jiraToken,
+  azure: Object.fromEntries(
+    Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: v.auth !== azureAuth('') }])
+  ),
+  jira: { email: jiraEmail, hasToken: !!jiraToken },
 }));
 
-// ─── Static (production) ─────────────────────────────────────────────────────
+// ─── Serve React build (production) ──────────────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, 'dist')));
   app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'dist', 'index.html')));
 }
 
+// ─── Startup connectivity test (HT) ──────────────────────────────────────────
 app.listen(PORT, async () => {
   console.log(`[Server] Running on :${PORT}`);
-
-  // Startup connectivity test
-  const testUrl = `${azureTarget}/_apis/projects?api-version=7.0`;
+  const { target, auth } = AZURE_ORGS.ht;
+  if (!target) return;
   try {
-    const r = await fetch(testUrl, {
-      headers: { Authorization: `Basic ${azureAuth}`, Accept: 'application/json' },
+    const r = await fetch(`${target}/_apis/projects?api-version=7.0`, {
+      headers: { Authorization: auth, Accept: 'application/json' },
     });
-    if (r.ok) {
-      console.log(`[Server] ✓ Azure DevOps connection OK (${r.status})`);
-    } else {
+    console.log(`[Server] HT connectivity: ${r.ok ? `✓ OK (${r.status})` : `✗ Failed (${r.status})`}`);
+    if (!r.ok) {
       const body = await r.text().catch(() => '');
-      console.warn(`[Server] ✗ Azure DevOps responded ${r.status} — check PAT and org URL`);
-      if (body && !body.startsWith('<')) console.warn('[Server]  ', body.slice(0, 200));
+      if (body && !body.trimStart().startsWith('<')) console.warn('[Server]', body.slice(0, 300));
     }
   } catch (err) {
-    console.error(`[Server] ✗ Azure DevOps unreachable: ${err.message}`);
-    console.error('[Server]   Check AZURE_DEVOPS_ORG_URL in .env');
+    console.error(`[Server] HT unreachable: ${err.message}`);
   }
 });

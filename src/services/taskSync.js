@@ -1,46 +1,66 @@
-import { createWorkItem, updateWorkItem, getWorkItem, getEpicUrl } from './azureDevops.js';
+import { createWorkItem, updateWorkItem, getWorkItem } from './azureDevops.js';
 import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl } from './jira.js';
 
-const AZURE_ORG = import.meta.env.VITE_AZURE_DEVOPS_ORG || 'your-org';
+// ─── Step counting ────────────────────────────────────────────────────────────
+// Centralised so Dashboard and SyncModal always agree on step count.
 
-// ─── CREATE ──────────────────────────────────────────────────────────────────
-// Follows the HT Tasks Creator skill logic:
-//   1. Create Azure DevOps Epic
-//   2. Create Jira Request (with Epic ID + URL in description)
-//   3. Link back: update Epic with Jira issue key
+export function getCreateStepCount(project) {
+  if (!project.jira) return 1;                       // Azure only
+  if (!project.azure.jiraIdField) return 2;          // Azure + Jira (no link-back field)
+  return 3;                                           // Azure + Jira + link-back
+}
 
-export async function createTask(project, title, description, onStep) {
+export function getEditStepCount(project) {
+  return project.jira ? 2 : 1;
+}
+
+// ─── CREATE ───────────────────────────────────────────────────────────────────
+/**
+ * @param {object} project  - from projects.js
+ * @param {string} title
+ * @param {string} description
+ * @param {object} extras   - { iterationPath?, storyUrl?, areaPath? }
+ * @param {function} onStep - (stepIndex, status, errorMsg, data) => void
+ */
+export async function createTask(project, title, description, extras = {}, onStep) {
   const { azure, jira } = project;
 
-  // Step 1 — Azure DevOps Epic
+  // ── Step 0: Azure work item ──────────────────────────────────────────────
   onStep(0, 'pending');
-  let epicItem;
+
+  const fields = {
+    'System.Title':       title,
+    'System.Description': description,
+  };
+  if (extras.iterationPath) fields['System.IterationPath'] = extras.iterationPath;
+  if (extras.areaPath)      fields['System.AreaPath']      = extras.areaPath;
+
+  const relations = extras.storyUrl
+    ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
+    : [];
+
+  let item;
   try {
-    epicItem = await createWorkItem(azure.project, azure.workItemType, {
-      'System.Title': title,
-      'System.Description': description,
-    });
+    item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
   } catch (err) {
     onStep(0, 'error', err.message);
     throw err;
   }
-  const epicId = epicItem.id;
-  const epicUrl = epicItem._links?.html?.href ?? getEpicUrl(AZURE_ORG, azure.project, epicId);
-  onStep(0, 'done', null, { epicId, epicUrl });
 
-  // Step 2 — Jira Request
+  const itemId  = item.id;
+  const itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
+  onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
+
+  // If no Jira configured for this project — we're done
+  if (!jira) return { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
+
+  // ── Step 1: Jira issue ───────────────────────────────────────────────────
   onStep(1, 'pending');
   let jiraItem;
   try {
     jiraItem = await createIssue(
-      jira.cloudId,
-      jira.projectKey,
-      jira.issueTypeId,
-      title,
-      description,
-      epicId,
-      epicUrl,
-      jira.clientRequestIdField
+      jira.cloudId, jira.projectKey, jira.issueTypeId,
+      title, description, itemId, itemUrl, jira.clientRequestIdField
     );
   } catch (err) {
     onStep(1, 'error', err.message);
@@ -50,84 +70,75 @@ export async function createTask(project, title, description, onStep) {
   const jiraUrl = getJiraUrl(jiraKey);
   onStep(1, 'done', null, { jiraKey, jiraUrl });
 
-  // Step 3 — Link back
+  if (!azure.jiraIdField) return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+
+  // ── Step 2: Link back — set Jira key on the Azure work item ─────────────
   onStep(2, 'pending');
   try {
-    await updateWorkItem(azure.project, epicId, {
-      [azure.jiraIdField]: jiraKey,
-    });
+    await updateWorkItem(azure.proxyKey, azure.project, itemId, { [azure.jiraIdField]: jiraKey });
   } catch (err) {
     onStep(2, 'error', err.message);
     throw err;
   }
   onStep(2, 'done');
 
-  return { epicId, epicUrl, jiraKey, jiraUrl };
+  return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
 }
 
-// ─── EDIT ────────────────────────────────────────────────────────────────────
-// Fetch existing task by Azure DevOps Epic ID, then update both systems.
-
-export async function fetchTaskForEdit(project, epicId) {
-  const { azure, jira } = project;
-  const item = await getWorkItem(azure.project, epicId);
-  const title = item.fields?.['System.Title'] ?? '';
-  const descRaw = item.fields?.['System.Description'] ?? '';
-  const jiraKey = item.fields?.[azure.jiraIdField] ?? null;
-
-  // Strip HTML from Azure DevOps description (it stores HTML)
-  const description = descRaw.replace(/<[^>]+>/g, '');
-
-  return { title, description, jiraKey };
+// ─── FETCH FOR EDIT ───────────────────────────────────────────────────────────
+export async function fetchTaskForEdit(project, itemId) {
+  const { azure } = project;
+  const item = await getWorkItem(azure.proxyKey, azure.project, itemId);
+  return {
+    title:    item.fields?.['System.Title']       ?? '',
+    description: (item.fields?.['System.Description'] ?? '').replace(/<[^>]+>/g, ''),
+    jiraKey:  azure.jiraIdField ? (item.fields?.[azure.jiraIdField] ?? null) : null,
+  };
 }
 
-export async function updateTask(project, epicId, title, description, jiraKey, onStep) {
+// ─── UPDATE ───────────────────────────────────────────────────────────────────
+export async function updateTask(project, itemId, title, description, jiraKey, onStep) {
   const { azure, jira } = project;
 
-  // Resolve Jira key if not already known
-  if (!jiraKey) {
-    try {
-      const issue = await findIssueByEpicId(
-        jira.cloudId,
-        jira.projectKey,
-        jira.clientRequestIdField,
-        epicId
-      );
-      jiraKey = issue?.key ?? null;
-    } catch {
-      // Non-fatal — we'll still update Azure
-    }
-  }
-
-  // Step 1 — Update Azure DevOps
+  // ── Step 0: Update Azure ─────────────────────────────────────────────────
   onStep(0, 'pending');
   try {
-    await updateWorkItem(azure.project, epicId, {
-      'System.Title': title,
+    await updateWorkItem(azure.proxyKey, azure.project, itemId, {
+      'System.Title':       title,
       'System.Description': description,
     });
   } catch (err) {
     onStep(0, 'error', err.message);
     throw err;
   }
-  const epicUrl = getEpicUrl(AZURE_ORG, azure.project, epicId);
-  onStep(0, 'done', null, { epicId, epicUrl });
+  const itemUrl = `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
+  onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
 
-  // Step 2 — Update Jira (if key exists)
-  if (jiraKey) {
-    onStep(1, 'pending');
+  if (!jira) return { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
+
+  // Resolve Jira key if not cached
+  if (!jiraKey) {
     try {
-      await updateIssue(jira.cloudId, jiraKey, title, description);
-    } catch (err) {
-      onStep(1, 'error', err.message);
-      throw err;
-    }
-    const jiraUrl = getJiraUrl(jiraKey);
-    onStep(1, 'done', null, { jiraKey, jiraUrl });
-    return { epicId, epicUrl, jiraKey, jiraUrl };
+      const found = await findIssueByEpicId(jira.cloudId, jira.projectKey, jira.clientRequestIdField, itemId);
+      jiraKey = found?.key ?? null;
+    } catch { /* non-fatal */ }
   }
 
-  // No Jira key — skip step 2 gracefully
-  onStep(1, 'skipped');
-  return { epicId, epicUrl, jiraKey: null, jiraUrl: null };
+  if (!jiraKey) {
+    onStep(1, 'skipped');
+    return { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
+  }
+
+  // ── Step 1: Update Jira ──────────────────────────────────────────────────
+  onStep(1, 'pending');
+  try {
+    await updateIssue(jira.cloudId, jiraKey, title, description);
+  } catch (err) {
+    onStep(1, 'error', err.message);
+    throw err;
+  }
+  const jiraUrl = getJiraUrl(jiraKey);
+  onStep(1, 'done', null, { jiraKey, jiraUrl });
+
+  return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
 }
