@@ -9,23 +9,27 @@
 
 export const PROJECTS = {
 
-  // ── HT — Hydrotec ──────────────────────────────────────────────────────────
-  HT: {
-    id: 'HT',
-    label: 'HT — Hydrotec',
+  // ── ABS — Dynamics 365 ─────────────────────────────────────────────────────
+  ABS: {
+    id: 'ABS',
+    label: 'ABS — Dynamics 365',
     azure: {
-      proxyKey:     'ht',                                          // matches server.js route key
-      project:      import.meta.env.VITE_AZURE_HT_PROJECT  || 'Hydrotec',
-      workItemType: 'Epic',
-      jiraIdField:  'Custom.JiraID',                               // Azure field that stores Jira key
+      proxyKey:     'abs',
+      project:      import.meta.env.VITE_AZURE_ABS_PROJECT || 'ABS - Dynamics 365',
+      workItemType: 'Issue',
+      jiraIdField:  'Custom.JiraID',
     },
     jira: {
       cloudId:              import.meta.env.VITE_JIRA_CLOUD_ID          || 'ede50bd6-614f-4723-b64b-76ef4be362d5',
-      projectKey:           import.meta.env.VITE_JIRA_HT_PROJECT_KEY    || 'HTH',
-      issueTypeId:          import.meta.env.VITE_JIRA_HT_ISSUE_TYPE_ID  || '10035',
-      clientRequestIdField: import.meta.env.VITE_JIRA_HT_CUSTOM_FIELD   || 'customfield_10034',
+      projectKey:           'ABS',                                        // overridden at runtime by jiraProjectKey extra
+      issueTypeId:          import.meta.env.VITE_JIRA_ABS_ISSUE_TYPE_ID  || '10035',
+      clientRequestIdField: import.meta.env.VITE_JIRA_ABS_CUSTOM_FIELD   || 'customfield_10034',
     },
-    features: { iteration: false, story: false, board: false },
+    // Shows Board (Area Path) + Jira Project selectors on the form
+    features: { iteration: false, story: false, board: true, jiraProject: true },
+    jiraProjectOptions: ['ABS', 'ABSPO'],
+    // Only show these two boards in the selector
+    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service'],
   },
 
   // ── NSMG ───────────────────────────────────────────────────────────────────
@@ -44,23 +48,27 @@ export const PROJECTS = {
       issueTypeId:          import.meta.env.VITE_JIRA_NSMG_ISSUE_TYPE_ID || '10035',
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMG_CUSTOM_FIELD  || 'customfield_10034',
     },
-    // Shows Sprint (Iteration) + Parent Story selectors on the form
-    features: { iteration: true, story: true, board: false },
+    // Shows Sprint (Iteration) + Parent Story selectors; iterations filtered to active + placement
+    features: { iteration: true, story: true, board: false, iterationFilter: true },
   },
 
-  // ── ABS — Dynamics 365 ─────────────────────────────────────────────────────
-  ABS: {
-    id: 'ABS',
-    label: 'ABS — Dynamics 365',
+  // ── HT — Hydrotec ──────────────────────────────────────────────────────────
+  HT: {
+    id: 'HT',
+    label: 'HT — Hydrotec',
     azure: {
-      proxyKey:     'abs',
-      project:      import.meta.env.VITE_AZURE_ABS_PROJECT || 'ABS - Dynamics 365',
+      proxyKey:     'ht',
+      project:      import.meta.env.VITE_AZURE_HT_PROJECT  || 'Hydrotec',
       workItemType: 'Epic',
       jiraIdField:  'Custom.JiraID',
     },
-    jira: null,
-    // Shows Board (Area Path) selector on the form
-    features: { iteration: false, story: false, board: true },
+    jira: {
+      cloudId:              import.meta.env.VITE_JIRA_CLOUD_ID          || 'ede50bd6-614f-4723-b64b-76ef4be362d5',
+      projectKey:           import.meta.env.VITE_JIRA_HT_PROJECT_KEY    || 'HTH',
+      issueTypeId:          import.meta.env.VITE_JIRA_HT_ISSUE_TYPE_ID  || '10035',
+      clientRequestIdField: import.meta.env.VITE_JIRA_HT_CUSTOM_FIELD   || 'customfield_10034',
+    },
+    features: { iteration: false, story: false, board: false },
   },
 
 };

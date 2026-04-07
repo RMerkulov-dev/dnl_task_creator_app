@@ -1,0 +1,66 @@
+// Vercel serverless proxy for Azure DevOps
+// Handles: /api/azure-devops/<orgKey>/<rest...>
+
+export const config = { api: { bodyParser: false } };
+
+const ORGS = {
+  ht:   { orgUrl: process.env.AZURE_DEVOPS_ORG_URL, pat: process.env.AZURE_DEVOPS_PAT },
+  nsmg: { orgUrl: process.env.AZURE_NSMG_ORG_URL,   pat: process.env.AZURE_NSMG_PAT },
+  abs:  { orgUrl: process.env.AZURE_ABS_ORG_URL,    pat: process.env.AZURE_ABS_PAT },
+};
+
+function buildTarget(raw) {
+  if (!raw) return '';
+  const clean = raw.trim().replace(/[,/\s]+$/, '');
+  if (!clean) return '';
+  if (clean.includes('dev.azure.com')) return clean;
+  if (clean.startsWith('http')) return `https://dev.azure.com/${clean.replace(/^https?:\/\//, '')}`;
+  return `https://dev.azure.com/${clean}`;
+}
+
+function azureAuth(pat) {
+  return `Basic ${Buffer.from(`:${pat || ''}`).toString('base64')}`;
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end',  () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+export default async function handler(req, res) {
+  const parts = req.query.path; // [...path] catch-all — array of segments
+  const segments = Array.isArray(parts) ? parts : [parts];
+  const [key, ...rest] = segments;
+
+  const org = ORGS[key];
+  if (!org?.orgUrl) {
+    return res.status(503).json({
+      error: `Azure org "${key}" is not configured. Add AZURE_${(key || '').toUpperCase()}_ORG_URL and AZURE_${(key || '').toUpperCase()}_PAT to environment variables.`,
+    });
+  }
+
+  const target = buildTarget(org.orgUrl);
+  const qs = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+  const url = `${target}/${rest.join('/')}${qs}`;
+
+  try {
+    const isBody = !['GET', 'HEAD'].includes(req.method);
+    const body   = isBody ? await readBody(req) : undefined;
+    const headers = { Authorization: azureAuth(org.pat), Accept: 'application/json' };
+    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+    if (body?.length)                headers['Content-Length'] = String(body.length);
+
+    const upstream = await fetch(url, { method: req.method, headers, body });
+    const text     = await upstream.text();
+    res.status(upstream.status)
+       .setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json')
+       .send(text);
+  } catch (err) {
+    console.error(`[Azure proxy error] ${url}:`, err.message);
+    res.status(503).json({ error: err.message });
+  }
+}

@@ -120,7 +120,7 @@ export async function getAreaPaths(proxyKey, project) {
 
 function flattenNodes(node, parentPath, result) {
   const fullPath = parentPath ? `${parentPath}\\${node.name}` : node.name;
-  result.push({ id: node.id, name: node.name, path: fullPath });
+  result.push({ id: node.id, name: node.name, path: fullPath, attributes: node.attributes ?? {} });
   if (node.children?.length) {
     for (const child of node.children) flattenNodes(child, fullPath, result);
   }

@@ -28,6 +28,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   const [selectedIteration,  setSelectedIteration]  = useState('');
   const [selectedStory,      setSelectedStory]      = useState(null);   // { id, title, url }
   const [selectedBoard,      setSelectedBoard]      = useState('');
+  const [selectedJiraProj,   setSelectedJiraProj]   = useState('');
   const [loadingExtras,      setLoadingExtras]      = useState(false);
   const [extrasErr,          setExtrasErr]          = useState('');
 
@@ -48,6 +49,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     setSelectedIteration('');
     setSelectedStory(null);
     setSelectedBoard('');
+    setSelectedJiraProj('');
     setExtrasErr('');
     setLoadingExtras(true);
 
@@ -56,7 +58,18 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     if (features.iteration) {
       loads.push(
         getIterations(azure.proxyKey, azure.project)
-          .then(setIterations)
+          .then(all => {
+            if (features.iterationFilter) {
+              // Keep only: current active sprint + "Tasks for Sprint Placement"
+              const filtered = all.filter(it =>
+                it.attributes?.timeFrame === 'current' ||
+                it.name.toLowerCase().includes('tasks for sprint placement')
+              );
+              setIterations(filtered.length ? filtered : all);
+            } else {
+              setIterations(all);
+            }
+          })
           .catch(e => setExtrasErr(e.message))
       );
     }
@@ -70,7 +83,10 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     if (features.board) {
       loads.push(
         getAreaPaths(azure.proxyKey, azure.project)
-          .then(setBoards)
+          .then(all => {
+            const allowList = proj.boardAllowList;
+            setBoards(allowList?.length ? all.filter(b => allowList.includes(b.name)) : all);
+          })
           .catch(e => setExtrasErr(e.message))
       );
     }
@@ -92,6 +108,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     setSelectedIteration('');
     setSelectedStory(null);
     setSelectedBoard('');
+    setSelectedJiraProj('');
   }
 
   function handleModeChange(m) {
@@ -135,9 +152,10 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     setShowModal(true);
 
     const extras = {
-      iterationPath: selectedIteration || undefined,
-      storyUrl:      selectedStory?.url || undefined,
-      areaPath:      selectedBoard || undefined,
+      iterationPath:  selectedIteration || undefined,
+      storyUrl:       selectedStory?.url || undefined,
+      areaPath:       selectedBoard || undefined,
+      jiraProjectKey: selectedJiraProj || undefined,
     };
 
     try {
@@ -290,6 +308,20 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
                   ))}
                 </select>
                 {extrasErr && <p className="error-msg">⚠ {extrasErr}</p>}
+              </div>
+            )}
+
+            {/* ── ABS: Jira Project ── */}
+            {proj.features.jiraProject && (
+              <div className="field">
+                <label className="field-label">Jira Project</label>
+                <select className="select" value={selectedJiraProj}
+                  onChange={e => setSelectedJiraProj(e.target.value)}>
+                  <option value="">— Select Jira project —</option>
+                  {(proj.jiraProjectOptions || []).map(key => (
+                    <option key={key} value={key}>{key}</option>
+                  ))}
+                </select>
               </div>
             )}
 

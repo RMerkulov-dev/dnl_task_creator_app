@@ -23,7 +23,11 @@ export function getEditStepCount(project) {
  * @param {function} onStep - (stepIndex, status, errorMsg, data) => void
  */
 export async function createTask(project, title, description, extras = {}, onStep) {
-  const { azure, jira } = project;
+  const { azure } = project;
+  // Allow runtime override of Jira project key (e.g. ABS/ABSPO selector)
+  const jira = extras.jiraProjectKey && project.jira
+    ? { ...project.jira, projectKey: extras.jiraProjectKey }
+    : project.jira;
 
   // ── Step 0: Azure work item ──────────────────────────────────────────────
   onStep(0, 'pending');
