@@ -1,10 +1,5 @@
-// Vercel serverless proxy — Hono
+// Vercel serverless proxy — plain Node.js (no framework)
 // Handles: /api/azure-devops/<key>/...  and  /api/jira/...
-
-import { Hono }   from 'hono'
-import { handle } from 'hono/vercel'
-
-export const config = { runtime: 'nodejs' }
 
 // ─── Azure org registry ───────────────────────────────────────────────────────
 function buildAzureTarget(raw) {
@@ -22,17 +17,25 @@ const AZURE_ORGS = {
   abs:  { target: buildAzureTarget(process.env.AZURE_ABS_ORG_URL),    pat: process.env.AZURE_ABS_PAT },
 };
 
+// ─── Read raw request body ────────────────────────────────────────────────────
+function readBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+  });
+}
+
 // ─── Generic proxy ────────────────────────────────────────────────────────────
-async function proxyTo(c, upstreamUrl, authHeader) {
-  const req    = c.req.raw;
+async function proxyTo(req, res, upstreamUrl, authHeader) {
   const method = req.method;
   const isBody = !['GET', 'HEAD'].includes(method);
 
   const headers = new Headers({ Authorization: authHeader, Accept: 'application/json' });
-  const ct = req.headers.get('content-type');
+  const ct = req.headers['content-type'];
   if (ct) headers.set('Content-Type', ct);
 
-  const body = isBody ? await req.arrayBuffer() : undefined;
+  const body = isBody ? await readBody(req) : undefined;
 
   console.log(`[Proxy] ${method} → ${upstreamUrl}`);
 
@@ -42,64 +45,67 @@ async function proxyTo(c, upstreamUrl, authHeader) {
     if (!upstream.ok) {
       console.error(`[Proxy] ${upstream.status} ← ${upstreamUrl}: ${text.slice(0, 300)}`);
     }
-    return new Response(text, {
-      status:  upstream.status,
-      headers: { 'Content-Type': upstream.headers.get('content-type') || 'application/json' },
-    });
+    res.statusCode = upstream.status;
+    res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
+    res.end(text);
   } catch (err) {
     console.error(`[Proxy error] ${err.message}`);
-    return c.json({ error: err.message }, 503);
+    res.statusCode = 503;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: err.message }));
   }
 }
 
-// ─── Extract path+qs from Hono request, preserving percent-encoding ───────────
-function rawPathAndQs(c) {
-  const full  = c.req.raw.url;                           // https://host/path?qs
-  const start = full.indexOf('/', full.indexOf('//') + 2); // first '/' after scheme://host
-  return full.substring(start);                          // /path?qs  (encoding preserved)
-}
+// ─── Main handler ─────────────────────────────────────────────────────────────
+export default async function handler(req, res) {
+  // req.url is the full path+qs, e.g. /api/azure-devops/abs/Project%20Name/_apis/...?api-version=7.0
+  const rawUrl = req.url;
 
-// ─── Hono app ─────────────────────────────────────────────────────────────────
-const app = new Hono()
+  // Azure DevOps proxy — /api/azure-devops/:key/...
+  if (rawUrl.startsWith('/api/azure-devops/')) {
+    const afterPrefix = rawUrl.substring('/api/azure-devops/'.length); // key/rest...
+    const slashIdx    = afterPrefix.indexOf('/');
+    const key         = slashIdx === -1 ? afterPrefix.split('?')[0] : afterPrefix.substring(0, slashIdx);
+    const rest        = slashIdx === -1 ? '' : afterPrefix.substring(slashIdx); // /Project%20Name/...?qs
 
-// Azure DevOps proxy — /api/azure-devops/:key/...
-app.all('/api/azure-devops/:key/*', async (c) => {
-  const key = c.req.param('key');
-  const org = AZURE_ORGS[key];
-  if (!org?.target) {
-    return c.json({ error: `Azure org "${key}" is not configured.` }, 503);
+    const org = AZURE_ORGS[key];
+    if (!org?.target) {
+      res.statusCode = 503;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: `Azure org "${key}" is not configured.` }));
+      return;
+    }
+
+    const auth = `Basic ${Buffer.from(`:${org.pat || ''}`).toString('base64')}`;
+    return proxyTo(req, res, `${org.target}${rest}`, auth);
   }
-  const raw    = rawPathAndQs(c);
-  const qIdx   = raw.indexOf('?');
-  const path_  = qIdx === -1 ? raw : raw.substring(0, qIdx);
-  const qs     = qIdx === -1 ? '' : raw.substring(qIdx);
-  const suffix = path_.substring(`/api/azure-devops/${key}`.length); // /ABS%20-.../...
-  const auth   = `Basic ${Buffer.from(`:${org.pat || ''}`).toString('base64')}`;
-  return proxyTo(c, `${org.target}${suffix}${qs}`, auth);
-});
 
-// Jira proxy — /api/jira/...
-app.all('/api/jira/*', async (c) => {
-  const raw    = rawPathAndQs(c);
-  const qIdx   = raw.indexOf('?');
-  const path_  = qIdx === -1 ? raw : raw.substring(0, qIdx);
-  const qs     = qIdx === -1 ? '' : raw.substring(qIdx);
-  const suffix = path_.substring('/api/jira'.length);
-  const email  = process.env.JIRA_EMAIL     || '';
-  const token  = process.env.JIRA_API_TOKEN || '';
-  const auth   = `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`;
-  return proxyTo(c, `https://api.atlassian.com${suffix}${qs}`, auth);
-});
+  // Jira proxy — /api/jira/...
+  if (rawUrl.startsWith('/api/jira/')) {
+    const suffix = rawUrl.substring('/api/jira'.length); // /ex/jira/...?qs
+    const email  = process.env.JIRA_EMAIL     || '';
+    const token  = process.env.JIRA_API_TOKEN || '';
+    const auth   = `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`;
+    return proxyTo(req, res, `https://api.atlassian.com${suffix}`, auth);
+  }
 
-// Health check
-app.get('/api/health', (c) => c.json({
-  ok:  true,
-  env: {
-    AZURE_DEVOPS_ORG_URL: process.env.AZURE_DEVOPS_ORG_URL ? '✓ set' : '✗ missing',
-    AZURE_NSMG_ORG_URL:   process.env.AZURE_NSMG_ORG_URL   ? '✓ set' : '✗ missing',
-    AZURE_ABS_ORG_URL:    process.env.AZURE_ABS_ORG_URL     ? '✓ set' : '✗ missing',
-    JIRA_EMAIL:           process.env.JIRA_EMAIL            ? '✓ set' : '✗ missing',
-  },
-}));
+  // Health check — /api/health
+  if (rawUrl.startsWith('/api/health')) {
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({
+      ok:  true,
+      env: {
+        AZURE_DEVOPS_ORG_URL: process.env.AZURE_DEVOPS_ORG_URL ? '✓ set' : '✗ missing',
+        AZURE_NSMG_ORG_URL:   process.env.AZURE_NSMG_ORG_URL   ? '✓ set' : '✗ missing',
+        AZURE_ABS_ORG_URL:    process.env.AZURE_ABS_ORG_URL     ? '✓ set' : '✗ missing',
+        JIRA_EMAIL:           process.env.JIRA_EMAIL            ? '✓ set' : '✗ missing',
+      },
+    }));
+    return;
+  }
 
-export default handle(app)
+  res.statusCode = 404;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ error: 'Not found' }));
+}
