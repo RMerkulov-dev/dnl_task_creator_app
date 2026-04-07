@@ -1,7 +1,9 @@
-import { Hono } from 'hono'
-import { handle } from 'hono/vercel'
+import express from 'express';
+import dotenv from 'dotenv';
 
-const app = new Hono()
+dotenv.config();
+
+const app = express();
 
 // ─── Azure org registry ───────────────────────────────────────────────────────
 function buildAzureTarget(raw) {
@@ -24,62 +26,83 @@ const jiraToken = process.env.JIRA_API_TOKEN  || '';
 const jiraAuth  = `Basic ${Buffer.from(`${jiraEmail}:${jiraToken}`).toString('base64')}`;
 
 // ─── Generic proxy ────────────────────────────────────────────────────────────
-async function proxyTo(c, upstreamUrl, authHeader) {
-  const req = c.req.raw;
-  const headers = new Headers({ Authorization: authHeader, Accept: 'application/json' });
-  const ct = req.headers.get('content-type');
-  if (ct) headers.set('Content-Type', ct);
+// Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)
+async function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', c => chunks.push(c));
+    req.on('end',  () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
 
-  const body = !['GET', 'HEAD'].includes(req.method) ? await req.arrayBuffer() : undefined;
+async function proxyTo(req, res, upstreamUrl, authHeader) {
+  const isBody = !['GET', 'HEAD'].includes(req.method);
+  const body = isBody ? await readBody(req) : undefined;
+
+  const headers = { 
+    'Authorization': authHeader, 
+    'Accept': 'application/json' 
+  };
+  
+  if (req.headers['content-type']) {
+    headers['Content-Type'] = req.headers['content-type'];
+  }
 
   try {
-    const upstream = await fetch(upstreamUrl, { method: req.method, headers, body });
-    const text = await upstream.text();
-    return new Response(text, {
-      status: upstream.status,
-      headers: { 'Content-Type': upstream.headers.get('content-type') || 'application/json' },
+    // В Node.js 18+ fetch встроен по умолчанию, Vercel его поддерживает
+    const upstream = await fetch(upstreamUrl, { 
+      method: req.method, 
+      headers, 
+      body 
     });
+    
+    const text = await upstream.text();
+    
+    res.status(upstream.status)
+       .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
+       .send(text);
   } catch (err) {
-    return c.json({ error: err.message }, 503);
+    console.error(`[Proxy error] ${upstreamUrl}:`, err.message);
+    res.status(503).json({ error: err.message });
   }
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 // Azure DevOps proxy
-app.all('/api/azure-devops/:key/*', async (c) => {
-  const key = c.req.param('key');
+app.all('/api/azure-devops/:key/*', async (req, res) => {
+  const key = req.params.key;
   const org = AZURE_ORGS[key];
+  
   if (!org?.target) {
-    return c.json({ error: `Azure org "${key}" is not configured in environment variables.` }, 503);
+    return res.status(503).json({ error: `Azure org "${key}" is not configured in environment variables.` });
   }
 
-  // Безопасное извлечение пути с сохранением %20 (пробелов)
-  const urlObj = new URL(c.req.raw.url);
-  const fullPath = urlObj.pathname + urlObj.search;
+  // Извлекаем точный путь с сохранением %20, используя req.originalUrl
   const prefix = `/api/azure-devops/${key}`;
-  const suffix = fullPath.substring(fullPath.indexOf(prefix) + prefix.length);
+  const suffix = req.originalUrl.substring(req.originalUrl.indexOf(prefix) + prefix.length);
 
   const auth = `Basic ${Buffer.from(`:${org.pat || ''}`).toString('base64')}`;
-  return proxyTo(c, `${org.target}${suffix}`, auth);
+  await proxyTo(req, res, `${org.target}${suffix}`, auth);
 });
 
 // Jira proxy
-app.all('/api/jira/*', async (c) => {
-  const urlObj = new URL(c.req.raw.url);
-  const fullPath = urlObj.pathname + urlObj.search;
+app.all('/api/jira/*', async (req, res) => {
   const prefix = `/api/jira`;
-  const suffix = fullPath.substring(fullPath.indexOf(prefix) + prefix.length);
+  const suffix = req.originalUrl.substring(req.originalUrl.indexOf(prefix) + prefix.length);
   
-  return proxyTo(c, `https://api.atlassian.com${suffix}`, jiraAuth);
+  await proxyTo(req, res, `https://api.atlassian.com${suffix}`, jiraAuth);
 });
 
 // Health check
-app.get('/api/health', (c) => c.json({
-  ok: true,
-  azure: Object.fromEntries(Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: !!v.pat }])),
-  jira: { hasToken: !!jiraToken }
-}));
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    azure: Object.fromEntries(Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: !!v.pat }])),
+    jira: { hasToken: !!jiraToken }
+  });
+});
 
-// Экспорт для Vercel
-export default handle(app);
+// Обязательно экспортируем app для бессерверной среды Vercel
+export default app;
