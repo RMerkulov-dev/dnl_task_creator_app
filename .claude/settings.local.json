@@ -21,7 +21,11 @@
       "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_runtime_logs",
       "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_project",
       "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__list_deployments",
-      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_deployment_build_logs"
+      "mcp__9f6db1d0-8bc1-469f-8bf0-7c4b4a6c0d0b__get_deployment_build_logs",
+      "Bash(rm -f \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app/api/azure-devops/[...path].js\")",
+      "Bash(rm -f \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app/api/jira/[...path].js\")",
+      "Bash(rm \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app/api/azure-devops/[...path].js\")",
+      "Bash(rm \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app/api/jira/[...path].js\")"
     ]
   }
 }
