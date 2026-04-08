@@ -1,5 +1,44 @@
-import { createWorkItem, updateWorkItem, getWorkItem } from './azureDevops.js';
-import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl } from './jira.js';
+import { createWorkItem, updateWorkItem, getWorkItem, uploadAttachment } from './azureDevops.js';
+import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl, uploadJiraAttachments } from './jira.js';
+
+// ─── Image processing ────────────────────────────────────────────────────────
+// Extracts base64 images from HTML, uploads them as Azure DevOps attachments,
+// and replaces the src with hosted URLs so both Azure and Jira can display them.
+
+async function processImages(html, proxyKey, project) {
+  if (!html) return { html, files: [] };
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  const imgs = doc.querySelectorAll('img[src^="data:"]');
+
+  if (!imgs.length) return { html, files: [] };
+
+  const files = [];       // { name, blob } — for Jira attachments
+  const relations = [];   // Azure DevOps attachment relations
+
+  for (let i = 0; i < imgs.length; i++) {
+    const img = imgs[i];
+    const dataUrl = img.getAttribute('src');
+    const ext = dataUrl.match(/^data:image\/(\w+)/)?.[1] || 'png';
+    const fileName = `image-${Date.now()}-${i + 1}.${ext}`;
+
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const result = await uploadAttachment(proxyKey, project, fileName, blob);
+
+      // Replace base64 with hosted Azure DevOps URL
+      img.setAttribute('src', result.url);
+      relations.push({ rel: 'AttachedFile', url: result.url, attributes: { comment: '' } });
+      files.push({ name: fileName, blob });
+    } catch (err) {
+      console.warn(`Image upload failed for ${fileName}:`, err.message);
+      // Keep the base64 src as fallback
+    }
+  }
+
+  return { html: doc.body.innerHTML, files, relations };
+}
 
 // ─── Step counting ────────────────────────────────────────────────────────────
 // Centralised so Dashboard and SyncModal always agree on step count.
@@ -32,16 +71,23 @@ export async function createTask(project, title, description, extras = {}, onSte
   // ── Step 0: Azure work item ──────────────────────────────────────────────
   onStep(0, 'pending');
 
+  // Upload embedded images as Azure DevOps attachments and replace data URIs
+  const { html: processedDesc, files: imageFiles, relations: imageRelations } =
+    await processImages(description, azure.proxyKey, azure.project);
+
   const fields = {
     'System.Title':       title,
-    'System.Description': description,
+    'System.Description': processedDesc,
   };
   if (extras.iterationPath) fields['System.IterationPath'] = extras.iterationPath;
   if (extras.areaPath)      fields['System.AreaPath']      = extras.areaPath;
 
-  const relations = extras.storyUrl
-    ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
-    : [];
+  const relations = [
+    ...(extras.storyUrl
+      ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
+      : []),
+    ...(imageRelations || []),
+  ];
 
   let item;
   try {
@@ -64,7 +110,7 @@ export async function createTask(project, title, description, extras = {}, onSte
   try {
     jiraItem = await createIssue(
       jira.cloudId, jira.projectKey, jira.issueTypeId,
-      title, description, itemId, itemUrl, jira.clientRequestIdField
+      title, processedDesc, itemId, itemUrl, jira.clientRequestIdField
     );
   } catch (err) {
     onStep(1, 'error', err.message);
@@ -72,6 +118,13 @@ export async function createTask(project, title, description, extras = {}, onSte
   }
   const jiraKey = jiraItem.key;
   const jiraUrl = getJiraUrl(jiraKey);
+
+  // Upload images as Jira attachments (non-blocking)
+  if (imageFiles.length) {
+    try { await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles); }
+    catch (err) { console.warn('Jira attachment upload failed:', err.message); }
+  }
+
   onStep(1, 'done', null, { jiraKey, jiraUrl });
 
   if (!azure.jiraIdField) return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
@@ -95,7 +148,7 @@ export async function fetchTaskForEdit(project, itemId) {
   const item = await getWorkItem(azure.proxyKey, azure.project, itemId);
   return {
     title:    item.fields?.['System.Title']       ?? '',
-    description: (item.fields?.['System.Description'] ?? '').replace(/<[^>]+>/g, ''),
+    description: item.fields?.['System.Description'] ?? '',
     jiraKey:  azure.jiraIdField ? (item.fields?.[azure.jiraIdField] ?? null) : null,
   };
 }
@@ -106,10 +159,15 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
 
   // ── Step 0: Update Azure ─────────────────────────────────────────────────
   onStep(0, 'pending');
+
+  // Upload embedded images as attachments
+  const { html: processedDesc, files: imageFiles } =
+    await processImages(description, azure.proxyKey, azure.project);
+
   try {
     await updateWorkItem(azure.proxyKey, azure.project, itemId, {
       'System.Title':       title,
-      'System.Description': description,
+      'System.Description': processedDesc,
     });
   } catch (err) {
     onStep(0, 'error', err.message);
@@ -136,11 +194,18 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
   // ── Step 1: Update Jira ──────────────────────────────────────────────────
   onStep(1, 'pending');
   try {
-    await updateIssue(jira.cloudId, jiraKey, title, description);
+    await updateIssue(jira.cloudId, jiraKey, title, processedDesc);
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;
   }
+
+  // Upload images as Jira attachments (non-blocking)
+  if (imageFiles.length) {
+    try { await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles); }
+    catch (err) { console.warn('Jira attachment upload failed:', err.message); }
+  }
+
   const jiraUrl = getJiraUrl(jiraKey);
   onStep(1, 'done', null, { jiraKey, jiraUrl });
 

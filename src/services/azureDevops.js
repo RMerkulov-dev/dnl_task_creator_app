@@ -116,6 +116,22 @@ export async function getAreaPaths(proxyKey, project) {
   return nodes;
 }
 
+// ─── Attachments ─────────────────────────────────────────────────────────────
+
+/**
+ * Upload a binary blob as an attachment.
+ * Returns { id, url } — `url` can be used in HTML <img> and as a work item relation.
+ */
+export async function uploadAttachment(proxyKey, project, fileName, blob) {
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/attachments?fileName=${encodeURIComponent(fileName)}&api-version=7.0`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: blob,
+  });
+  return parse(res, 'uploadAttachment');
+}
+
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
 function flattenNodes(node, parentPath, result) {

@@ -3,6 +3,7 @@ import { PROJECT_LIST } from '../config/projects.js';
 import { getIterations, getStories, getAreaPaths } from '../services/azureDevops.js';
 import { createTask, updateTask, fetchTaskForEdit, getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
 import SyncModal from './SyncModal.jsx';
+import RichTextEditor from './RichTextEditor.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -418,10 +419,11 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
             {/* Description */}
             <div className="field" style={{ marginBottom: 28 }}>
               <label className="field-label">Description</label>
-              <textarea className="textarea"
-                placeholder="Describe the task in detail…"
+              <RichTextEditor
                 value={description}
-                onChange={e => setDescription(e.target.value)} />
+                onChange={setDescription}
+                placeholder="Describe the task in detail…"
+              />
             </div>
 
             <button type="submit" className="btn btn-primary"
