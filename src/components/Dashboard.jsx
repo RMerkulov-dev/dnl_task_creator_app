@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../config/projects.js';
 import { getIterations, getStories, getAreaPaths } from '../services/azureDevops.js';
 import { createTask, updateTask, fetchTaskForEdit, getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
@@ -6,11 +6,39 @@ import SyncModal from './SyncModal.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
+// ─── localStorage helpers ──────────────────────────────────────────────────
+const LS_KEY = 'dnl-task-filters';
+
+function loadSaved() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
+}
+
+function saveFilters(projId, filters) {
+  const all = loadSaved();
+  all[projId] = filters;
+  localStorage.setItem(LS_KEY, JSON.stringify(all));
+}
+
+function getSavedFilters(projId) {
+  return loadSaved()[projId] || {};
+}
+
+// ─── Restore selected project from localStorage ────────────────────────────
+function getInitialProject() {
+  const saved = loadSaved();
+  const lastId = saved._lastProject;
+  if (lastId) {
+    const found = PROJECT_LIST.find(p => p.id === lastId);
+    if (found) return found;
+  }
+  return PROJECT_LIST[0];
+}
+
 export default function Dashboard({ user, expiresAt, onLogout }) {
   const hoursLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 3_600_000));
 
   // ── Core form state ───────────────────────────────────────────────────────
-  const [proj,        setProj]        = useState(PROJECT_LIST[0]);
+  const [proj,        setProj]        = useState(getInitialProject);
   const [mode,        setMode]        = useState('create');
   const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
@@ -26,7 +54,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   const [stories,            setStories]            = useState([]);
   const [boards,             setBoards]             = useState([]);
   const [selectedIteration,  setSelectedIteration]  = useState('');
-  const [selectedStory,      setSelectedStory]      = useState(null);   // { id, title, url }
+  const [selectedStory,      setSelectedStory]      = useState(null);
   const [selectedBoard,      setSelectedBoard]      = useState('');
   const [selectedJiraProj,   setSelectedJiraProj]   = useState('');
   const [loadingExtras,      setLoadingExtras]      = useState(false);
@@ -38,20 +66,27 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   const [result,    setResult]    = useState(null);
   const [showModal, setShowModal] = useState(false);
 
+  // Track latest project load to ignore stale responses
+  const loadIdRef = useRef(0);
+
   // ── Load project-specific data when project changes ───────────────────────
   useEffect(() => {
     const { features, azure } = proj;
-    if (!features.iteration && !features.story && !features.board) return;
+    const needsData = features.iteration || features.story || features.board;
 
+    // Immediately clear old data to prevent artifacts
     setIterations([]);
     setStories([]);
     setBoards([]);
-    setSelectedIteration('');
-    setSelectedStory(null);
-    setSelectedBoard('');
-    setSelectedJiraProj('');
     setExtrasErr('');
+
+    if (!needsData) {
+      setLoadingExtras(false);
+      return;
+    }
+
     setLoadingExtras(true);
+    const currentLoadId = ++loadIdRef.current;
 
     const loads = [];
 
@@ -59,8 +94,8 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
       loads.push(
         getIterations(azure.proxyKey, azure.project)
           .then(all => {
+            if (loadIdRef.current !== currentLoadId) return;
             if (features.iterationFilter) {
-              // Keep only: current active sprint + "Tasks for Sprint Placement"
               const filtered = all.filter(it =>
                 it.attributes?.timeFrame === 'current' ||
                 it.name.toLowerCase().includes('tasks for sprint placement')
@@ -70,34 +105,68 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
               setIterations(all);
             }
           })
-          .catch(e => setExtrasErr(e.message))
+          .catch(e => {
+            if (loadIdRef.current === currentLoadId) setExtrasErr(e.message);
+          })
       );
     }
     if (features.story) {
       loads.push(
         getStories(azure.proxyKey, azure.project)
-          .then(setStories)
-          .catch(e => setExtrasErr(e.message))
+          .then(all => { if (loadIdRef.current === currentLoadId) setStories(all); })
+          .catch(e => { if (loadIdRef.current === currentLoadId) setExtrasErr(e.message); })
       );
     }
     if (features.board) {
       loads.push(
         getAreaPaths(azure.proxyKey, azure.project)
           .then(all => {
+            if (loadIdRef.current !== currentLoadId) return;
             const allowList = proj.boardAllowList;
             setBoards(allowList?.length ? all.filter(b => allowList.includes(b.name)) : all);
           })
-          .catch(e => setExtrasErr(e.message))
+          .catch(e => { if (loadIdRef.current === currentLoadId) setExtrasErr(e.message); })
       );
     }
 
-    Promise.all(loads).finally(() => setLoadingExtras(false));
+    Promise.all(loads).finally(() => {
+      if (loadIdRef.current === currentLoadId) setLoadingExtras(false);
+    });
   }, [proj.id]);
 
+  // ── Restore saved filters once extras are loaded ──────────────────────────
+  useEffect(() => {
+    if (loadingExtras) return;
+    const saved = getSavedFilters(proj.id);
+
+    if (saved.iteration && iterations.some(it => it.path === saved.iteration)) {
+      setSelectedIteration(saved.iteration);
+    }
+    if (saved.story && stories.some(s => String(s.id) === saved.story)) {
+      setSelectedStory(stories.find(s => String(s.id) === saved.story) ?? null);
+    }
+    if (saved.board && boards.some(b => b.path === saved.board)) {
+      setSelectedBoard(saved.board);
+    }
+    if (saved.jiraProject) {
+      setSelectedJiraProj(saved.jiraProject);
+    }
+  }, [loadingExtras, proj.id]);
+
+  // ── Persist filter selections ─────────────────────────────────────────────
+  useEffect(() => {
+    saveFilters(proj.id, {
+      iteration:   selectedIteration || undefined,
+      story:       selectedStory ? String(selectedStory.id) : undefined,
+      board:       selectedBoard || undefined,
+      jiraProject: selectedJiraProj || undefined,
+    });
+  }, [proj.id, selectedIteration, selectedStory, selectedBoard, selectedJiraProj]);
+
   // ── Helpers ───────────────────────────────────────────────────────────────
-  function updateStep(i, status, error = null, data = null) {
+  const updateStep = useCallback((i, status, error = null, data = null) => {
     setSteps(prev => { const n = [...prev]; n[i] = { status, error, data }; return n; });
-  }
+  }, []);
 
   function resetForm() {
     setTitle('');
@@ -105,10 +174,6 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     setEpicId('');
     setJiraKey(null);
     setFetchErr('');
-    setSelectedIteration('');
-    setSelectedStory(null);
-    setSelectedBoard('');
-    setSelectedJiraProj('');
   }
 
   function handleModeChange(m) {
@@ -118,8 +183,18 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
 
   function handleProjectChange(id) {
     const p = PROJECT_LIST.find(p => p.id === id);
-    setProj(p);
+    if (!p || p.id === proj.id) return;
     resetForm();
+    // Reset filter selections before loading new project data
+    setSelectedIteration('');
+    setSelectedStory(null);
+    setSelectedBoard('');
+    setSelectedJiraProj('');
+    setProj(p);
+    // Save last selected project
+    const all = loadSaved();
+    all._lastProject = id;
+    localStorage.setItem(LS_KEY, JSON.stringify(all));
   }
 
   // ── Load Epic for Edit mode ───────────────────────────────────────────────
@@ -179,6 +254,8 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
 
   // ── Validation ────────────────────────────────────────────────────────────
   const canSubmit = title.trim() && (mode === 'create' || epicId.trim());
+  const { features } = proj;
+  const showExtrasSection = features.iteration || features.story || features.board || features.jiraProject;
 
   return (
     <div className="app-shell">
@@ -254,74 +331,77 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
               </div>
             )}
 
-            {/* ── NSMG: Sprint (Iteration) ── */}
-            {proj.features.iteration && (
-              <div className="field">
-                <label className="field-label">
-                  Sprint (Iteration)
-                  {loadingExtras && <span className="spinner" style={{ marginLeft: 8, width: 12, height: 12 }} />}
-                </label>
-                <select className="select" value={selectedIteration}
-                  onChange={e => setSelectedIteration(e.target.value)}
-                  disabled={loadingExtras || !iterations.length}>
-                  <option value="">— Select sprint —</option>
-                  {iterations.map(it => (
-                    <option key={it.id} value={it.path}>{it.name}</option>
-                  ))}
-                </select>
-                {extrasErr && <p className="error-msg">⚠ {extrasErr}</p>}
-              </div>
-            )}
+            {/* ── Project extras: loader overlay while fetching ── */}
+            {showExtrasSection && (
+              <div className="extras-section">
+                {loadingExtras && (
+                  <div className="extras-loader">
+                    <span className="spinner spinner-lg" />
+                    <span className="extras-loader-text">Loading project data…</span>
+                  </div>
+                )}
 
-            {/* ── NSMG: Parent Story ── */}
-            {proj.features.story && (
-              <div className="field">
-                <label className="field-label">
-                  Parent Story
-                  {loadingExtras && <span className="spinner" style={{ marginLeft: 8, width: 12, height: 12 }} />}
-                </label>
-                <select className="select"
-                  value={selectedStory?.id ?? ''}
-                  onChange={e => setSelectedStory(stories.find(s => String(s.id) === e.target.value) ?? null)}
-                  disabled={loadingExtras || !stories.length}>
-                  <option value="">— Select story (optional) —</option>
-                  {stories.map(s => (
-                    <option key={s.id} value={s.id}>{s.title}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+                <div style={loadingExtras ? { opacity: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' } : undefined}>
 
-            {/* ── ABS: Board (Area Path) ── */}
-            {proj.features.board && (
-              <div className="field">
-                <label className="field-label">
-                  Board
-                  {loadingExtras && <span className="spinner" style={{ marginLeft: 8, width: 12, height: 12 }} />}
-                </label>
-                <select className="select" value={selectedBoard}
-                  onChange={e => setSelectedBoard(e.target.value)}
-                  disabled={loadingExtras || !boards.length}>
-                  <option value="">— Select board —</option>
-                  {boards.map(b => (
-                    <option key={b.id} value={b.path}>{b.name}</option>
-                  ))}
-                </select>
-                {extrasErr && <p className="error-msg">⚠ {extrasErr}</p>}
-              </div>
-            )}
+                  {/* ── NSMG: Sprint (Iteration) ── */}
+                  {features.iteration && iterations.length > 0 && (
+                    <div className="field">
+                      <label className="field-label">Sprint (Iteration)</label>
+                      <select className="select" value={selectedIteration}
+                        onChange={e => setSelectedIteration(e.target.value)}>
+                        <option value="">— Select sprint —</option>
+                        {iterations.map(it => (
+                          <option key={it.id} value={it.path}>{it.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
-            {/* ── ABS: Jira Project ── */}
-            {proj.features.jiraProject && (
-              <div className="field">
-                <label className="field-label">Jira Project</label>
-                <select className="select" value={selectedJiraProj}
-                  onChange={e => setSelectedJiraProj(e.target.value)}>
-                  <option value="">— Select Jira project —</option>
-                  {(proj.jiraProjectOptions || []).map(key => (
-                    <option key={key} value={key}>{key}</option>
-                  ))}
-                </select>
+                  {/* ── NSMG: Parent Story ── */}
+                  {features.story && stories.length > 0 && (
+                    <div className="field">
+                      <label className="field-label">Parent Story</label>
+                      <select className="select"
+                        value={selectedStory?.id ?? ''}
+                        onChange={e => setSelectedStory(stories.find(s => String(s.id) === e.target.value) ?? null)}>
+                        <option value="">— Select story (optional) —</option>
+                        {stories.map(s => (
+                          <option key={s.id} value={s.id}>{s.title}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* ── ABS: Board (Area Path) ── */}
+                  {features.board && boards.length > 0 && (
+                    <div className="field">
+                      <label className="field-label">Board</label>
+                      <select className="select" value={selectedBoard}
+                        onChange={e => setSelectedBoard(e.target.value)}>
+                        <option value="">— Select board —</option>
+                        {boards.map(b => (
+                          <option key={b.id} value={b.path}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* ── ABS: Jira Project ── */}
+                  {features.jiraProject && (
+                    <div className="field">
+                      <label className="field-label">Jira Project</label>
+                      <select className="select" value={selectedJiraProj}
+                        onChange={e => setSelectedJiraProj(e.target.value)}>
+                        <option value="">— Select Jira project —</option>
+                        {(proj.jiraProjectOptions || []).map(key => (
+                          <option key={key} value={key}>{key}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {extrasErr && <p className="error-msg" style={{ marginBottom: 8 }}>⚠ {extrasErr}</p>}
+                </div>
               </div>
             )}
 

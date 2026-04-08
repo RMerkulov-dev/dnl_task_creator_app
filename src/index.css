@@ -475,6 +475,26 @@ body {
 
 .result-link-anchor:hover { opacity: 0.75; text-decoration: underline; }
 
+/* ─── Extras section loader ─────────────────────────────────────────────────── */
+.extras-section {
+  position: relative;
+  min-height: 0;
+}
+
+.extras-loader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0;
+  justify-content: center;
+}
+
+.extras-loader-text {
+  font-size: 13px;
+  color: var(--text-2);
+  font-weight: 500;
+}
+
 /* ─── Spinner ────────────────────────────────────────────────────────────────── */
 .spinner {
   width: 14px;
@@ -483,6 +503,12 @@ body {
   border-top-color: var(--accent-1);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+.spinner-lg {
+  width: 22px;
+  height: 22px;
+  border-width: 2.5px;
 }
 
 /* ─── Misc helpers ───────────────────────────────────────────────────────────── */
