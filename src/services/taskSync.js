@@ -49,8 +49,11 @@ export function getCreateStepCount(project) {
   return 3;                                           // Azure + Jira + link-back
 }
 
-export function getEditStepCount(project) {
-  return project.jira ? 2 : 1;
+export function getEditStepCount(project, jiraKey) {
+  if (!project.jira) return 1;                       // Azure only
+  if (jiraKey) return 2;                              // Azure + Jira update
+  if (!project.azure.jiraIdField) return 2;           // Azure + Jira create (no link-back)
+  return 3;                                           // Azure + Jira create + link-back
 }
 
 // ─── CREATE ───────────────────────────────────────────────────────────────────
@@ -154,8 +157,12 @@ export async function fetchTaskForEdit(project, itemId) {
 }
 
 // ─── UPDATE ───────────────────────────────────────────────────────────────────
-export async function updateTask(project, itemId, title, description, jiraKey, onStep) {
-  const { azure, jira } = project;
+export async function updateTask(project, itemId, title, description, jiraKey, onStep, extras = {}) {
+  const { azure } = project;
+  // Allow runtime override of Jira project key (e.g. ABS/ABSPO selector)
+  const jira = extras.jiraProjectKey && project.jira
+    ? { ...project.jira, projectKey: extras.jiraProjectKey }
+    : project.jira;
 
   // ── Step 0: Update Azure ─────────────────────────────────────────────────
   onStep(0, 'pending');
@@ -186,28 +193,60 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
     } catch { /* non-fatal */ }
   }
 
-  if (!jiraKey) {
-    onStep(1, 'skipped');
-    return { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
+  if (jiraKey) {
+    // ── Step 1: Update existing Jira issue ────────────────────────────────
+    onStep(1, 'pending');
+    try {
+      await updateIssue(jira.cloudId, jiraKey, title, processedDesc);
+    } catch (err) {
+      onStep(1, 'error', err.message);
+      throw err;
+    }
+
+    if (imageFiles.length) {
+      try { await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles); }
+      catch (err) { console.warn('Jira attachment upload failed:', err.message); }
+    }
+
+    const jiraUrl = getJiraUrl(jiraKey);
+    onStep(1, 'done', null, { jiraKey, jiraUrl });
+    return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
   }
 
-  // ── Step 1: Update Jira ──────────────────────────────────────────────────
+  // ── Step 1: Create new Jira issue (none exists yet) ───────────────────
   onStep(1, 'pending');
+  const numericId = Number(itemId);
+  let jiraItem;
   try {
-    await updateIssue(jira.cloudId, jiraKey, title, processedDesc);
+    jiraItem = await createIssue(
+      jira.cloudId, jira.projectKey, jira.issueTypeId,
+      title, processedDesc, numericId, itemUrl, jira.clientRequestIdField
+    );
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;
   }
+  const newJiraKey = jiraItem.key;
+  const newJiraUrl = getJiraUrl(newJiraKey);
 
-  // Upload images as Jira attachments (non-blocking)
   if (imageFiles.length) {
-    try { await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles); }
+    try { await uploadJiraAttachments(jira.cloudId, newJiraKey, imageFiles); }
     catch (err) { console.warn('Jira attachment upload failed:', err.message); }
   }
 
-  const jiraUrl = getJiraUrl(jiraKey);
-  onStep(1, 'done', null, { jiraKey, jiraUrl });
+  onStep(1, 'done', null, { jiraKey: newJiraKey, jiraUrl: newJiraUrl });
 
-  return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+  if (!azure.jiraIdField) return { epicId: itemId, epicUrl: itemUrl, jiraKey: newJiraKey, jiraUrl: newJiraUrl };
+
+  // ── Step 2: Link back — set Jira key on the Azure work item ───────────
+  onStep(2, 'pending');
+  try {
+    await updateWorkItem(azure.proxyKey, azure.project, itemId, { [azure.jiraIdField]: newJiraKey });
+  } catch (err) {
+    onStep(2, 'error', err.message);
+    throw err;
+  }
+  onStep(2, 'done');
+
+  return { epicId: itemId, epicUrl: itemUrl, jiraKey: newJiraKey, jiraUrl: newJiraUrl };
 }

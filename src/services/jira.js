@@ -167,10 +167,13 @@ async function parseJira(res, label) {
   }
 
   if (!res.ok) {
-    const msg = data.errors
-      ? Object.values(data.errors).join('; ')
-      : data.message || data.error || data.errorMessages?.[0];
-    throw new Error(msg || `Jira error ${res.status}`);
+    const errParts = [];
+    if (data.errorMessages?.length) errParts.push(...data.errorMessages);
+    if (data.errors && Object.keys(data.errors).length) errParts.push(Object.values(data.errors).join('; '));
+    if (data.message) errParts.push(data.message);
+    if (data.error) errParts.push(data.error);
+    const msg = errParts.join(' | ') || `Jira error ${res.status}: ${text.substring(0, 300)}`;
+    throw new Error(msg);
   }
   return data;
 }
@@ -186,12 +189,15 @@ export async function createIssue(cloudId, projectKey, issueTypeId, summary, des
       [clientRequestIdField]: epicId,
     },
   };
+  console.log('[createIssue] body:', JSON.stringify(body, null, 2));
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  return parseJira(res, 'createIssue');
+  const result = await parseJira(res, 'createIssue');
+  console.log('[createIssue] response:', result);
+  return result;
 }
 
 export async function updateIssue(cloudId, issueKey, summary, description) {

@@ -1,15 +1,17 @@
-import { getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
-
 // ─── Step definitions — derived from project config ───────────────────────────
-function buildStepDefs(mode, project) {
+function buildStepDefs(mode, project, stepCount) {
   const type = project?.azure?.workItemType ?? 'Item';
   const hasJira = !!project?.jira;
   const hasLinkBack = !!project?.azure?.jiraIdField;
 
   if (mode === 'edit') {
+    // stepCount > 2 means we're creating a new Jira issue + linking back
+    const creatingJira = stepCount > 2 || (stepCount === 2 && hasJira);
+    const isNewJira = stepCount > 2;
     return [
       { label: `Updating Azure DevOps ${type}` },
-      ...(hasJira ? [{ label: 'Updating Jira Request' }] : []),
+      ...(hasJira ? [{ label: isNewJira ? 'Creating Jira Request' : 'Updating Jira Request' }] : []),
+      ...(isNewJira && hasLinkBack ? [{ label: 'Linking records' }] : []),
     ];
   }
   return [
@@ -30,7 +32,7 @@ function StepIcon({ status }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function SyncModal({ mode, project, steps, result, onClose }) {
-  const defs    = buildStepDefs(mode, project);
+  const defs    = buildStepDefs(mode, project, steps.length);
   const allDone = steps.length > 0 && steps.every(s => s?.status === 'done' || s?.status === 'skipped');
   const hasErr  = steps.some(s => s?.status === 'error');
 

@@ -49,6 +49,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   const [jiraKey,      setJiraKey]      = useState(null);
   const [fetchingEpic, setFetchingEpic] = useState(false);
   const [fetchErr,     setFetchErr]     = useState('');
+  const [confirmCreate, setConfirmCreate] = useState(false);  // Jira create confirmation
 
   // ── Project-specific extras ───────────────────────────────────────────────
   const [iterations,         setIterations]         = useState([]);
@@ -217,11 +218,12 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!title.trim()) return;
+  async function runSync(skipJiraCreate = false) {
+    const editProj = skipJiraCreate ? { ...proj, jira: null } : proj;
 
-    const count = mode === 'create' ? getCreateStepCount(proj) : getEditStepCount(proj);
+    const count = mode === 'create'
+      ? getCreateStepCount(proj)
+      : getEditStepCount(editProj, jiraKey);
     setSteps(Array(count).fill({ status: 'idle' }));
     setResult(null);
     setSyncing(true);
@@ -240,11 +242,24 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
         res = await createTask(proj, title.trim(), description.trim(), extras, updateStep);
         resetForm();
       } else {
-        res = await updateTask(proj, epicId.trim(), title.trim(), description.trim(), jiraKey, updateStep);
+        res = await updateTask(editProj, epicId.trim(), title.trim(), description.trim(), jiraKey, updateStep, extras);
       }
       setResult(res);
     } catch { /* errors shown in modal */ }
     finally { setSyncing(false); }
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!title.trim()) return;
+
+    // Edit mode + Jira configured + no existing Jira issue → ask user
+    if (mode === 'edit' && proj.jira && !jiraKey) {
+      setConfirmCreate(true);
+      return;
+    }
+
+    runSync();
   }
 
   function handleCloseModal() {
@@ -449,6 +464,32 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
           result={result}
           onClose={handleCloseModal}
         />
+      )}
+
+      {confirmCreate && (
+        <div className="overlay">
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <p style={{ fontSize: 15, lineHeight: 1.5, marginBottom: 20 }}>
+              Jira Request for this item doesn't exist. Do you want to create?
+            </p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => { setConfirmCreate(false); runSync(true); }}
+              >
+                No, update Azure only
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={() => { setConfirmCreate(false); runSync(); }}
+              >
+                Yes, create Jira
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
