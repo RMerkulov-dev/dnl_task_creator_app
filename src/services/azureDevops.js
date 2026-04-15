@@ -101,6 +101,37 @@ export async function getStories(proxyKey, project) {
   }));
 }
 
+/**
+ * Find an Azure DevOps work item by its stored Jira key.
+ * Returns the work item ID or null if not found.
+ */
+export async function findWorkItemByJiraKey(proxyKey, project, jiraIdField, jiraKey, jiraUrl) {
+  const wiqlUrl = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.0`;
+  const esc  = v => v.replace(/'/g, "''");
+
+  // Try: exact key, full Jira URL, CONTAINS key
+  const candidates = [
+    `[${jiraIdField}] = '${esc(jiraKey)}'`,
+    ...(jiraUrl ? [`[${jiraIdField}] = '${esc(jiraUrl)}'`] : []),
+    `[${jiraIdField}] CONTAINS '${esc(jiraKey)}'`,
+  ];
+
+  for (const condition of candidates) {
+    const wiqlRes = await fetch(wiqlUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND ${condition}`,
+      }),
+    });
+    const wiql = await parse(wiqlRes, 'findWorkItemByJiraKey');
+    const id = wiql.workItems?.[0]?.id ?? null;
+    console.log(`[WIQL] ${condition} → ${id ?? 'null'}`);
+    if (id) return id;
+  }
+  return null;
+}
+
 // ─── Area Paths (Boards) — used by ABS ───────────────────────────────────────
 
 /**

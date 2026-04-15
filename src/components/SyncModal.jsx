@@ -4,9 +4,14 @@ function buildStepDefs(mode, project, stepCount) {
   const hasJira = !!project?.jira;
   const hasLinkBack = !!project?.azure?.jiraIdField;
 
+  if (mode === 'createFromJira') {
+    return [
+      { label: `Creating Azure DevOps ${type}` },
+      ...(hasJira ? [{ label: 'Linking Jira Request' }] : []),
+    ];
+  }
+
   if (mode === 'edit') {
-    // stepCount > 2 means we're creating a new Jira issue + linking back
-    const creatingJira = stepCount > 2 || (stepCount === 2 && hasJira);
     const isNewJira = stepCount > 2;
     return [
       { label: `Updating Azure DevOps ${type}` },

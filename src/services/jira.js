@@ -241,6 +241,75 @@ export async function uploadJiraAttachments(cloudId, issueKey, files) {
   }
 }
 
+export async function getJiraIssueByKey(cloudId, issueKey, clientRequestIdField) {
+  const url = `${jiraBase(cloudId)}/issue/${issueKey}?fields=summary,description,${clientRequestIdField}`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getJiraIssue');
+  return {
+    summary:     data.fields?.summary ?? '',
+    description: adfToHtml(data.fields?.description),
+    azureId:     data.fields?.[clientRequestIdField] ?? null,
+  };
+}
+
+export async function setJiraAzureId(cloudId, issueKey, clientRequestIdField, azureId) {
+  const url = `${jiraBase(cloudId)}/issue/${issueKey}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { [clientRequestIdField]: azureId } }),
+  });
+  return parseJira(res, 'setJiraAzureId');
+}
+
 export function getJiraUrl(issueKey) {
   return `https://dynamicalabs.atlassian.net/browse/${issueKey}`;
+}
+
+// ─── ADF → HTML converter ─────────────────────────────────────────────────────
+// Converts Atlassian Document Format back to HTML for display in TipTap.
+
+function escHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function adfInline(node) {
+  if (!node) return '';
+  if (node.type !== 'text') return adfBlock(node);
+  let text = escHtml(node.text || '');
+  for (const mark of (node.marks || [])) {
+    if (mark.type === 'strong')    text = `<strong>${text}</strong>`;
+    else if (mark.type === 'em')   text = `<em>${text}</em>`;
+    else if (mark.type === 'underline') text = `<u>${text}</u>`;
+    else if (mark.type === 'strike')    text = `<s>${text}</s>`;
+    else if (mark.type === 'code')      text = `<code>${text}</code>`;
+    else if (mark.type === 'link')      text = `<a href="${escHtml(mark.attrs?.href || '')}">${text}</a>`;
+    else if (mark.type === 'textColor') text = `<span style="color:${escHtml(mark.attrs?.color || '')}">${text}</span>`;
+  }
+  return text;
+}
+
+function adfBlock(node) {
+  if (!node) return '';
+  const children = (content) => (content || []).map(adfBlock).join('');
+  const inlines  = (content) => (content || []).map(adfInline).join('');
+
+  switch (node.type) {
+    case 'doc':         return children(node.content);
+    case 'paragraph':   return `<p>${inlines(node.content)}</p>`;
+    case 'heading':     return `<h${node.attrs?.level || 1}>${inlines(node.content)}</h${node.attrs?.level || 1}>`;
+    case 'bulletList':  return `<ul>${children(node.content)}</ul>`;
+    case 'orderedList': return `<ol>${children(node.content)}</ol>`;
+    case 'listItem':    return `<li>${children(node.content)}</li>`;
+    case 'blockquote':  return `<blockquote>${children(node.content)}</blockquote>`;
+    case 'codeBlock':   return `<pre><code>${escHtml((node.content || []).map(n => n.text || '').join(''))}</code></pre>`;
+    case 'text':        return adfInline(node);
+    case 'hardBreak':   return '<br>';
+    default:            return children(node.content);
+  }
+}
+
+export function adfToHtml(adf) {
+  if (!adf) return '';
+  return adfBlock(adf);
 }

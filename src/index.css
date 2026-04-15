@@ -511,6 +511,46 @@ body {
   border-width: 2.5px;
 }
 
+/* ─── ID Mode Toggle (Azure / Jira) ─────────────────────────────────────────── */
+.id-mode-toggle {
+  display: flex;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+}
+.id-mode-btn {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 14px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+  white-space: nowrap;
+}
+.id-mode-btn:hover:not(.active) { color: var(--text-1); }
+.id-mode-btn.active {
+  background: var(--gradient);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(91, 99, 254, 0.35);
+}
+
+/* ─── Create-from-Jira notice ────────────────────────────────────────────────── */
+.create-from-jira-notice {
+  font-size: 12px;
+  color: var(--accent-1);
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: rgba(91, 99, 254, 0.08);
+  border: 1px solid rgba(91, 99, 254, 0.25);
+  border-radius: 6px;
+}
+
 /* ─── Misc helpers ───────────────────────────────────────────────────────────── */
 .error-msg {
   font-size: 12px;

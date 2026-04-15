@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../config/projects.js';
-import { getIterations, getStories, getAreaPaths } from '../services/azureDevops.js';
-import { createTask, updateTask, fetchTaskForEdit, getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
+import { getIterations, getStories, getAreaPaths, findWorkItemByJiraKey } from '../services/azureDevops.js';
+import { createTask, updateTask, fetchTaskForEdit, createAzureFromJira, getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
+import { getJiraIssueByKey, getJiraUrl } from '../services/jira.js';
 import SyncModal from './SyncModal.jsx';
 import RichTextEditor from './RichTextEditor.jsx';
 
@@ -49,7 +50,9 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   const [jiraKey,      setJiraKey]      = useState(null);
   const [fetchingEpic, setFetchingEpic] = useState(false);
   const [fetchErr,     setFetchErr]     = useState('');
-  const [confirmCreate, setConfirmCreate] = useState(false);  // Jira create confirmation
+  const [idMode,         setIdMode]         = useState('azure'); // 'azure' | 'jira'
+  const [createFromJira, setCreateFromJira] = useState(false);  // Jira-only item, create Azure on save
+  const [confirmCreate,  setConfirmCreate]  = useState(false);  // Jira create confirmation
 
   // ── Project-specific extras ───────────────────────────────────────────────
   const [iterations,         setIterations]         = useState([]);
@@ -176,6 +179,8 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     setEpicId('');
     setJiraKey(null);
     setFetchErr('');
+    setIdMode('azure');
+    setCreateFromJira(false);
   }
 
   function handleModeChange(m) {
@@ -201,15 +206,61 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
 
   // ── Load Epic for Edit mode ───────────────────────────────────────────────
   async function handleEpicLookup() {
-    const id = epicId.trim();
-    if (!id) return;
+    const raw = epicId.trim();
+    if (!raw) return;
     setFetchingEpic(true);
     setFetchErr('');
     try {
-      const data = await fetchTaskForEdit(proj, id);
-      setTitle(data.title);
-      setDescription(data.description);
-      setJiraKey(data.jiraKey);
+      if (idMode === 'jira' && proj.jira) {
+        const jiraKeyUpper = raw.toUpperCase();
+        let azureId = null;
+
+        // Try Jira's custom field first (reverse link)
+        try {
+          const res = await getJiraIssueByKey(
+            proj.jira.cloudId, jiraKeyUpper, proj.jira.clientRequestIdField
+          );
+          azureId = res.azureId;
+          console.log('[Jira lookup] azureId from Jira field:', azureId, '| field:', proj.jira.clientRequestIdField);
+        } catch (e) {
+          console.warn('[Jira lookup] Jira field lookup failed:', e.message);
+        }
+
+        // Fallback: search Azure DevOps by jiraIdField (try key + full URL)
+        if (!azureId && proj.azure.jiraIdField) {
+          console.log('[Jira lookup] Trying Azure WIQL with field:', proj.azure.jiraIdField, 'value:', jiraKeyUpper);
+          azureId = await findWorkItemByJiraKey(
+            proj.azure.proxyKey, proj.azure.project, proj.azure.jiraIdField,
+            jiraKeyUpper, getJiraUrl(jiraKeyUpper)
+          );
+          console.log('[Jira lookup] azureId from Azure WIQL:', azureId);
+        }
+
+        if (!azureId) {
+          // No Azure item — load data from Jira and enter "create Azure" mode
+          const jiraData = await getJiraIssueByKey(
+            proj.jira.cloudId, jiraKeyUpper, proj.jira.clientRequestIdField
+          );
+          setTitle(jiraData.summary);
+          setDescription(jiraData.description || '');
+          setJiraKey(jiraKeyUpper);
+          setEpicId('');
+          setCreateFromJira(true);
+          return;
+        }
+        setCreateFromJira(false);
+        const resolvedId = String(azureId);
+        setEpicId(resolvedId);
+        const data = await fetchTaskForEdit(proj, resolvedId);
+        setTitle(data.title);
+        setDescription(data.description);
+        setJiraKey(jiraKeyUpper);
+      } else {
+        const data = await fetchTaskForEdit(proj, raw);
+        setTitle(data.title);
+        setDescription(data.description);
+        setJiraKey(data.jiraKey);
+      }
     } catch (e) {
       setFetchErr(e.message);
     } finally {
@@ -219,8 +270,30 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
 
   // ── Submit ────────────────────────────────────────────────────────────────
   async function runSync(skipJiraCreate = false) {
-    const editProj = skipJiraCreate ? { ...proj, jira: null } : proj;
+    const extras = {
+      iterationPath:  selectedIteration || undefined,
+      storyUrl:       selectedStory?.url || undefined,
+      areaPath:       selectedBoard || undefined,
+      jiraProjectKey: selectedJiraProj || undefined,
+    };
 
+    // createFromJira: Jira issue exists, Azure doesn't — create Azure + link back
+    if (createFromJira) {
+      setSteps(Array(proj.jira ? 2 : 1).fill({ status: 'idle' }));
+      setResult(null);
+      setSyncing(true);
+      setShowModal(true);
+      try {
+        const res = await createAzureFromJira(proj, jiraKey, title.trim(), description.trim(), extras, updateStep);
+        setCreateFromJira(false);
+        setEpicId(String(res.epicId));
+        setResult(res);
+      } catch { /* errors shown in modal */ }
+      finally { setSyncing(false); }
+      return;
+    }
+
+    const editProj = skipJiraCreate ? { ...proj, jira: null } : proj;
     const count = mode === 'create'
       ? getCreateStepCount(proj)
       : getEditStepCount(editProj, jiraKey);
@@ -228,13 +301,6 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     setResult(null);
     setSyncing(true);
     setShowModal(true);
-
-    const extras = {
-      iterationPath:  selectedIteration || undefined,
-      storyUrl:       selectedStory?.url || undefined,
-      areaPath:       selectedBoard || undefined,
-      jiraProjectKey: selectedJiraProj || undefined,
-    };
 
     try {
       let res;
@@ -253,6 +319,9 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     e.preventDefault();
     if (!title.trim()) return;
 
+    // createFromJira mode: go straight to sync (no confirmation needed)
+    if (createFromJira) { runSync(); return; }
+
     // Edit mode + Jira configured + no existing Jira issue → ask user
     if (mode === 'edit' && proj.jira && !jiraKey) {
       setConfirmCreate(true);
@@ -269,7 +338,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   }
 
   // ── Validation ────────────────────────────────────────────────────────────
-  const canSubmit = title.trim() && (mode === 'create' || epicId.trim());
+  const canSubmit = title.trim() && (mode === 'create' || epicId.trim() || createFromJira);
   const { features } = proj;
   const showExtrasSection = features.iteration || features.story || features.board || features.jiraProject;
 
@@ -331,12 +400,34 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
             {/* Epic/Task ID — Edit mode only */}
             {mode === 'edit' && (
               <div className="field">
-                <label className="field-label">Azure DevOps {proj.azure.workItemType} ID</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <label className="field-label" style={{ margin: 0 }}>
+                    {idMode === 'jira' ? 'Jira Issue Key' : `Azure DevOps ${proj.azure.workItemType} ID`}
+                  </label>
+                  {proj.jira && (
+                    <div className="id-mode-toggle">
+                      <button
+                        type="button"
+                        className={`id-mode-btn${idMode === 'azure' ? ' active' : ''}`}
+                        onClick={() => { setIdMode('azure'); setEpicId(''); setFetchErr(''); }}
+                      >Azure</button>
+                      <button
+                        type="button"
+                        className={`id-mode-btn${idMode === 'jira' ? ' active' : ''}`}
+                        onClick={() => { setIdMode('jira'); setEpicId(''); setFetchErr(''); }}
+                      >Jira</button>
+                    </div>
+                  )}
+                </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <input type="number" className="input" placeholder="e.g. 154" min={1}
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder={idMode === 'jira' ? 'e.g. NSMG-8244' : 'e.g. 1154'}
                     value={epicId}
                     onChange={e => { setEpicId(e.target.value); setFetchErr(''); }}
-                    style={{ flex: 1 }} />
+                    style={{ flex: 1 }}
+                  />
                   <button type="button" className="btn btn-ghost"
                     onClick={handleEpicLookup} disabled={!epicId.trim() || fetchingEpic}
                     style={{ flexShrink: 0 }}>
@@ -344,6 +435,11 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
                   </button>
                 </div>
                 {fetchErr && <p className="error-msg">⚠ {fetchErr}</p>}
+                {createFromJira && (
+                  <p className="create-from-jira-notice">
+                    No Azure item found — a new one will be created and linked to {jiraKey}
+                  </p>
+                )}
               </div>
             )}
 
@@ -458,7 +554,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
 
       {showModal && (
         <SyncModal
-          mode={mode}
+          mode={createFromJira ? 'createFromJira' : mode}
           project={proj}
           steps={steps}
           result={result}

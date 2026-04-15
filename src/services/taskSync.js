@@ -1,5 +1,5 @@
 import { createWorkItem, updateWorkItem, getWorkItem, uploadAttachment } from './azureDevops.js';
-import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl, uploadJiraAttachments } from './jira.js';
+import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl, uploadJiraAttachments, setJiraAzureId } from './jira.js';
 
 // ─── Image processing ────────────────────────────────────────────────────────
 // Extracts base64 images from HTML, uploads them as Azure DevOps attachments,
@@ -154,6 +154,69 @@ export async function fetchTaskForEdit(project, itemId) {
     description: item.fields?.['System.Description'] ?? '',
     jiraKey:  azure.jiraIdField ? (item.fields?.[azure.jiraIdField] ?? null) : null,
   };
+}
+
+// ─── CREATE AZURE FROM JIRA ───────────────────────────────────────────────────
+/**
+ * When a Jira issue exists but has no Azure counterpart:
+ * create the Azure work item and link both systems.
+ * Steps: 0=Create Azure, 1=Update Jira with Azure ID
+ */
+export async function createAzureFromJira(project, jiraKey, title, description, extras = {}, onStep) {
+  const { azure, jira } = project;
+  const jiraUrl = getJiraUrl(jiraKey);
+
+  // ── Step 0: Create Azure work item ──────────────────────────────────────
+  onStep(0, 'pending');
+
+  const { html: processedDesc, files: imageFiles, relations: imageRelations } =
+    await processImages(description, azure.proxyKey, azure.project);
+
+  const fields = {
+    'System.Title':       title,
+    'System.Description': processedDesc,
+    ...(azure.jiraIdField          ? { [azure.jiraIdField]: jiraKey }          : {}),
+    ...(extras.iterationPath       ? { 'System.IterationPath': extras.iterationPath } : {}),
+    ...(extras.areaPath            ? { 'System.AreaPath':      extras.areaPath }      : {}),
+  };
+
+  const relations = [
+    ...(extras.storyUrl
+      ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
+      : []),
+    ...(imageRelations || []),
+  ];
+
+  let item;
+  try {
+    item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
+  } catch (err) {
+    onStep(0, 'error', err.message);
+    throw err;
+  }
+
+  const itemId  = item.id;
+  const itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
+  onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
+
+  if (!jira) return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+
+  // ── Step 1: Update Jira with Azure ID ───────────────────────────────────
+  onStep(1, 'pending');
+  try {
+    await setJiraAzureId(jira.cloudId, jiraKey, jira.clientRequestIdField, itemId);
+    if (imageFiles?.length) {
+      await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles).catch(e =>
+        console.warn('Jira attachment upload failed:', e.message)
+      );
+    }
+  } catch (err) {
+    onStep(1, 'error', err.message);
+    throw err;
+  }
+  onStep(1, 'done', null, { jiraKey, jiraUrl });
+
+  return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
 }
 
 // ─── UPDATE ───────────────────────────────────────────────────────────────────
