@@ -52,7 +52,6 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   const [fetchErr,     setFetchErr]     = useState('');
   const [idMode,         setIdMode]         = useState('azure'); // 'azure' | 'jira'
   const [createFromJira, setCreateFromJira] = useState(false);  // Jira-only item, create Azure on save
-  const [confirmCreate,  setConfirmCreate]  = useState(false);  // Jira create confirmation
 
   // ── Project-specific extras ───────────────────────────────────────────────
   const [iterations,         setIterations]         = useState([]);
@@ -204,6 +203,18 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     localStorage.setItem(LS_KEY, JSON.stringify(all));
   }
 
+  // ── Apply loaded task data to selectors ───────────────────────────────────
+  function applyLoadedExtras(data) {
+    if (data.iterationPath) setSelectedIteration(data.iterationPath);
+    if (data.areaPath)      setSelectedBoard(data.areaPath);
+    if (data.parentId != null) {
+      // Match parent story by ID (more reliable than URL)
+      const match = stories.find(s => String(s.id) === String(data.parentId));
+      if (match) setSelectedStory(match);
+      else if (data.parentUrl) setSelectedStory({ id: data.parentId, title: `Story #${data.parentId}`, url: data.parentUrl });
+    }
+  }
+
   // ── Load Epic for Edit mode ───────────────────────────────────────────────
   async function handleEpicLookup() {
     const raw = epicId.trim();
@@ -255,11 +266,13 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
         setTitle(data.title);
         setDescription(data.description);
         setJiraKey(jiraKeyUpper);
+        applyLoadedExtras(data);
       } else {
         const data = await fetchTaskForEdit(proj, raw);
         setTitle(data.title);
         setDescription(data.description);
         setJiraKey(data.jiraKey);
+        applyLoadedExtras(data);
       }
     } catch (e) {
       setFetchErr(e.message);
@@ -269,7 +282,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
-  async function runSync(skipJiraCreate = false) {
+  async function runSync() {
     const extras = {
       iterationPath:  selectedIteration || undefined,
       storyUrl:       selectedStory?.url || undefined,
@@ -293,10 +306,9 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
       return;
     }
 
-    const editProj = skipJiraCreate ? { ...proj, jira: null } : proj;
     const count = mode === 'create'
       ? getCreateStepCount(proj)
-      : getEditStepCount(editProj, jiraKey);
+      : getEditStepCount(proj, jiraKey);
     setSteps(Array(count).fill({ status: 'idle' }));
     setResult(null);
     setSyncing(true);
@@ -308,7 +320,10 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
         res = await createTask(proj, title.trim(), description.trim(), extras, updateStep);
         resetForm();
       } else {
-        res = await updateTask(editProj, epicId.trim(), title.trim(), description.trim(), jiraKey, updateStep, extras);
+        res = await updateTask(proj, epicId.trim(), title.trim(), description.trim(), jiraKey, updateStep, extras);
+        // Keep jiraKey in sync — if Jira was just created, store the key so next save updates instead of creating
+        if (res.jiraKey && res.jiraKey !== jiraKey) setJiraKey(res.jiraKey);
+        if (res.epicId  && !epicId.trim())          setEpicId(String(res.epicId));
       }
       setResult(res);
     } catch { /* errors shown in modal */ }
@@ -318,16 +333,6 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   async function handleSubmit(e) {
     e.preventDefault();
     if (!title.trim()) return;
-
-    // createFromJira mode: go straight to sync (no confirmation needed)
-    if (createFromJira) { runSync(); return; }
-
-    // Edit mode + Jira configured + no existing Jira issue → ask user
-    if (mode === 'edit' && proj.jira && !jiraKey) {
-      setConfirmCreate(true);
-      return;
-    }
-
     runSync();
   }
 
@@ -426,6 +431,12 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
                     placeholder={idMode === 'jira' ? 'e.g. NSMG-8244' : 'e.g. 1154'}
                     value={epicId}
                     onChange={e => { setEpicId(e.target.value); setFetchErr(''); }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && epicId.trim() && !fetchingEpic) {
+                        e.preventDefault();
+                        handleEpicLookup();
+                      }
+                    }}
                     style={{ flex: 1 }}
                   />
                   <button type="button" className="btn btn-ghost"
@@ -562,31 +573,6 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
         />
       )}
 
-      {confirmCreate && (
-        <div className="overlay">
-          <div className="modal" style={{ maxWidth: 440 }}>
-            <p style={{ fontSize: 15, lineHeight: 1.5, marginBottom: 20 }}>
-              Jira Request for this item doesn't exist. Do you want to create?
-            </p>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                onClick={() => { setConfirmCreate(false); runSync(true); }}
-              >
-                No, update Azure only
-              </button>
-              <button
-                className="btn btn-primary"
-                style={{ flex: 1 }}
-                onClick={() => { setConfirmCreate(false); runSync(); }}
-              >
-                Yes, create Jira
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

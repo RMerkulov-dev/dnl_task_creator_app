@@ -49,7 +49,8 @@ export async function updateWorkItem(proxyKey, project, id, fields) {
 }
 
 export async function getWorkItem(proxyKey, project, id) {
-  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workitems/${id}?api-version=7.0`;
+  // $expand=relations to get parent/hierarchy links
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workitems/${id}?$expand=relations&api-version=7.0`;
   const res = await fetch(url);
   return parse(res, 'getWorkItem');
 }

@@ -149,10 +149,15 @@ export async function createTask(project, title, description, extras = {}, onSte
 export async function fetchTaskForEdit(project, itemId) {
   const { azure } = project;
   const item = await getWorkItem(azure.proxyKey, azure.project, itemId);
+  const parentRel = item.relations?.find(r => r.rel === 'System.LinkTypes.Hierarchy-Reverse');
   return {
-    title:    item.fields?.['System.Title']       ?? '',
-    description: item.fields?.['System.Description'] ?? '',
-    jiraKey:  azure.jiraIdField ? (item.fields?.[azure.jiraIdField] ?? null) : null,
+    title:         item.fields?.['System.Title']          ?? '',
+    description:   item.fields?.['System.Description']    ?? '',
+    iterationPath: item.fields?.['System.IterationPath']  ?? '',
+    areaPath:      item.fields?.['System.AreaPath']       ?? '',
+    parentUrl:     parentRel?.url                         ?? null,
+    parentId:      parentRel?.url ? Number(parentRel.url.split('/').pop()) : null,
+    jiraKey:       azure.jiraIdField ? (item.fields?.[azure.jiraIdField] ?? null) : null,
   };
 }
 
@@ -248,7 +253,9 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
 
   if (!jira) return { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
 
-  // Resolve Jira key if not cached
+  // Resolve Jira key if not cached — track whether we had to look it up so we
+  // can re-link it on the Azure side (jiraIdField was empty).
+  const hadJiraKeyInitially = !!jiraKey;
   if (!jiraKey) {
     try {
       const found = await findIssueByEpicId(jira.cloudId, jira.projectKey, jira.clientRequestIdField, itemId);
@@ -273,6 +280,18 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
 
     const jiraUrl = getJiraUrl(jiraKey);
     onStep(1, 'done', null, { jiraKey, jiraUrl });
+
+    // ── Step 2: Link back if the Azure side wasn't already linked ─────────
+    if (!hadJiraKeyInitially && azure.jiraIdField) {
+      onStep(2, 'pending');
+      try {
+        await updateWorkItem(azure.proxyKey, azure.project, itemId, { [azure.jiraIdField]: jiraKey });
+      } catch (err) {
+        onStep(2, 'error', err.message);
+        throw err;
+      }
+      onStep(2, 'done');
+    }
     return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
   }
 
