@@ -26,21 +26,25 @@ function getSavedFilters(projId) {
 }
 
 // ─── Restore selected project from localStorage ────────────────────────────
-function getInitialProject() {
+function getInitialProject(visible) {
   const saved = loadSaved();
   const lastId = saved._lastProject;
   if (lastId) {
-    const found = PROJECT_LIST.find(p => p.id === lastId);
+    const found = visible.find(p => p.id === lastId);
     if (found) return found;
   }
-  return PROJECT_LIST[0];
+  return visible[0];
 }
 
-export default function Dashboard({ user, expiresAt, onLogout }) {
+export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }) {
+  // null = all projects (System Admin); array = restricted list
+  const visibleProjects = allowedProjects
+    ? PROJECT_LIST.filter(p => allowedProjects.includes(p.id))
+    : PROJECT_LIST;
   const hoursLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 3_600_000));
 
   // ── Core form state ───────────────────────────────────────────────────────
-  const [proj,        setProj]        = useState(getInitialProject);
+  const [proj,        setProj]        = useState(() => getInitialProject(visibleProjects));
   const [mode,        setMode]        = useState('create');
   const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
@@ -138,6 +142,17 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
     });
   }, [proj.id]);
 
+  // ── Reload stories when sprint selection changes (only for projects with storyIterationFilter) ──
+  useEffect(() => {
+    if (!proj.features.storyIterationFilter) return;
+    if (!selectedIteration) return;
+    let cancelled = false;
+    getStories(proj.azure.proxyKey, proj.azure.project, selectedIteration)
+      .then(all => { if (!cancelled) setStories(all); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedIteration]);
+
   // ── Restore saved filters once extras are loaded ──────────────────────────
   useEffect(() => {
     if (loadingExtras) return;
@@ -188,7 +203,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
   }
 
   function handleProjectChange(id) {
-    const p = PROJECT_LIST.find(p => p.id === id);
+    const p = visibleProjects.find(p => p.id === id);
     if (!p || p.id === proj.id) return;
     resetForm();
     // Reset filter selections before loading new project data
@@ -396,7 +411,7 @@ export default function Dashboard({ user, expiresAt, onLogout }) {
               <label className="field-label">Select Project</label>
               <select className="select" value={proj.id}
                 onChange={e => handleProjectChange(e.target.value)}>
-                {PROJECT_LIST.map(p => (
+                {visibleProjects.map(p => (
                   <option key={p.id} value={p.id}>{p.label}</option>
                 ))}
               </select>

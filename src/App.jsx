@@ -5,12 +5,14 @@ import Dashboard from './components/Dashboard.jsx';
 // ─── Auth config ─────────────────────────────────────────────────────────────
 const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || 'puxcof-tegnib-diZgy5';
 
-const ALLOWED_EMAILS = (
-  import.meta.env.VITE_ALLOWED_EMAILS ||
-  'kateryna.romanenko@dynamicalabs.com,dima.shyshov@dynamicalabs.com,roman.merkulov@dynamicalabs.com'
-)
-  .split(',')
-  .map(e => e.trim().toLowerCase());
+// null = all projects (System Admin)
+const ROLES = {
+  'roman.merkulov@dynamicalabs.com':    null,
+  'dima.shyshov@dynamicalabs.com':      ['NSMG'],
+  'kateryna.romanenko@dynamicalabs.com': ['ABS'],
+};
+
+const ALLOWED_EMAILS = Object.keys(ROLES);
 
 const TOKEN_KEY = 'dnl_auth_token';
 const TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -23,6 +25,10 @@ function getStoredSession() {
     if (Date.now() > session.expiresAt) {
       localStorage.removeItem(TOKEN_KEY);
       return null;
+    }
+    // Re-derive projects from ROLES in case session was saved before roles existed
+    if (!Object.prototype.hasOwnProperty.call(session, 'projects')) {
+      session.projects = ROLES[session.email] ?? null;
     }
     return session;
   } catch {
@@ -49,9 +55,11 @@ export default function App() {
   function handleLogin(email, password) {
     if (!ALLOWED_EMAILS.includes(email.trim().toLowerCase())) return 'email';
     if (password !== APP_PASSWORD) return 'password';
+    const normalised = email.trim().toLowerCase();
     const newSession = {
-      email: email.trim().toLowerCase(),
-      expiresAt: Date.now() + TOKEN_TTL,
+      email:      normalised,
+      projects:   ROLES[normalised] ?? null,
+      expiresAt:  Date.now() + TOKEN_TTL,
     };
     localStorage.setItem(TOKEN_KEY, JSON.stringify(newSession));
     setSession(newSession);
@@ -64,6 +72,6 @@ export default function App() {
   }
 
   return session
-    ? <Dashboard user={session.email} expiresAt={session.expiresAt} onLogout={handleLogout} />
+    ? <Dashboard user={session.email} allowedProjects={session.projects} expiresAt={session.expiresAt} onLogout={handleLogout} />
     : <LoginScreen onLogin={handleLogin} />;
 }

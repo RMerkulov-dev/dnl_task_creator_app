@@ -77,18 +77,37 @@ export async function getIterations(proxyKey, project) {
  * Returns user stories: [{ id, title, url }]
  * `url` is the Azure DevOps REST API URL needed for the parent relation.
  */
-export async function getStories(proxyKey, project) {
-  // Step 1: WIQL to get IDs
+export async function getStories(proxyKey, project, iterationPath = null) {
   const wiqlUrl = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.0`;
-  const wiqlRes = await fetch(wiqlUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query: `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'User Story' AND [System.TeamProject] = @project AND [System.State] <> 'Closed' ORDER BY [System.Title]`,
-    }),
-  });
-  const wiql = await parse(wiqlRes, 'getStories-wiql');
-  const ids  = (wiql.workItems || []).slice(0, 200).map(w => w.id);
+
+  let ids;
+  if (iterationPath) {
+    // Find User Stories that have child Tasks in the selected iteration
+    const esc = iterationPath.replace(/'/g, "''");
+    const wiqlRes = await fetch(wiqlUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `SELECT [System.Id] FROM WorkItemLinks WHERE ([Source].[System.WorkItemType] = 'User Story' AND [Source].[System.TeamProject] = @project AND [Source].[System.State] <> 'Closed') AND ([Target].[System.WorkItemType] = 'Task' AND [Target].[System.IterationPath] = '${esc}') AND [System.Links.LinkType] = 'System.LinkTypes.Hierarchy-Forward' MODE (MustContain)`,
+      }),
+    });
+    const wiql = await parse(wiqlRes, 'getStories-wiql');
+    ids = [...new Set(
+      (wiql.workItemRelations || []).filter(r => r.source != null).map(r => r.source.id)
+    )].slice(0, 200);
+  } else {
+    // Step 1: WIQL to get IDs
+    const wiqlRes = await fetch(wiqlUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'User Story' AND [System.TeamProject] = @project AND [System.State] <> 'Closed' ORDER BY [System.Title]`,
+      }),
+    });
+    const wiql = await parse(wiqlRes, 'getStories-wiql');
+    ids = [...new Set((wiql.workItems || []).map(w => w.id))].slice(0, 200);
+  }
+
   if (!ids.length) return [];
 
   // Step 2: batch-fetch titles (org-level endpoint, no project in path)

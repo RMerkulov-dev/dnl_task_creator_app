@@ -49,7 +49,26 @@ export const PROJECTS = {
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMG_CUSTOM_FIELD  || 'customfield_10034',
     },
     // Shows Sprint (Iteration) + Parent Story selectors; iterations filtered to active + placement
-    features: { iteration: true, story: true, board: false, iterationFilter: true },
+    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+  },
+
+  // ── NSMG Marker ────────────────────────────────────────────────────────────
+  NSMG_MARKER: {
+    id: 'NSMG_MARKER',
+    label: 'NSMG Marker',
+    azure: {
+      proxyKey:     'nsmg_marker',
+      project:      import.meta.env.VITE_AZURE_NSMG_MARKER_PROJECT       || 'NSMGM',
+      workItemType: 'Task',
+      jiraIdField:  import.meta.env.VITE_NSMG_MARKER_AZURE_JIRA_FIELD    || 'Custom.JiraID',
+    },
+    jira: {
+      cloudId:              import.meta.env.VITE_JIRA_CLOUD_ID                    || 'ede50bd6-614f-4723-b64b-76ef4be362d5',
+      projectKey:           import.meta.env.VITE_JIRA_NSMG_MARKER_PROJECT_KEY     || 'NSMGM',
+      issueTypeId:          import.meta.env.VITE_JIRA_NSMG_MARKER_ISSUE_TYPE_ID   || '10035',
+      clientRequestIdField: import.meta.env.VITE_JIRA_NSMG_MARKER_CUSTOM_FIELD    || 'customfield_10034',
+    },
+    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
   },
 
   // ── HT — Hydrotec ──────────────────────────────────────────────────────────
