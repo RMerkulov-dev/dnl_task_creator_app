@@ -396,8 +396,44 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
           <form onSubmit={handleSubmit}>
             <div className="task-layout">
 
-              {/* ── Left column: filters ── */}
+              {/* ── Left column: title + description + submit ── */}
               <div className="task-col-left">
+
+                {/* Title */}
+                <div className="field">
+                  <label className="field-label">Task Title</label>
+                  <input type="text" className="input"
+                    placeholder={`e.g. ${proj.id}. Feature name`}
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                    required />
+                </div>
+
+                {/* Description */}
+                <div className="field" style={{ marginBottom: 28, flex: 1 }}>
+                  <label className="field-label">Description</label>
+                  <RichTextEditor
+                    value={description}
+                    onChange={setDescription}
+                    placeholder="Describe the task in detail…"
+                  />
+                </div>
+
+                <button type="submit" className="btn btn-primary"
+                  disabled={!canSubmit || syncing}>
+                  {syncing ? (
+                    <>
+                      <span className="spinner"
+                        style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.25)' }} />
+                      Syncing…
+                    </>
+                  ) : mode === 'create' ? 'Create Task ↗' : 'Save Changes ↗'}
+                </button>
+
+              </div>
+
+              {/* ── Right column: filters ── */}
+              <div className="task-col-right">
 
                 {/* Event */}
                 <div className="field" style={{ marginBottom: 24 }}>
@@ -546,41 +582,6 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                     </div>
                   </div>
                 )}
-
-                {/* Title */}
-                <div className="field">
-                  <label className="field-label">Task Title</label>
-                  <input type="text" className="input"
-                    placeholder={`e.g. ${proj.id}. Feature name`}
-                    value={title}
-                    onChange={e => setTitle(e.target.value)}
-                    required />
-                </div>
-
-              </div>
-
-              {/* ── Right column: description + submit ── */}
-              <div className="task-col-right">
-
-                <div className="field" style={{ marginBottom: 28, flex: 1 }}>
-                  <label className="field-label">Description</label>
-                  <RichTextEditor
-                    value={description}
-                    onChange={setDescription}
-                    placeholder="Describe the task in detail…"
-                  />
-                </div>
-
-                <button type="submit" className="btn btn-primary"
-                  disabled={!canSubmit || syncing}>
-                  {syncing ? (
-                    <>
-                      <span className="spinner"
-                        style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.25)' }} />
-                      Syncing…
-                    </>
-                  ) : mode === 'create' ? 'Create Task ↗' : 'Save Changes ↗'}
-                </button>
 
               </div>
 

@@ -300,7 +300,7 @@ body {
 /* ─── Two-column task layout ─────────────────────────────────────────────────── */
 .task-layout {
   display: grid;
-  grid-template-columns: 1fr 1.7fr;
+  grid-template-columns: 1fr 0.52fr;
   gap: 40px;
   align-items: start;
 }
