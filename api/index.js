@@ -96,6 +96,47 @@ app.use('/api/jira', async (req, res) => {
   await proxyTo(req, res, `https://api.atlassian.com${suffix}`, jiraAuth);
 });
 
+// Domain vocabulary prompt — helps Whisper recognise PM/DevOps terminology
+const BASE_PROMPT =
+  'Azure DevOps, Jira, Dynamica Labs, Hydrotec, NSMG, ABS, ' +
+  'спринт, беклог, эпик, юзер стори, таска, баг, фикс, ' +
+  'дедлайн, релиз, деплой, тестирование, интеграция, ' +
+  'требования, функциональность, приоритет, оценка, ревью.';
+
+// Voice transcription (OpenAI Whisper)
+app.post('/api/transcribe', async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(503).json({ error: 'OPENAI_API_KEY is not configured on the server.' });
+  }
+
+  const language    = req.query.language || '';
+  const extraPrompt = req.query.prompt   || '';
+  const prompt      = extraPrompt ? `${BASE_PROMPT} ${extraPrompt}` : BASE_PROMPT;
+  const contentType = req.headers['content-type'] || 'audio/webm';
+  const body        = await readBody(req);
+
+  const formData = new FormData();
+  formData.append('file',        new Blob([body], { type: contentType }), 'audio.webm');
+  formData.append('model',       'whisper-1');
+  formData.append('prompt',      prompt);
+  formData.append('temperature', '0');
+  if (language) formData.append('language', language);
+
+  try {
+    const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData,
+    });
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
+  } catch (err) {
+    console.error('[Transcribe error]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({

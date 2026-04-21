@@ -45,7 +45,7 @@ export default function LoginScreen({ onLogin }) {
           <img src={LOGO} alt="Dynamica Labs" />
         </div>
 
-        <h1 className="login-title">DNL Tasks Creator</h1>
+        <h1 className="login-title">DNL PM Platform</h1>
         <p className="login-sub">Sign in to continue</p>
 
         <form onSubmit={handleSubmit}>

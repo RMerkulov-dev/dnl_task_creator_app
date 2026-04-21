@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import LoginScreen from './components/LoginScreen.jsx';
-import Dashboard from './components/Dashboard.jsx';
+import PlatformShell from './platform/PlatformShell.jsx';
 
 // ─── Auth config ─────────────────────────────────────────────────────────────
 const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || 'puxcof-tegnib-diZgy5';
@@ -72,6 +72,6 @@ export default function App() {
   }
 
   return session
-    ? <Dashboard user={session.email} allowedProjects={session.projects} expiresAt={session.expiresAt} onLogout={handleLogout} />
+    ? <PlatformShell session={session} onLogout={handleLogout} />
     : <LoginScreen onLogin={handleLogin} />;
 }
