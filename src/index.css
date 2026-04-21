@@ -291,10 +291,29 @@ body {
   border-radius: var(--r-xl);
   padding: 40px;
   width: 100%;
-  max-width: 580px;
+  max-width: 1200px;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   animation: rise 0.4s cubic-bezier(0.16,1,0.3,1);
+}
+
+/* ─── Two-column task layout ─────────────────────────────────────────────────── */
+.task-layout {
+  display: grid;
+  grid-template-columns: 1fr 1.7fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.task-col-left {
+  display: flex;
+  flex-direction: column;
+}
+
+.task-col-right {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .card-heading {
@@ -662,8 +681,8 @@ body {
 /* ── Editor content area ── */
 .rte-content .tiptap {
   padding: 12px 14px;
-  min-height: 140px;
-  max-height: 400px;
+  min-height: 420px;
+  max-height: 720px;
   overflow-y: auto;
   outline: none;
   font-family: var(--font);
@@ -894,6 +913,11 @@ html, body, #root {
   .task-card {
     padding: 24px 16px;
     border-radius: var(--r-lg);
+  }
+
+  .task-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
   }
 
   .card-heading {

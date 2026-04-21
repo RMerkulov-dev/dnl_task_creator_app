@@ -394,186 +394,197 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
           </div>
 
           <form onSubmit={handleSubmit}>
+            <div className="task-layout">
 
-            {/* Event */}
-            <div className="field" style={{ marginBottom: 24 }}>
-              <label className="field-label">Event</label>
-              <div className="segment">
-                <button type="button" className={`seg-btn ${mode === 'create' ? 'active' : ''}`}
-                  onClick={() => handleModeChange('create')}>Create</button>
-                <button type="button" className={`seg-btn ${mode === 'edit' ? 'active' : ''}`}
-                  onClick={() => handleModeChange('edit')}>Edit</button>
-              </div>
-            </div>
+              {/* ── Left column: filters ── */}
+              <div className="task-col-left">
 
-            {/* Project */}
-            <div className="field">
-              <label className="field-label">Select Project</label>
-              <select className="select" value={proj.id}
-                onChange={e => handleProjectChange(e.target.value)}>
-                {visibleProjects.map(p => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-            </div>
+                {/* Event */}
+                <div className="field" style={{ marginBottom: 24 }}>
+                  <label className="field-label">Event</label>
+                  <div className="segment">
+                    <button type="button" className={`seg-btn ${mode === 'create' ? 'active' : ''}`}
+                      onClick={() => handleModeChange('create')}>Create</button>
+                    <button type="button" className={`seg-btn ${mode === 'edit' ? 'active' : ''}`}
+                      onClick={() => handleModeChange('edit')}>Edit</button>
+                  </div>
+                </div>
 
-            {/* Epic/Task ID — Edit mode only */}
-            {mode === 'edit' && (
-              <div className="field">
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <label className="field-label" style={{ margin: 0 }}>
-                    {idMode === 'jira' ? 'Jira Issue Key' : `Azure DevOps ${proj.azure.workItemType} ID`}
-                  </label>
-                  {proj.jira && (
-                    <div className="id-mode-toggle">
-                      <button
-                        type="button"
-                        className={`id-mode-btn${idMode === 'azure' ? ' active' : ''}`}
-                        onClick={() => { setIdMode('azure'); setEpicId(''); setFetchErr(''); }}
-                      >Azure</button>
-                      <button
-                        type="button"
-                        className={`id-mode-btn${idMode === 'jira' ? ' active' : ''}`}
-                        onClick={() => { setIdMode('jira'); setEpicId(''); setFetchErr(''); }}
-                      >Jira</button>
+                {/* Project */}
+                <div className="field">
+                  <label className="field-label">Select Project</label>
+                  <select className="select" value={proj.id}
+                    onChange={e => handleProjectChange(e.target.value)}>
+                    {visibleProjects.map(p => (
+                      <option key={p.id} value={p.id}>{p.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Epic/Task ID — Edit mode only */}
+                {mode === 'edit' && (
+                  <div className="field">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <label className="field-label" style={{ margin: 0 }}>
+                        {idMode === 'jira' ? 'Jira Issue Key' : `Azure DevOps ${proj.azure.workItemType} ID`}
+                      </label>
+                      {proj.jira && (
+                        <div className="id-mode-toggle">
+                          <button
+                            type="button"
+                            className={`id-mode-btn${idMode === 'azure' ? ' active' : ''}`}
+                            onClick={() => { setIdMode('azure'); setEpicId(''); setFetchErr(''); }}
+                          >Azure</button>
+                          <button
+                            type="button"
+                            className={`id-mode-btn${idMode === 'jira' ? ' active' : ''}`}
+                            onClick={() => { setIdMode('jira'); setEpicId(''); setFetchErr(''); }}
+                          >Jira</button>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    type="text"
-                    className="input"
-                    placeholder={idMode === 'jira' ? 'e.g. NSMG-8244' : 'e.g. 1154'}
-                    value={epicId}
-                    onChange={e => { setEpicId(e.target.value); setFetchErr(''); }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' && epicId.trim() && !fetchingEpic) {
-                        e.preventDefault();
-                        handleEpicLookup();
-                      }
-                    }}
-                    style={{ flex: 1 }}
-                  />
-                  <button type="button" className="btn btn-ghost"
-                    onClick={handleEpicLookup} disabled={!epicId.trim() || fetchingEpic}
-                    style={{ flexShrink: 0 }}>
-                    {fetchingEpic ? <span className="spinner" /> : 'Load'}
-                  </button>
-                </div>
-                {fetchErr && <p className="error-msg">⚠ {fetchErr}</p>}
-                {createFromJira && (
-                  <p className="create-from-jira-notice">
-                    No Azure item found — a new one will be created and linked to {jiraKey}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* ── Project extras: loader overlay while fetching ── */}
-            {showExtrasSection && (
-              <div className="extras-section">
-                {loadingExtras && (
-                  <div className="extras-loader">
-                    <span className="spinner spinner-lg" />
-                    <span className="extras-loader-text">Loading project data…</span>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder={idMode === 'jira' ? 'e.g. NSMG-8244' : 'e.g. 1154'}
+                        value={epicId}
+                        onChange={e => { setEpicId(e.target.value); setFetchErr(''); }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && epicId.trim() && !fetchingEpic) {
+                            e.preventDefault();
+                            handleEpicLookup();
+                          }
+                        }}
+                        style={{ flex: 1 }}
+                      />
+                      <button type="button" className="btn btn-ghost"
+                        onClick={handleEpicLookup} disabled={!epicId.trim() || fetchingEpic}
+                        style={{ flexShrink: 0 }}>
+                        {fetchingEpic ? <span className="spinner" /> : 'Load'}
+                      </button>
+                    </div>
+                    {fetchErr && <p className="error-msg">⚠ {fetchErr}</p>}
+                    {createFromJira && (
+                      <p className="create-from-jira-notice">
+                        No Azure item found — a new one will be created and linked to {jiraKey}
+                      </p>
+                    )}
                   </div>
                 )}
 
-                <div style={loadingExtras ? { opacity: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' } : undefined}>
+                {/* ── Project extras: loader overlay while fetching ── */}
+                {showExtrasSection && (
+                  <div className="extras-section">
+                    {loadingExtras && (
+                      <div className="extras-loader">
+                        <span className="spinner spinner-lg" />
+                        <span className="extras-loader-text">Loading project data…</span>
+                      </div>
+                    )}
 
-                  {/* ── NSMG: Sprint (Iteration) ── */}
-                  {features.iteration && iterations.length > 0 && (
-                    <div className="field">
-                      <label className="field-label">Sprint (Iteration)</label>
-                      <select className="select" value={selectedIteration}
-                        onChange={e => setSelectedIteration(e.target.value)}>
-                        <option value="">— Select sprint —</option>
-                        {iterations.map(it => (
-                          <option key={it.id} value={it.path}>{it.name}</option>
-                        ))}
-                      </select>
+                    <div style={loadingExtras ? { opacity: 0, height: 0, overflow: 'hidden', pointerEvents: 'none' } : undefined}>
+
+                      {/* ── NSMG: Sprint (Iteration) ── */}
+                      {features.iteration && iterations.length > 0 && (
+                        <div className="field">
+                          <label className="field-label">Sprint (Iteration)</label>
+                          <select className="select" value={selectedIteration}
+                            onChange={e => setSelectedIteration(e.target.value)}>
+                            <option value="">— Select sprint —</option>
+                            {iterations.map(it => (
+                              <option key={it.id} value={it.path}>{it.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* ── NSMG: Parent Story ── */}
+                      {features.story && stories.length > 0 && (
+                        <div className="field">
+                          <label className="field-label">Parent Story</label>
+                          <select className="select"
+                            value={selectedStory?.id ?? ''}
+                            onChange={e => setSelectedStory(stories.find(s => String(s.id) === e.target.value) ?? null)}>
+                            <option value="">— Select story (optional) —</option>
+                            {stories.map(s => (
+                              <option key={s.id} value={s.id}>{s.title}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* ── ABS: Board (Area Path) ── */}
+                      {features.board && boards.length > 0 && (
+                        <div className="field">
+                          <label className="field-label">Board</label>
+                          <select className="select" value={selectedBoard}
+                            onChange={e => setSelectedBoard(e.target.value)}>
+                            <option value="">— Select board —</option>
+                            {boards.map(b => (
+                              <option key={b.id} value={b.path}>{b.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* ── ABS: Jira Project ── */}
+                      {features.jiraProject && (
+                        <div className="field">
+                          <label className="field-label">Jira Project</label>
+                          <select className="select" value={selectedJiraProj}
+                            onChange={e => setSelectedJiraProj(e.target.value)}>
+                            <option value="">— Select Jira project —</option>
+                            {(proj.jiraProjectOptions || []).map(key => (
+                              <option key={key} value={key}>{key}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {extrasErr && <p className="error-msg" style={{ marginBottom: 8 }}>⚠ {extrasErr}</p>}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* ── NSMG: Parent Story ── */}
-                  {features.story && stories.length > 0 && (
-                    <div className="field">
-                      <label className="field-label">Parent Story</label>
-                      <select className="select"
-                        value={selectedStory?.id ?? ''}
-                        onChange={e => setSelectedStory(stories.find(s => String(s.id) === e.target.value) ?? null)}>
-                        <option value="">— Select story (optional) —</option>
-                        {stories.map(s => (
-                          <option key={s.id} value={s.id}>{s.title}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* ── ABS: Board (Area Path) ── */}
-                  {features.board && boards.length > 0 && (
-                    <div className="field">
-                      <label className="field-label">Board</label>
-                      <select className="select" value={selectedBoard}
-                        onChange={e => setSelectedBoard(e.target.value)}>
-                        <option value="">— Select board —</option>
-                        {boards.map(b => (
-                          <option key={b.id} value={b.path}>{b.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* ── ABS: Jira Project ── */}
-                  {features.jiraProject && (
-                    <div className="field">
-                      <label className="field-label">Jira Project</label>
-                      <select className="select" value={selectedJiraProj}
-                        onChange={e => setSelectedJiraProj(e.target.value)}>
-                        <option value="">— Select Jira project —</option>
-                        {(proj.jiraProjectOptions || []).map(key => (
-                          <option key={key} value={key}>{key}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {extrasErr && <p className="error-msg" style={{ marginBottom: 8 }}>⚠ {extrasErr}</p>}
+                {/* Title */}
+                <div className="field">
+                  <label className="field-label">Task Title</label>
+                  <input type="text" className="input"
+                    placeholder={`e.g. ${proj.id}. Feature name`}
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                    required />
                 </div>
+
               </div>
-            )}
 
-            {/* Title */}
-            <div className="field">
-              <label className="field-label">Task Title</label>
-              <input type="text" className="input"
-                placeholder={`e.g. ${proj.id}. Feature name`}
-                value={title}
-                onChange={e => setTitle(e.target.value)}
-                required />
+              {/* ── Right column: description + submit ── */}
+              <div className="task-col-right">
+
+                <div className="field" style={{ marginBottom: 28, flex: 1 }}>
+                  <label className="field-label">Description</label>
+                  <RichTextEditor
+                    value={description}
+                    onChange={setDescription}
+                    placeholder="Describe the task in detail…"
+                  />
+                </div>
+
+                <button type="submit" className="btn btn-primary"
+                  disabled={!canSubmit || syncing}>
+                  {syncing ? (
+                    <>
+                      <span className="spinner"
+                        style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.25)' }} />
+                      Syncing…
+                    </>
+                  ) : mode === 'create' ? 'Create Task ↗' : 'Save Changes ↗'}
+                </button>
+
+              </div>
+
             </div>
-
-            {/* Description */}
-            <div className="field" style={{ marginBottom: 28 }}>
-              <label className="field-label">Description</label>
-              <RichTextEditor
-                value={description}
-                onChange={setDescription}
-                placeholder="Describe the task in detail…"
-              />
-            </div>
-
-            <button type="submit" className="btn btn-primary"
-              disabled={!canSubmit || syncing}>
-              {syncing ? (
-                <>
-                  <span className="spinner"
-                    style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.25)' }} />
-                  Syncing…
-                </>
-              ) : mode === 'create' ? 'Create Task ↗' : 'Save Changes ↗'}
-            </button>
-
           </form>
         </div>
       </main>
