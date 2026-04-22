@@ -8,9 +8,9 @@
       "port": 3000
     },
     {
-      "name": "Proxy Server only",
+      "name": "API Server",
       "runtimeExecutable": "/usr/local/bin/node",
-      "runtimeArgs": ["server.js"],
+      "runtimeArgs": ["api/index.js"],
       "port": 3001
     }
   ]

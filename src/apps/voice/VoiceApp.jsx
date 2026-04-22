@@ -160,6 +160,7 @@ export default function VoiceApp() {
   const chunksRef   = useRef([]);
   const audioCtxRef = useRef(null);
   const analyserRef = useRef(null);
+  const recStartRef = useRef(null);
 
   function startVisualizer(stream) {
     const audioCtx = new AudioContext();
@@ -206,7 +207,8 @@ export default function VoiceApp() {
         await sendToWhisper(blob, type);
       };
 
-      mrRef.current = mr;
+      mrRef.current   = mr;
+      recStartRef.current = Date.now();
       mr.start(); // full recording, no chunking
       setRecording(true);
     } catch {
