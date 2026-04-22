@@ -54,7 +54,7 @@ export default function App() {
   // Returns null on success, or 'email' / 'password' error key
   function handleLogin(email, password) {
     if (!ALLOWED_EMAILS.includes(email.trim().toLowerCase())) return 'email';
-    if (password !== APP_PASSWORD) return 'password';
+    if (password.trim() !== APP_PASSWORD) return 'password';
     const normalised = email.trim().toLowerCase();
     const newSession = {
       email:      normalised,
