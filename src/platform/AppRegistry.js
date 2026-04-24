@@ -22,11 +22,19 @@ export const APP_REGISTRY = [
     gradient: 'linear-gradient(135deg, #2684FF 0%, #0052CC 100%)',
     glow: 'rgba(38, 132, 255, 0.5)',
   },
+  {
+    id: 'jira-ba-agent',
+    name: 'Jira BA Agent',
+    shortName: 'BA Agent',
+    gradient: 'linear-gradient(135deg, #7c3aed 0%, #5b63fe 100%)',
+    glow: 'rgba(124, 58, 237, 0.5)',
+  },
 ];
 
 // Lazy-load app components separately so AppRegistry stays JSON-serialisable
 export const APP_COMPONENTS = {
-  'task-creator': lazy(() => import('../components/Dashboard.jsx')),
-  'voice':        lazy(() => import('../apps/voice/VoiceApp.jsx')),
-  'task-agent':   lazy(() => import('../apps/task_agent/TaskAgentApp.jsx')),
+  'task-creator':  lazy(() => import('../components/Dashboard.jsx')),
+  'voice':         lazy(() => import('../apps/voice/VoiceApp.jsx')),
+  'task-agent':    lazy(() => import('../apps/task_agent/TaskAgentApp.jsx')),
+  'jira-ba-agent': lazy(() => import('../apps/jira_ba_agent/JiraBaAgentApp.jsx')),
 };

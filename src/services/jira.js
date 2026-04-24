@@ -213,9 +213,12 @@ export async function updateIssue(cloudId, issueKey, summary, description) {
 
 export async function findIssueByEpicId(cloudId, projectKey, clientRequestIdField, epicId) {
   const fieldId = clientRequestIdField.replace('customfield_', '');
-  const jql = encodeURIComponent(`project = "${projectKey}" AND cf[${fieldId}] = ${epicId}`);
-  const url = `${jiraBase(cloudId)}/search?jql=${jql}&maxResults=1`;
-  const res = await fetch(url);
+  const jql = `project = "${projectKey}" AND cf[${fieldId}] = ${epicId}`;
+  const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jql, maxResults: 1 }),
+  });
   const data = await parseJira(res, 'findIssue');
   return data.issues?.[0] ?? null;
 }
@@ -411,14 +414,17 @@ export async function getSprintsForBoard(cloudId, boardId) {
 }
 
 export async function getChildIssues(cloudId, issueKey) {
-  const fields = 'summary,issuetype,priority,assignee,parent,labels,attachment';
+  const fields = ['summary', 'issuetype', 'priority', 'assignee', 'parent', 'labels', 'attachment'];
   const seen = new Set();
   const results = [];
 
   async function runSearch(jql) {
     try {
-      const url = `${jiraBase(cloudId)}/search?jql=${encodeURIComponent(jql)}&maxResults=100&fields=${fields}`;
-      const res  = await fetch(url);
+      const res  = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jql, maxResults: 100, fields }),
+      });
       const data = await parseJira(res, 'getChildIssues');
       for (const issue of data.issues ?? []) {
         if (!seen.has(issue.key)) { seen.add(issue.key); results.push(issue); }

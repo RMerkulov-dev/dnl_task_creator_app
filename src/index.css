@@ -1721,3 +1721,295 @@ html, body, #root {
   color: var(--text-3);
   flex-shrink: 0;
 }
+
+/* ─── Jira BA Agent ──────────────────────────────────────────────────────────── */
+
+.ba-main {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+
+.ba-chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Empty state */
+.ba-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 60px 24px;
+  gap: 10px;
+}
+
+.ba-empty-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.ba-empty-sub {
+  font-size: 14px;
+  color: var(--text-3);
+  line-height: 1.7;
+}
+
+.ba-empty-sub em {
+  color: var(--text-2);
+  font-style: normal;
+}
+
+/* Messages */
+.ba-msg {
+  max-width: 88%;
+  padding: 12px 16px;
+  border-radius: 16px;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.ba-msg-user {
+  align-self: flex-end;
+  background: var(--gradient);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.ba-msg-user .ba-msg-text {
+  color: #fff;
+  margin: 0;
+}
+
+.ba-msg-assistant {
+  align-self: flex-start;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  border-bottom-left-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ba-msg-error {
+  align-self: flex-start;
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #dc2626;
+  border-radius: 12px;
+  font-size: 13px;
+  padding: 10px 14px;
+}
+
+/* Tool pills */
+.ba-tool-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ba-tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.ba-tool-pill.error {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.3);
+  color: #dc2626;
+}
+
+/* Message text rendering */
+.ba-msg-text {
+  margin: 0;
+  color: inherit;
+}
+
+.ba-msg-text p {
+  margin: 0 0 4px;
+}
+
+.ba-msg-text p:last-child {
+  margin-bottom: 0;
+}
+
+.ba-list-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ba-bullet {
+  color: var(--accent-1);
+  flex-shrink: 0;
+  min-width: 16px;
+  font-weight: 600;
+}
+
+.ba-inline-code {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-1);
+}
+
+.ba-issue-link {
+  color: var(--accent-1);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.ba-issue-link:hover {
+  text-decoration: underline;
+}
+
+/* Thinking dots */
+.ba-thinking {
+  padding: 14px 20px;
+  gap: 6px;
+  flex-direction: row;
+  align-items: center;
+}
+
+.ba-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  animation: ba-bounce 1.2s ease-in-out infinite;
+}
+
+.ba-dot:nth-child(2) { animation-delay: 0.2s; }
+.ba-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes ba-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%            { transform: translateY(-5px); opacity: 1; }
+}
+
+/* Input bar */
+.ba-input-bar {
+  padding: 12px 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ba-input-error {
+  font-size: 12px;
+  color: #dc2626;
+  margin: 0;
+  padding: 0 4px;
+}
+
+.ba-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 8px 10px;
+  transition: border-color 0.15s;
+}
+
+.ba-input-row:focus-within {
+  border-color: var(--accent-1);
+}
+
+.ba-textarea {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 14px;
+  color: var(--text-1);
+  line-height: 1.5;
+  padding: 4px 0;
+  font-family: inherit;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.ba-textarea::placeholder { color: var(--text-3); }
+
+.ba-mic-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--bg-input);
+  color: var(--text-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ba-mic-btn:hover:not(:disabled) {
+  background: var(--border);
+  color: var(--text-1);
+}
+
+.ba-mic-btn.ba-mic-btn-stop {
+  background: #dc2626;
+  color: #fff;
+}
+
+.ba-mic-btn.ba-mic-btn-busy {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ba-mic-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ba-send-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: var(--gradient);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s;
+  box-shadow: 0 2px 10px rgba(91,99,254,0.35);
+}
+
+.ba-send-btn:hover:not(:disabled) { opacity: 0.88; }
+.ba-send-btn:disabled { opacity: 0.3; cursor: not-allowed; }

@@ -31,10 +31,20 @@ function TaskAgentIcon() {
   );
 }
 
+function JiraBaIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M4 4C4 2.9 4.9 2 6 2H18C19.1 2 20 2.9 20 4V14C20 15.1 19.1 16 18 16H7.8L4 20V4Z" fill="white" fillOpacity="0.85"/>
+      <path d="M9 8.5L10.5 6L12 8.5L15 7L13 10L16 11.5L12.5 11L13 14L10.5 11.5L7.5 13L9 8.5Z" fill="#7c3aed"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
-  'task-creator': TaskCreatorIcon,
-  'voice':        VoiceIcon,
-  'task-agent':   TaskAgentIcon,
+  'task-creator':  TaskCreatorIcon,
+  'voice':         VoiceIcon,
+  'task-agent':    TaskAgentIcon,
+  'jira-ba-agent': JiraBaIcon,
 };
 
 function PlatformLogo() {
