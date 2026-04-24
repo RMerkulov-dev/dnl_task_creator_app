@@ -88,11 +88,35 @@ app.use('/api/azure-devops/:key', async (req, res) => {
   await proxyTo(req, res, `${org.target}${suffix}`, auth);
 });
 
+// Binary Jira attachment download proxy (defined BEFORE the generic /api/jira catch-all)
+app.get('/api/jira/attachment-binary/:cloudId/:attachmentId', async (req, res) => {
+  const { cloudId, attachmentId } = req.params;
+  const url = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/attachment/content/${attachmentId}`;
+  try {
+    const upstream = await fetch(url, {
+      headers: { Authorization: jiraAuth, Accept: '*/*' },
+      redirect: 'follow',
+    });
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({ error: `Jira attachment fetch failed: ${upstream.status}` });
+    }
+    const buffer = await upstream.arrayBuffer();
+    res
+      .status(200)
+      .set('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream')
+      .set('Content-Disposition', upstream.headers.get('content-disposition') || 'attachment')
+      .send(Buffer.from(buffer));
+  } catch (err) {
+    console.error('[Attachment binary proxy error]:', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
 // Jira proxy
 app.use('/api/jira', async (req, res) => {
   const prefix = `/api/jira`;
   const suffix = req.originalUrl.substring(req.originalUrl.indexOf(prefix) + prefix.length);
-  
+
   await proxyTo(req, res, `https://api.atlassian.com${suffix}`, jiraAuth);
 });
 

@@ -28,7 +28,10 @@
       "Bash(rm \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app/api/jira/[...path].js\")",
       "Bash(PATH=/usr/bin:/usr/local/bin:/opt/homebrew/bin git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\" status)",
       "Bash(bash -c 'cd \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\" && git status')",
-      "Bash(/usr/bin/git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\" status)"
+      "Bash(/usr/bin/git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\" status)",
+      "Bash(npx vite *)",
+      "Bash(npx tsc *)",
+      "Bash(npm run *)"
     ]
   }
 }

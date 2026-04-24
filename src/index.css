@@ -196,6 +196,18 @@ body {
   font-weight: 500;
 }
 
+.btn-danger {
+  width: 100%;
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(220,38,38,0.3);
+}
+
+.btn-danger:hover:not(:disabled) {
+  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(220,38,38,0.45);
+}
+
 .btn-ghost:hover { background: var(--bg-card-hover); color: var(--text-1); }
 
 /* ─── Segment control ────────────────────────────────────────────────────────── */
@@ -1483,4 +1495,229 @@ html, body, #root {
     left: 0;
     right: 0;
   }
+}
+
+/* ─── Task Agent ─────────────────────────────────────────────────────────────── */
+.agent-preview {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 16px 18px;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-preview-summary {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+  line-height: 1.4;
+}
+
+.agent-preview-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.agent-preview-dot {
+  color: var(--text-3);
+}
+
+.agent-preview-row {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.agent-preview-key {
+  min-width: 72px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.agent-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+  user-select: none;
+}
+
+.agent-checkbox input[type="checkbox"] {
+  cursor: pointer;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent-1);
+  flex-shrink: 0;
+}
+
+/* ─── User Picker ────────────────────────────────────────────────────────────── */
+.user-picker-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+}
+
+.user-picker-name {
+  font-size: 14px;
+  color: var(--text-1);
+}
+
+.user-picker-name-btn {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-1);
+  padding: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s;
+}
+
+.user-picker-name-btn:hover {
+  color: var(--accent);
+}
+
+.user-picker-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.user-picker-btn {
+  padding: 3px 10px !important;
+  font-size: 12px !important;
+  height: auto !important;
+}
+
+.user-picker-search {
+  position: relative;
+}
+
+.user-picker-results {
+  list-style: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  margin-top: 4px;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.user-picker-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 9px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-1);
+  text-align: left;
+  gap: 2px;
+  transition: background 0.12s;
+}
+
+.user-picker-result:hover {
+  background: var(--bg-card-hover);
+}
+
+.user-picker-email {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ─── Project Picker ──────────────────────────────────────────────────────── */
+
+.project-picker {
+  position: relative;
+}
+
+.project-picker-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-1);
+  text-align: left;
+  gap: 8px;
+  transition: border-color 0.15s;
+}
+
+.project-picker-current:hover,
+.project-picker-current:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.project-picker-chevron {
+  color: var(--text-3);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.project-picker-results {
+  list-style: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  margin-top: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.project-picker-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 9px 14px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-1);
+  text-align: left;
+  gap: 8px;
+  transition: background 0.12s;
+}
+
+.project-picker-result:hover {
+  background: var(--bg-card-hover);
+}
+
+.project-picker-key {
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
 }

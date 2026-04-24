@@ -21,9 +21,20 @@ function VoiceIcon() {
   );
 }
 
+function TaskAgentIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24.817 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path fill="white" d="M11.571 11.513H0a5.218 5.218 0 0 0 5.218 5.218h2.098v2.191A5.218 5.218 0 0 0 12.532 24V12.481a.968.968 0 0 0-.961-.968z"/>
+      <path fill="white" fillOpacity="0.7" d="M17.713 5.441H6.142a5.218 5.218 0 0 0 5.218 5.218h2.099v2.19a5.218 5.218 0 0 0 5.215 5.215V6.41a.968.968 0 0 0-.961-.969z"/>
+      <path fill="white" fillOpacity="0.45" d="M23.855 0H12.284a5.218 5.218 0 0 0 5.218 5.218h2.098v2.19A5.218 5.218 0 0 0 24.817 12.6V.968A.968.968 0 0 0 23.855 0z"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'task-creator': TaskCreatorIcon,
   'voice':        VoiceIcon,
+  'task-agent':   TaskAgentIcon,
 };
 
 function PlatformLogo() {

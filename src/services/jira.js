@@ -313,3 +313,120 @@ export function adfToHtml(adf) {
   if (!adf) return '';
   return adfBlock(adf);
 }
+
+// ─── Task Agent API ───────────────────────────────────────────────────────────
+
+export async function getIssueFull(cloudId, issueKey) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}`;
+  const res = await fetch(url);
+  return parseJira(res, 'getIssueFull');
+}
+
+export async function getProjectIssueTypes(cloudId, projectKey) {
+  const url = `${jiraBase(cloudId)}/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getProjectIssueTypes');
+  const arr = data.issueTypes ?? data.values ?? [];
+  return Array.isArray(arr) ? arr : [];
+}
+
+export async function getCreateMetaFields(cloudId, projectKey, issueTypeId) {
+  const url = `${jiraBase(cloudId)}/issue/createmeta/${encodeURIComponent(projectKey)}/issuetypes/${issueTypeId}`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getCreateMetaFields');
+  // Jira returns either a map { fieldId: meta } or a paginated array { fields: [...] }
+  if (Array.isArray(data.fields)) {
+    return Object.fromEntries(data.fields.map(f => [f.fieldId ?? f.key, f]));
+  }
+  return data.fields ?? {};
+}
+
+export async function getJiraProjects(cloudId) {
+  const url = `${jiraBase(cloudId)}/project/search?maxResults=100&orderBy=name`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getJiraProjects');
+  return data.values ?? [];
+}
+
+export async function createRawIssue(cloudId, fields) {
+  const url = `${jiraBase(cloudId)}/issue`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  return parseJira(res, 'createRawIssue');
+}
+
+// outwardKey "clones" inwardKey (inwardKey "is cloned by" outwardKey)
+export async function addIssueLink(cloudId, outwardKey, inwardKey, linkTypeName = 'Clones') {
+  const url = `${jiraBase(cloudId)}/issueLink`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: { name: linkTypeName },
+      outwardIssue: { key: outwardKey },
+      inwardIssue:  { key: inwardKey },
+    }),
+  });
+  return parseJira(res, 'addIssueLink');
+}
+
+export async function deleteIssue(cloudId, issueKey) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}?deleteSubtasks=false`;
+  const res = await fetch(url, { method: 'DELETE' });
+  return parseJira(res, 'deleteIssue');
+}
+
+export async function downloadAttachmentBlob(cloudId, attachmentId) {
+  const res = await fetch(`/api/jira/attachment-binary/${cloudId}/${attachmentId}`);
+  if (!res.ok) throw new Error(`Attachment download failed: HTTP ${res.status}`);
+  return res.blob();
+}
+
+export async function searchJiraUsers(cloudId, query) {
+  const url = `${jiraBase(cloudId)}/user/search?query=${encodeURIComponent(query)}&maxResults=10`;
+  const res  = await fetch(url);
+  const data = await parseJira(res, 'searchJiraUsers');
+  return Array.isArray(data) ? data : [];
+}
+
+function jiraAgile(cloudId) {
+  return `${BASE}/ex/jira/${cloudId}/rest/agile/1.0`;
+}
+
+export async function getBoardsForProject(cloudId, projectKey) {
+  const url = `${jiraAgile(cloudId)}/board?projectKeyOrId=${encodeURIComponent(projectKey)}&maxResults=10`;
+  const res  = await fetch(url);
+  const data = await parseJira(res, 'getBoardsForProject');
+  return data.values ?? [];
+}
+
+export async function getSprintsForBoard(cloudId, boardId) {
+  const url = `${jiraAgile(cloudId)}/board/${boardId}/sprint?state=active,future&maxResults=50`;
+  const res  = await fetch(url);
+  const data = await parseJira(res, 'getSprintsForBoard');
+  return data.values ?? [];
+}
+
+export async function getChildIssues(cloudId, issueKey) {
+  const fields = 'summary,issuetype,priority,assignee,parent,labels,attachment';
+  const seen = new Set();
+  const results = [];
+
+  async function runSearch(jql) {
+    try {
+      const url = `${jiraBase(cloudId)}/search?jql=${encodeURIComponent(jql)}&maxResults=100&fields=${fields}`;
+      const res  = await fetch(url);
+      const data = await parseJira(res, 'getChildIssues');
+      for (const issue of data.issues ?? []) {
+        if (!seen.has(issue.key)) { seen.add(issue.key); results.push(issue); }
+      }
+    } catch { /* ignore failing JQL variant */ }
+  }
+
+  await runSearch(`parent = "${issueKey}" ORDER BY created ASC`);
+  await runSearch(`"Epic Link" = "${issueKey}" ORDER BY created ASC`);
+  return results;
+}
