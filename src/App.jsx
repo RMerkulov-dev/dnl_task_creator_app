@@ -36,9 +36,28 @@ function getStoredSession() {
   }
 }
 
+const THEME_KEY = 'dnl_theme';
+
+function getInitialTheme() {
+  try {
+    const stored = localStorage.getItem(THEME_KEY);
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch { /* noop */ }
+  if (typeof window !== 'undefined' && window.matchMedia) {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  }
+  return 'dark';
+}
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [session, setSession] = useState(() => getStoredSession());
+  const [theme, setTheme] = useState(getInitialTheme);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* noop */ }
+  }, [theme]);
 
   // Auto-expire: re-check every minute
   useEffect(() => {
@@ -72,6 +91,6 @@ export default function App() {
   }
 
   return session
-    ? <PlatformShell session={session} onLogout={handleLogout} />
-    : <LoginScreen onLogin={handleLogin} />;
+    ? <PlatformShell session={session} onLogout={handleLogout} theme={theme} setTheme={setTheme} />
+    : <LoginScreen onLogin={handleLogin} theme={theme} setTheme={setTheme} />;
 }

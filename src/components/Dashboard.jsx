@@ -36,7 +36,7 @@ function getInitialProject(visible) {
   return visible[0];
 }
 
-export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }) {
+export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, theme, setTheme }) {
   // null = all projects (System Admin); array = restricted list
   const visibleProjects = allowedProjects
     ? PROJECT_LIST.filter(p => allowedProjects.includes(p.id))
@@ -373,6 +373,31 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
         <div className="header-sep" />
         <span className="header-title">DNL Tasks Creator</span>
         <div className="header-spacer" />
+        {setTheme && (
+          <div className="theme-toggle" role="group" aria-label="Theme" style={{ marginRight: 12 }}>
+            <button
+              type="button"
+              className={`theme-toggle-opt ${theme === 'light' ? 'active' : ''}`}
+              onClick={() => setTheme('light')}
+              aria-label="Light theme"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.8"/>
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </button>
+            <button
+              type="button"
+              className={`theme-toggle-opt ${theme === 'dark' ? 'active' : ''}`}
+              onClick={() => setTheme('dark')}
+              aria-label="Dark theme"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        )}
         {user && <span className="header-user" title={`Session expires in ~${hoursLeft}h`}>{user}</span>}
         <button className="btn btn-ghost" onClick={onLogout} style={{ marginLeft: 12 }}>
           Sign out
@@ -383,14 +408,24 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
       <main className="main">
         <div className="task-card">
           <div className="card-heading">
-            <h2 className="card-title">
-              {mode === 'create' ? 'New Task' : 'Edit Task'}
-            </h2>
-            <p className="card-sub">
-              {mode === 'create'
-                ? `Creates Azure DevOps ${proj.azure.workItemType}${proj.jira ? ' + Jira Request' : ''}`
-                : `Updates the existing ${proj.azure.workItemType}${proj.jira ? ' and Jira Request' : ''}`}
-            </p>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+              <div>
+                <h2 className="card-title">
+                  {mode === 'create' ? 'New Task' : 'Edit Task'}
+                </h2>
+                <p className="card-sub">
+                  {mode === 'create'
+                    ? `Creates Azure DevOps ${proj.azure.workItemType}${proj.jira ? ' + Jira Request' : ''}`
+                    : `Updates the existing ${proj.azure.workItemType}${proj.jira ? ' and Jira Request' : ''}`}
+                </p>
+              </div>
+              <div className="segment segment-sm">
+                <button type="button" className={`seg-btn ${mode === 'create' ? 'active' : ''}`}
+                  onClick={() => handleModeChange('create')}>Create</button>
+                <button type="button" className={`seg-btn ${mode === 'edit' ? 'active' : ''}`}
+                  onClick={() => handleModeChange('edit')}>Edit</button>
+              </div>
+            </div>
           </div>
 
           <form onSubmit={handleSubmit}>
@@ -419,7 +454,14 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                   />
                 </div>
 
+              </div>
+
+              {/* ── Right column: filters ── */}
+              <div className="task-col-right">
+
+                {/* Submit */}
                 <button type="submit" className="btn btn-primary"
+                  style={{ marginBottom: 24 }}
                   disabled={!canSubmit || syncing}>
                   {syncing ? (
                     <>
@@ -429,22 +471,6 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                     </>
                   ) : mode === 'create' ? 'Create Task ↗' : 'Save Changes ↗'}
                 </button>
-
-              </div>
-
-              {/* ── Right column: filters ── */}
-              <div className="task-col-right">
-
-                {/* Event */}
-                <div className="field" style={{ marginBottom: 24 }}>
-                  <label className="field-label">Event</label>
-                  <div className="segment">
-                    <button type="button" className={`seg-btn ${mode === 'create' ? 'active' : ''}`}
-                      onClick={() => handleModeChange('create')}>Create</button>
-                    <button type="button" className={`seg-btn ${mode === 'edit' ? 'active' : ''}`}
-                      onClick={() => handleModeChange('edit')}>Edit</button>
-                  </div>
-                </div>
 
                 {/* Project */}
                 <div className="field">

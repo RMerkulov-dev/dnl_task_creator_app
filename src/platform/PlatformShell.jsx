@@ -10,7 +10,7 @@ function AppLoader() {
   );
 }
 
-export default function PlatformShell({ session, onLogout }) {
+export default function PlatformShell({ session, onLogout, theme, setTheme }) {
   const [activeId, setActiveId] = useState(APP_REGISTRY[0].id);
 
   const AppComponent = APP_COMPONENTS[activeId];
@@ -31,6 +31,8 @@ export default function PlatformShell({ session, onLogout }) {
               allowedProjects={session.projects}
               expiresAt={session.expiresAt}
               onLogout={onLogout}
+              theme={theme}
+              setTheme={setTheme}
             />
           )}
         </Suspense>
