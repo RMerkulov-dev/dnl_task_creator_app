@@ -75,7 +75,7 @@ function getInitialThemeMode(email) {
     // Migrate existing generic key for already-logged-in users
     if (email) {
       const legacy = localStorage.getItem('dnl_theme');
-      if (legacy === 'light' || legacy === 'dark') return legacy;
+      if (legacy === 'light' || legacy === 'dark' || legacy === 'scheduled') return legacy;
     }
   } catch { /* noop */ }
   if (typeof window !== 'undefined' && window.matchMedia) {
@@ -140,6 +140,7 @@ export default function App() {
       expiresAt:  Date.now() + TOKEN_TTL,
     };
     localStorage.setItem(TOKEN_KEY, JSON.stringify(newSession));
+    localStorage.setItem(THEME_KEY(normalised), themeMode);
     setSession(newSession);
     return null;
   }
