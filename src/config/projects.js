@@ -29,7 +29,7 @@ export const PROJECTS = {
     features: { iteration: false, story: false, board: true, jiraProject: true },
     jiraProjectOptions: ['ABS', 'ABSPO'],
     // Only show these two boards in the selector
-    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service'],
+    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service', 'ABS Bureau and Group Only'],
   },
 
   // ── NSMG ───────────────────────────────────────────────────────────────────

@@ -31,7 +31,8 @@
       "Bash(/usr/bin/git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/task_creator_app\" status)",
       "Bash(npx vite *)",
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "mcp__claude_ai_Linear__list_projects"
     ]
   }
 }
