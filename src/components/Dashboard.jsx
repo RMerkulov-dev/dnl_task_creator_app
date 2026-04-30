@@ -593,7 +593,13 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
                         <div className="field">
                           <label className="field-label">Board</label>
                           <select className="select" value={selectedBoard}
-                            onChange={e => setSelectedBoard(e.target.value)}>
+                            onChange={e => {
+                              const board = e.target.value;
+                              setSelectedBoard(board);
+                              if (selectedJiraProj === 'ABSPO' && !proj.abspoBoards?.includes(board)) {
+                                setSelectedJiraProj('');
+                              }
+                            }}>
                             <option value="">— Select board —</option>
                             {boards.map(b => (
                               <option key={b.id} value={b.path}>{b.name}</option>
@@ -609,9 +615,11 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
                           <select className="select" value={selectedJiraProj}
                             onChange={e => setSelectedJiraProj(e.target.value)}>
                             <option value="">— Select Jira project —</option>
-                            {(proj.jiraProjectOptions || []).map(key => (
-                              <option key={key} value={key}>{key}</option>
-                            ))}
+                            {(proj.jiraProjectOptions || [])
+                              .filter(key => key !== 'ABSPO' || proj.abspoBoards?.includes(selectedBoard))
+                              .map(key => (
+                                <option key={key} value={key}>{key}</option>
+                              ))}
                           </select>
                         </div>
                       )}
