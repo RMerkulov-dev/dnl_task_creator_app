@@ -32,9 +32,9 @@
   --r-xl:  10px;
 
   --glow:  none;
-  --font:         'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
-  --font-display: 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
-  --font-mono:    'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace;
+  --font:         'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-display: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-mono:    'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
 
   --tint-soft:      rgba(255,255,255,0.025);
   --tint-mid:       rgba(255,255,255,0.06);
@@ -2006,7 +2006,7 @@ html, body, #root {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 5px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-1);
 }

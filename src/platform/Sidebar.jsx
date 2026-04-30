@@ -3,10 +3,17 @@ import { APP_REGISTRY } from './AppRegistry.js';
 function TaskCreatorIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="8" y="2" width="8" height="3" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-      <path d="M8 3.5H5C3.895 3.5 3 4.395 3 5.5v15C3 21.605 3.895 22.5 5 22.5h14c1.105 0 2-.895 2-2v-15c0-1.105-.895-2-2-2h-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M8.5 13.5l2 2 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M8.5 18h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      {/* Left document */}
+      <rect x="1.5" y="4.5" width="8" height="15" rx="2" stroke="currentColor" strokeWidth="1.35"/>
+      <path d="M3.5 8.5h4M3.5 12h4M3.5 15.5h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      {/* Bidirectional sync arrows */}
+      <path d="M11 10h2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <path d="M12 8.5L13.5 10L12 11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M13.5 14H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <path d="M12.5 12.5L11 14L12.5 15.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+      {/* Right document */}
+      <rect x="14.5" y="4.5" width="8" height="15" rx="2" stroke="currentColor" strokeWidth="1.35"/>
+      <path d="M16.5 8.5h4M16.5 12h4M16.5 15.5h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
     </svg>
   );
 }
@@ -24,12 +31,16 @@ function VoiceIcon() {
 function TaskAgentIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M3 14h7.5a3.5 3.5 0 003.5-3.5V10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M3 14v3.5A3.5 3.5 0 006.5 21H8v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M9 7h7.5A3.5 3.5 0 0120 3.5V3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M9 7v3.5A3.5 3.5 0 0012.5 14H14v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <circle cx="20" cy="3" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
-      <circle cx="8" cy="22" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
+      {/* Robot head */}
+      <rect x="4" y="8" width="16" height="11" rx="3" stroke="currentColor" strokeWidth="1.5"/>
+      {/* Eyes */}
+      <circle cx="9.5" cy="13" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
+      <circle cx="14.5" cy="13" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
+      {/* Mouth */}
+      <path d="M9 17h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      {/* Antenna */}
+      <path d="M12 8V5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <circle cx="12" cy="4" r="1.2" stroke="currentColor" strokeWidth="1.3"/>
     </svg>
   );
 }
