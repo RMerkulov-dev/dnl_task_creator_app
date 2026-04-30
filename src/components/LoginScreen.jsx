@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
-export default function LoginScreen({ onLogin, theme, setTheme }) {
+export default function LoginScreen({ onLogin, theme, themeMode, setThemeMode }) {
   const [email,    setEmail]   = useState('');
   const [password, setPassword] = useState('');
   const [error,    setError]   = useState('');
@@ -40,13 +40,13 @@ export default function LoginScreen({ onLogin, theme, setTheme }) {
 
   return (
     <div className="login-wrap">
-      {setTheme && (
+      {setThemeMode && (
         <div className="theme-toggle" role="group" aria-label="Theme"
           style={{ position: 'fixed', top: 20, right: 20 }}>
           <button
             type="button"
-            className={`theme-toggle-opt ${theme === 'light' ? 'active' : ''}`}
-            onClick={() => setTheme('light')}
+            className={`theme-toggle-opt ${themeMode === 'light' ? 'active' : ''}`}
+            onClick={() => setThemeMode('light')}
             aria-label="Light theme"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -56,8 +56,20 @@ export default function LoginScreen({ onLogin, theme, setTheme }) {
           </button>
           <button
             type="button"
-            className={`theme-toggle-opt ${theme === 'dark' ? 'active' : ''}`}
-            onClick={() => setTheme('dark')}
+            className={`theme-toggle-opt ${themeMode === 'scheduled' ? 'active' : ''}`}
+            onClick={() => setThemeMode('scheduled')}
+            aria-label="Scheduled theme (Kyiv time)"
+            title="Auto: light after sunrise, dark after sunset (Kyiv)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8"/>
+              <path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={`theme-toggle-opt ${themeMode === 'dark' ? 'active' : ''}`}
+            onClick={() => setThemeMode('dark')}
             aria-label="Dark theme"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
