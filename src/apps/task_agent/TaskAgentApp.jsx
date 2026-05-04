@@ -221,6 +221,185 @@ function ProjectPicker({ projects, value, onChange, loading }) {
   );
 }
 
+// ─── Tree helpers (Move) ──────────────────────────────────────────────────────
+
+function countDescendants(nodes) {
+  if (!nodes?.length) return 0;
+  let total = nodes.length;
+  for (const n of nodes) total += countDescendants(n.children);
+  return total;
+}
+
+function treeAllSettled(node) {
+  if (node.status !== 'done' && node.status !== 'error') return false;
+  return (node.children ?? []).every(treeAllSettled);
+}
+
+function treeAllOk(node) {
+  if (node.status !== 'done') return false;
+  return (node.children ?? []).every(treeAllOk);
+}
+
+function allInTreeDone(node) {
+  return treeAllOk(node);
+}
+
+function issueTypeColor(name) {
+  const n = (name ?? '').toLowerCase();
+  if (n.includes('request')) return '#ff8c1a';
+  if (n.includes('epic'))    return '#a371f7';
+  if (n.includes('task'))    return '#3b9eff';
+  return 'var(--text-3)';
+}
+
+function getNodeIssueTypeName(node) {
+  return node.raw?.fields?.issuetype?.name
+      ?? node.source?.issueTypeName
+      ?? node.issueTypeName
+      ?? '';
+}
+
+function TypeIcon({ name }) {
+  const n = (name ?? '').toLowerCase();
+  const color = issueTypeColor(name);
+  const baseStyle = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 14, height: 14,
+    marginRight: 6,
+    flexShrink: 0,
+    verticalAlign: -2,
+    borderRadius: 3,
+  };
+
+  if (n.includes('epic')) {
+    return (
+      <span title={name || 'Epic'} style={baseStyle}>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <rect x="0" y="0" width="16" height="16" rx="3" fill={color} />
+          <path d="M9.2 2.5L4.5 9.2h2.9l-.6 4.3 4.7-6.7H8.6l.6-4.3z" fill="#fff" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (n.includes('task') || n.includes('story') || n.includes('sub-task') || n.includes('subtask')) {
+    return (
+      <span title={name || 'Task'} style={baseStyle}>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <rect x="1" y="1" width="14" height="14" rx="3" fill={color} />
+          <path d="M4.5 8.2l2.4 2.4 4.6-5" stroke="#fff" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    );
+  }
+
+  if (n.includes('request') || n.includes('bug')) {
+    return (
+      <span title={name || 'Request'} style={baseStyle}>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <rect x="1" y="1" width="14" height="14" rx="3" fill={color} />
+          <rect x="7.1" y="3.6" width="1.8" height="5.4" rx="0.6" fill="#fff" />
+          <rect x="7.1" y="10.4" width="1.8" height="2"   rx="0.6" fill="#fff" />
+        </svg>
+      </span>
+    );
+  }
+
+  // Fallback: filled rounded square
+  return (
+    <span title={name || 'Unknown'} style={baseStyle}>
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+        <rect x="1" y="1" width="14" height="14" rx="3" fill={color} />
+      </svg>
+    </span>
+  );
+}
+
+function PreviewTreeNode({ node, depth }) {
+  const typeName = getNodeIssueTypeName(node);
+  return (
+    <li style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 2, marginLeft: depth * 14, listStyle: 'none' }}>
+      <TypeIcon name={typeName} />
+      <strong style={{ color: 'var(--text-1)' }}>{node.key}</strong>
+      {node.summary ? <> — {node.summary}</> : null}
+      {node.children?.length > 0 && (
+        <ul style={{ margin: '2px 0 0', paddingLeft: 0 }}>
+          {node.children.map(c => (
+            <PreviewTreeNode key={c.key} node={c} depth={depth + 1} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function ConfirmTreeNode({ node, depth }) {
+  const typeName = getNodeIssueTypeName(node);
+  return (
+    <li style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4, marginLeft: depth * 18, listStyle: 'none' }}>
+      <TypeIcon name={typeName} />
+      <strong style={{ color: 'var(--text-1)' }}>{node.key}</strong>
+      {node.summary ? <> — {node.summary}</> : null}
+      {node.children?.length > 0 && (
+        <ul style={{ margin: '4px 0 0', paddingLeft: 0 }}>
+          {node.children.map(c => (
+            <ConfirmTreeNode key={c.key} node={c} depth={depth + 1} />
+          ))}
+        </ul>
+      )}
+    </li>
+  );
+}
+
+function MoveResultNode({ node, depth }) {
+  const status = node.status === 'idle'
+    ? 'idle'
+    : node.status === 'running' ? 'pending' : node.status;
+  const isRoot = depth === 0;
+  return (
+    <li
+      className={isRoot ? 'step-item' : undefined}
+      style={isRoot
+        ? undefined
+        : { display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4, marginLeft: depth * 18 }}
+    >
+      <StepIcon status={status} />
+      <div className={isRoot ? 'step-body' : undefined}>
+        {isRoot ? (
+          <>
+            <p className="step-name">{node.key}</p>
+            {node.newKey && (
+              <a className="step-link" href={node.newUrl} target="_blank" rel="noreferrer">
+                → {node.newKey} ↗
+              </a>
+            )}
+            {node.error && <p className="step-error">{node.error}</p>}
+          </>
+        ) : (
+          <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
+            {node.key}
+            {node.newKey && (
+              <> → <a className="step-link" href={node.newUrl} target="_blank" rel="noreferrer">
+                {node.newKey} ↗
+              </a></>
+            )}
+            {node.error && <span className="step-error"> {node.error}</span>}
+          </span>
+        )}
+        {node.children?.length > 0 && (
+          <ul style={{ listStyle: 'none', padding: isRoot ? '6px 0 0' : '4px 0 0', margin: 0 }}>
+            {node.children.map(c => (
+              <MoveResultNode key={c.key} node={c} depth={depth + 1} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </li>
+  );
+}
+
 // ─── Shared issue list (Move / Delete) ────────────────────────────────────────
 
 function IssueList({ items, onKeyChange, onLoad, onRemove, onAdd, showChildren }) {
@@ -257,17 +436,30 @@ function IssueList({ items, onKeyChange, onLoad, onRemove, onAdd, showChildren }
               </button>
             )}
           </div>
-          {item.source && (
-            <p style={{ fontSize: 12, color: 'var(--text-2)', margin: '4px 0 0 2px' }}>
-              ✓ <strong>{item.source.key}</strong> — {item.source.summary}
-              {showChildren && item.loadingChildren && (
-                <span style={{ color: 'var(--text-3)' }}> (loading children…)</span>
-              )}
-              {showChildren && !item.loadingChildren && item.children?.length > 0 && (
-                <span> + {item.children.length} child issue{item.children.length !== 1 ? 's' : ''}</span>
-              )}
-            </p>
-          )}
+          {item.source && (() => {
+            const total = showChildren ? countDescendants(item.children) : 0;
+            return (
+              <div style={{ fontSize: 12, color: 'var(--text-2)', margin: '4px 0 0 2px' }}>
+                <p style={{ margin: 0 }}>
+                  ✓ <TypeIcon name={item.source.issueTypeName} />
+                  <strong>{item.source.key}</strong> — {item.source.summary}
+                  {showChildren && item.loadingChildren && (
+                    <span style={{ color: 'var(--text-3)' }}> (loading descendants…)</span>
+                  )}
+                  {showChildren && !item.loadingChildren && total > 0 && (
+                    <span style={{ color: 'var(--text-3)' }}> + {total} descendant{total !== 1 ? 's' : ''}</span>
+                  )}
+                </p>
+                {showChildren && !item.loadingChildren && item.children?.length > 0 && (
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {item.children.map(c => (
+                      <PreviewTreeNode key={c.key} node={c} depth={0} />
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })()}
           {item.loadErr && (
             <p className="error-msg" style={{ marginTop: 4 }}>⚠ {item.loadErr}</p>
           )}
@@ -430,6 +622,16 @@ export default function TaskAgentApp({ user, onLogout }) {
     setMoveItems(prev => prev.map(m => m.id === id ? { ...m, key, source: null, loadErr: '', children: [], loadingChildren: false } : m));
   }
 
+  async function loadDescendantsTree(parentKey) {
+    const childIssues = await getChildIssues(CLOUD_ID, parentKey);
+    return Promise.all(childIssues.map(async ci => ({
+      key: ci.key,
+      summary: ci.fields?.summary ?? '',
+      raw: ci,
+      children: await loadDescendantsTree(ci.key),
+    })));
+  }
+
   async function loadMoveItem(id) {
     const item = moveItems.find(m => m.id === id);
     const raw  = item?.key.trim().toUpperCase();
@@ -439,8 +641,7 @@ export default function TaskAgentApp({ user, onLogout }) {
       const issue = await loadIssue(CLOUD_ID, raw);
       setMoveItems(prev => prev.map(m => m.id === id ? { ...m, key: issue.key, source: issue, loading: false, loadingChildren: true } : m));
       try {
-        const childIssues = await getChildIssues(CLOUD_ID, issue.key);
-        const children = childIssues.map(ci => ({ key: ci.key, summary: ci.fields?.summary ?? '', raw: ci }));
+        const children = await loadDescendantsTree(issue.key);
         setMoveItems(prev => prev.map(m => m.id === id ? { ...m, children, loadingChildren: false } : m));
       } catch {
         setMoveItems(prev => prev.map(m => m.id === id ? { ...m, loadingChildren: false } : m));
@@ -516,44 +717,70 @@ export default function TaskAgentApp({ user, onLogout }) {
   async function executeMove() {
     setShowConfirm(false);
     const loaded = moveItems.filter(m => m.source);
-    setMoveResults(loaded.map(m => ({
-      key: m.key, status: 'idle', newKey: null, newUrl: null, error: null,
-      children: m.children.map(c => ({ key: c.key, summary: c.summary, status: 'idle', newKey: null, newUrl: null, error: null })),
-    })));
+
+    function buildResultNode(node) {
+      return {
+        key: node.key,
+        status: 'idle',
+        newKey: null,
+        newUrl: null,
+        error: null,
+        children: (node.children ?? []).map(buildResultNode),
+      };
+    }
+    setMoveResults(loaded.map(buildResultNode));
     setRunning(true);
     setShowProgress(true);
 
-    for (let i = 0; i < loaded.length; i++) {
-      setMoveResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'running' } : r));
-      let newParentKey = null;
-      try {
-        const res = await moveToProject(CLOUD_ID, loaded[i].source, targetProject, { fieldOverrides: {} }, () => {});
-        newParentKey = res.newKey;
-        setMoveResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'done', newKey: res.newKey, newUrl: res.newUrl } : r));
-      } catch (err) {
-        setMoveResults(prev => prev.map((r, idx) => idx === i
-          ? { ...r, status: 'error', error: err.message, children: r.children.map(c => ({ ...c, status: 'error', error: 'Parent move failed' })) }
-          : r));
-        continue;
-      }
-
-      const childList = loaded[i].children;
-      for (let j = 0; j < childList.length; j++) {
-        setMoveResults(prev => prev.map((r, idx) => idx === i
-          ? { ...r, children: r.children.map((c, ci) => ci === j ? { ...c, status: 'running' } : c) }
-          : r));
-        try {
-          const childIssue = await loadIssue(CLOUD_ID, childList[j].key);
-          const childRes   = await moveToProject(CLOUD_ID, childIssue, targetProject, { fieldOverrides: {}, parentKey: newParentKey }, () => {});
-          setMoveResults(prev => prev.map((r, idx) => idx === i
-            ? { ...r, children: r.children.map((c, ci) => ci === j ? { ...c, status: 'done', newKey: childRes.newKey, newUrl: childRes.newUrl } : c) }
-            : r));
-        } catch (err) {
-          setMoveResults(prev => prev.map((r, idx) => idx === i
-            ? { ...r, children: r.children.map((c, ci) => ci === j ? { ...c, status: 'error', error: err.message } : c) }
-            : r));
+    function patchNode(tree, key, patch) {
+      return tree.map(n => {
+        if (n.key === key) return { ...n, ...patch };
+        if (n.children?.length) return { ...n, children: patchNode(n.children, key, patch) };
+        return n;
+      });
+    }
+    function markSubtreeFailed(tree, key, errMsg) {
+      return tree.map(n => {
+        if (n.key === key) {
+          const fail = (children) => children.map(c => ({
+            ...c,
+            status: 'error',
+            error: 'Parent move failed',
+            children: fail(c.children ?? []),
+          }));
+          return { ...n, children: fail(n.children ?? []) };
         }
+        if (n.children?.length) return { ...n, children: markSubtreeFailed(n.children, key, errMsg) };
+        return n;
+      });
+    }
+
+    async function moveSubtree(node, parentKey) {
+      setMoveResults(prev => patchNode(prev, node.key, { status: 'running' }));
+      let newKey = null;
+      try {
+        const issueToMove = node.source ?? await loadIssue(CLOUD_ID, node.key);
+        const res = await moveToProject(
+          CLOUD_ID, issueToMove, targetProject,
+          { fieldOverrides: {}, parentKey },
+          () => {},
+        );
+        newKey = res.newKey;
+        setMoveResults(prev => patchNode(prev, node.key, {
+          status: 'done', newKey: res.newKey, newUrl: res.newUrl,
+        }));
+      } catch (err) {
+        setMoveResults(prev => patchNode(prev, node.key, { status: 'error', error: err.message }));
+        setMoveResults(prev => markSubtreeFailed(prev, node.key));
+        return;
       }
+      for (const child of node.children ?? []) {
+        await moveSubtree(child, newKey);
+      }
+    }
+
+    for (const root of loaded) {
+      await moveSubtree(root, null);
     }
     setRunning(false);
   }
@@ -590,10 +817,14 @@ export default function TaskAgentApp({ user, onLogout }) {
       setResult(null);
       if (result) { resetSource(); setIssueKey(''); }
     } else if (mode === 'move') {
-      const doneKeys = new Set(moveResults.filter(r => r.status === 'done').map(r => r.key));
+      const rootDoneKeys = new Set(
+        moveResults
+          .filter(r => r.status === 'done' && allInTreeDone(r))
+          .map(r => r.key),
+      );
       setMoveResults([]);
       setMoveItems(prev => {
-        const remaining = prev.filter(m => !doneKeys.has(m.key));
+        const remaining = prev.filter(m => !rootDoneKeys.has(m.key));
         return remaining.length > 0
           ? remaining
           : [{ id: moveIdRef.current++, key: '', source: null, loadErr: '', loading: false, children: [], loadingChildren: false }];
@@ -624,9 +855,8 @@ export default function TaskAgentApp({ user, onLogout }) {
 
   const allCloneDone = steps.length > 0 && steps.every(s => s?.status === 'done' || s?.status === 'skipped');
   const hasCloneErr  = steps.some(s => s?.status === 'error');
-  const allMoveDone  = moveResults.length > 0 && moveResults.every(r =>
-    (r.status === 'done' || r.status === 'error') &&
-    r.children.every(c => c.status === 'done' || c.status === 'error'));
+  const allMoveDone  = moveResults.length > 0 && moveResults.every(treeAllSettled);
+  const allMoveOk    = moveResults.length > 0 && moveResults.every(treeAllOk);
   const allDeleteDone = deleteResults.length > 0 && deleteResults.every(r => r.status === 'done' || r.status === 'error');
 
   const modalTitle = mode === 'clone'
@@ -639,7 +869,7 @@ export default function TaskAgentApp({ user, onLogout }) {
       ? running
         ? `Moving to ${targetProject}…`
         : allMoveDone
-          ? (moveResults.every(r => r.status === 'done') ? '✓ Moved successfully' : '✓ Moved (with errors)')
+          ? (allMoveOk ? '✓ Moved successfully' : '✓ Moved (with errors)')
           : 'Moving…'
       : running
         ? 'Deleting issues…'
@@ -900,16 +1130,18 @@ export default function TaskAgentApp({ user, onLogout }) {
                   <strong style={{ color: 'var(--text-1)' }}>{targetProject}</strong> and{' '}
                   <strong style={{ color: 'var(--red)' }}>permanently deleted</strong> from their current project{loadedMoveItems.length !== 1 ? 's' : ''}.
                 </p>
-                <ul style={{ margin: '0 0 20px', paddingLeft: 18 }}>
+                <ul style={{ margin: '0 0 20px', paddingLeft: 0 }}>
                   {loadedMoveItems.map(m => (
-                    <li key={m.key} style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>
-                      <strong style={{ color: 'var(--text-1)' }}>{m.key}</strong> — {m.source.summary}
-                      {m.children.length > 0 && (
-                        <span style={{ color: 'var(--text-3)' }}>
-                          {' '}+ {m.children.length} child issue{m.children.length !== 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </li>
+                    <ConfirmTreeNode
+                      key={m.key}
+                      node={{
+                        key: m.key,
+                        summary: m.source.summary,
+                        issueTypeName: m.source.issueTypeName,
+                        children: m.children,
+                      }}
+                      depth={0}
+                    />
                   ))}
                 </ul>
                 <div style={{ display: 'flex', gap: 10 }}>
@@ -1000,40 +1232,7 @@ export default function TaskAgentApp({ user, onLogout }) {
               <>
                 <ul className="step-list" style={{ marginTop: 12 }}>
                   {moveResults.map(r => (
-                    <li key={r.key} className="step-item">
-                      <StepIcon status={
-                        r.status === 'idle'    ? 'idle'    :
-                        r.status === 'running' ? 'pending' :
-                        r.status
-                      } />
-                      <div className="step-body">
-                        <p className="step-name">{r.key}</p>
-                        {r.newKey && (
-                          <a className="step-link" href={r.newUrl} target="_blank" rel="noreferrer">
-                            → {r.newKey} ↗
-                          </a>
-                        )}
-                        {r.error && <p className="step-error">{r.error}</p>}
-                        {r.children.length > 0 && (
-                          <ul style={{ listStyle: 'none', padding: '6px 0 0', margin: 0 }}>
-                            {r.children.map(c => (
-                              <li key={c.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 4 }}>
-                                <StepIcon status={c.status === 'running' ? 'pending' : c.status} />
-                                <span style={{ fontSize: 13, color: 'var(--text-2)' }}>
-                                  {c.key}
-                                  {c.newKey && (
-                                    <> → <a className="step-link" href={c.newUrl} target="_blank" rel="noreferrer">
-                                      {c.newKey} ↗
-                                    </a></>
-                                  )}
-                                  {c.error && <span className="step-error"> {c.error}</span>}
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                      </div>
-                    </li>
+                    <MoveResultNode key={r.key} node={r} depth={0} />
                   ))}
                 </ul>
 
