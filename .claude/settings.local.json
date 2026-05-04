@@ -32,7 +32,12 @@
       "Bash(npx vite *)",
       "Bash(npx tsc *)",
       "Bash(npm run *)",
-      "mcp__claude_ai_Linear__list_projects"
+      "mcp__claude_ai_Linear__list_projects",
+      "Bash(git fetch *)",
+      "Bash(vercel --version)",
+      "mcp__claude_ai_Vercel__list_teams",
+      "mcp__claude_ai_Vercel__get_project",
+      "mcp__claude_ai_Vercel__list_deployments"
     ]
   }
 }

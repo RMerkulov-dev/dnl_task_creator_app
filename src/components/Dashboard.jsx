@@ -11,6 +11,8 @@ const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white
 // ─── localStorage helpers ──────────────────────────────────────────────────
 const LS_KEY = 'dnl-task-filters';
 
+//Test
+
 function loadSaved() {
   try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
 }
