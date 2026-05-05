@@ -22,6 +22,20 @@ const EXCLUDE_FIELDS = new Set([
   'creator', 'reporter',
 ]);
 
+// ADF media nodes carry attachment IDs from the source issue, which are
+// invalid on the new issue. Jira rejects the create with
+// "We don't recognise the format of a file you added or the data in it."
+const ADF_MEDIA_TYPES = new Set(['media', 'mediaSingle', 'mediaGroup', 'mediaInline']);
+function stripAdfMedia(node) {
+  if (!node || typeof node !== 'object') return node;
+  if (Array.isArray(node)) return node.map(stripAdfMedia).filter(n => n != null);
+  if (ADF_MEDIA_TYPES.has(node.type)) return null;
+  if (Array.isArray(node.content)) {
+    return { ...node, content: node.content.map(stripAdfMedia).filter(n => n != null) };
+  }
+  return node;
+}
+
 function simplifyValue(key, value) {
   if (value === null || value === undefined) return undefined;
   if (key === 'assignee')  return value.accountId ? { accountId: value.accountId } : undefined;
@@ -30,6 +44,11 @@ function simplifyValue(key, value) {
   if (key === 'components' || key === 'fixVersions' || key === 'versions') {
     const ids = (Array.isArray(value) ? value : []).map(v => ({ id: v.id })).filter(v => v.id);
     return ids.length ? ids : undefined;
+  }
+  // Rich-text fields (description and ADF custom fields) — drop embedded
+  // attachment references that point to the source issue.
+  if (typeof value === 'object' && !Array.isArray(value) && value.type === 'doc' && Array.isArray(value.content)) {
+    return stripAdfMedia(value);
   }
   // Sprint field returns [{id, name, state, boardId, ...}] — Jira create expects the numeric sprint ID
   if (Array.isArray(value) && value.length > 0 && typeof value[0]?.id === 'number' && 'state' in value[0]) {
