@@ -4,9 +4,26 @@ import { getIterations, getStories, getAreaPaths, findWorkItemByJiraKey } from '
 import { createTask, updateTask, fetchTaskForEdit, createAzureFromJira, getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
 import { getJiraIssueByKey, getJiraUrl } from '../services/jira.js';
 import SyncModal from './SyncModal.jsx';
+import ToastContainer from './Toast.jsx';
 import RichTextEditor from './RichTextEditor.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
+
+// ─── Default title prefixes ────────────────────────────────────────────────
+const ALL_PREFIXES = new Set(['HT.', 'NSMGM.', 'NSMG.', 'ABS.', 'ABSPO.', 'ABS. [WS]. Customer Service.', 'ABS. QMP.']);
+
+function getDefaultTitlePrefix(projId, boardName, jiraProj) {
+  if (projId === 'HT')          return 'HT.';
+  if (projId === 'NSMG_MARKER') return 'NSMGM.';
+  if (projId === 'NSMG')        return 'NSMG.';
+  if (projId === 'ABS') {
+    if (!boardName)                             return '';
+    if (boardName.includes('Customer Service')) return 'ABS. [WS]. Customer Service.';
+    if (boardName.includes('Bureau'))           return 'ABS. QMP.';
+    return jiraProj === 'ABSPO' ? 'ABSPO.' : 'ABS.';
+  }
+  return '';
+}
 
 // ─── localStorage helpers ──────────────────────────────────────────────────
 const LS_KEY = 'dnl-task-filters';
@@ -75,6 +92,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   const [steps,     setSteps]     = useState([]);
   const [result,    setResult]    = useState(null);
   const [showModal, setShowModal] = useState(false);
+
+  // ── Toast state ───────────────────────────────────────────────────────────
+  const [toasts, setToasts] = useState([]);
 
   // Track latest project load to ignore stale responses
   const loadIdRef = useRef(0);
@@ -183,6 +203,28 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       jiraProject: selectedJiraProj || undefined,
     });
   }, [proj.id, selectedIteration, selectedStory, selectedBoard, selectedJiraProj]);
+
+  // ── Auto-set default title prefix when project / board / jira project changes
+  useEffect(() => {
+    if (mode !== 'create') return;
+    const boardName = boards.find(b => b.path === selectedBoard)?.name ?? '';
+    const prefix = getDefaultTitlePrefix(proj.id, boardName, selectedJiraProj);
+    if (!prefix) return;
+    setTitle(prev => (prev === '' || ALL_PREFIXES.has(prev.trim()) ? prefix : prev));
+  }, [proj.id, selectedBoard, selectedJiraProj, mode, boards]);
+
+  // ── Auto-close modal and show toast on sync success ────────────────────────
+  useEffect(() => {
+    if (!result) return;
+    setToasts(prev => [...prev, { id: Date.now(), ...result }]);
+    setShowModal(false);
+    setSteps([]);
+    setResult(null);
+  }, [result]);
+
+  function dismissToast(id) {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const updateStep = useCallback((i, status, error = null, data = null) => {
@@ -357,6 +399,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     setShowModal(false);
     setSteps([]);
     setResult(null);
+    setSyncing(false);
   }
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -643,10 +686,11 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
           mode={createFromJira ? 'createFromJira' : mode}
           project={proj}
           steps={steps}
-          result={result}
           onClose={handleCloseModal}
         />
       )}
+
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
 
     </div>
   );

@@ -36,16 +36,15 @@ function StepIcon({ status }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function SyncModal({ mode, project, steps, result, onClose }) {
-  const defs    = buildStepDefs(mode, project, steps.length);
-  const allDone = steps.length > 0 && steps.every(s => s?.status === 'done' || s?.status === 'skipped');
-  const hasErr  = steps.some(s => s?.status === 'error');
+export default function SyncModal({ mode, project, steps, onClose }) {
+  const defs   = buildStepDefs(mode, project, steps.length);
+  const hasErr = steps.some(s => s?.status === 'error');
 
   return (
     <div className="overlay">
       <div className="modal">
         <p className="modal-title">
-          {hasErr ? '⚠ Sync Error' : allDone ? '✓ Sync Complete' : 'Syncing task…'}
+          {hasErr ? '⚠ Sync Error' : 'Syncing task…'}
         </p>
 
         <ul className="step-list">
@@ -56,16 +55,6 @@ export default function SyncModal({ mode, project, steps, result, onClose }) {
                 <StepIcon status={s.status} />
                 <div className="step-body">
                   <p className="step-name">{def.label}</p>
-                  {s.data?.epicId && (
-                    <a className="step-link" href={s.data.epicUrl} target="_blank" rel="noreferrer">
-                      #{s.data.epicId} ↗
-                    </a>
-                  )}
-                  {s.data?.jiraKey && (
-                    <a className="step-link" href={s.data.jiraUrl} target="_blank" rel="noreferrer">
-                      {s.data.jiraKey} ↗
-                    </a>
-                  )}
                   {s.error && <p className="step-error">{s.error}</p>}
                 </div>
               </li>
@@ -73,31 +62,8 @@ export default function SyncModal({ mode, project, steps, result, onClose }) {
           })}
         </ul>
 
-        {allDone && result && (
-          <div className="result-links">
-            {result.epicUrl && (
-              <div className="result-link-row">
-                <span className="result-link-label">Azure DevOps</span>
-                <a className="result-link-anchor" href={result.epicUrl} target="_blank" rel="noreferrer">
-                  #{result.epicId} ↗
-                </a>
-              </div>
-            )}
-            {result.jiraUrl && (
-              <div className="result-link-row">
-                <span className="result-link-label">Jira</span>
-                <a className="result-link-anchor" href={result.jiraUrl} target="_blank" rel="noreferrer">
-                  {result.jiraKey} ↗
-                </a>
-              </div>
-            )}
-          </div>
-        )}
-
-        {(allDone || hasErr) && (
-          <button className="btn btn-primary" onClick={onClose}>
-            {hasErr ? 'Close' : 'Done'}
-          </button>
+        {hasErr && (
+          <button className="btn btn-primary" onClick={onClose}>Close</button>
         )}
       </div>
     </div>
