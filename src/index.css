@@ -2304,3 +2304,164 @@ html, body, #root {
 .theme-toggle-opt:not(.active):hover {
   color: var(--text-1);
 }
+
+/* ─── Voice FAB ─────────────────────────────────────────────────────────── */
+
+.voice-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 28px rgba(6, 182, 212, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.voice-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 32px rgba(6, 182, 212, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.voice-fab-open {
+  background: var(--bg-input);
+  color: var(--text-1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.voice-fab-popover {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  background: var(--bg-card, var(--bg-input));
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.2);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: voiceFabIn 0.16s ease-out;
+}
+
+@keyframes voiceFabIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.voice-fab-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.voice-fab-popover-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.voice-fab-popover-close {
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.voice-fab-popover-close:hover {
+  background: var(--bg-input);
+  color: var(--text-1);
+}
+
+.voice-fab-popover-body {
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voice-fab-status {
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.voice-fab-status p { margin: 0; }
+
+.voice-fab-error {
+  margin: 0;
+  color: #ef4444;
+  font-size: 13px;
+}
+
+.voice-fab-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-fab-result-text {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-1);
+  line-height: 1.45;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.voice-fab-copy {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.voice-fab-copy:hover {
+  background: var(--border);
+}
+
+.voice-fab-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.voice-fab-mic {
+  width: 48px;
+  height: 48px;
+}

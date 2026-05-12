@@ -29,6 +29,13 @@ export const APP_REGISTRY = [
     gradient: 'linear-gradient(135deg, #7c3aed 0%, #5b63fe 100%)',
     glow: 'rgba(124, 58, 237, 0.5)',
   },
+  {
+    id: 'fathom-agent',
+    name: 'Fathom Agent',
+    shortName: 'Fathom',
+    gradient: 'linear-gradient(135deg, #ef4444 0%, #f97316 100%)',
+    glow: 'rgba(239, 68, 68, 0.5)',
+  },
 ];
 
 // Lazy-load app components separately so AppRegistry stays JSON-serialisable
@@ -37,4 +44,5 @@ export const APP_COMPONENTS = {
   'voice':         lazy(() => import('../apps/voice/VoiceApp.jsx')),
   'task-agent':    lazy(() => import('../apps/task_agent/TaskAgentApp.jsx')),
   'jira-ba-agent': lazy(() => import('../apps/jira_ba_agent/JiraBaAgentApp.jsx')),
+  'fathom-agent':  lazy(() => import('../apps/fathom_agent/FathomAgentApp.jsx')),
 };

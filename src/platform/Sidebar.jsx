@@ -54,11 +54,25 @@ function JiraBaIcon() {
   );
 }
 
+function FathomIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Video frame */}
+      <rect x="2.5" y="6" width="13" height="12" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
+      {/* Lens / play */}
+      <path d="M15.5 10l5-2.5v9L15.5 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
+      {/* Sound waves */}
+      <path d="M6 11v2M8.5 9.5v5M11 10.5v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'task-creator':  TaskCreatorIcon,
   'voice':         VoiceIcon,
   'task-agent':    TaskAgentIcon,
   'jira-ba-agent': JiraBaIcon,
+  'fathom-agent':  FathomIcon,
 };
 
 function PlatformLogo() {

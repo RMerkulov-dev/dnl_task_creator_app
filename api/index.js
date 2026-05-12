@@ -406,12 +406,245 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
   }
 });
 
+// ─── Fathom Agent ────────────────────────────────────────────────────────────
+
+const FATHOM_BASE   = 'https://api.fathom.ai/external/v1';
+const FATHOM_KEY    = process.env.FATHOM_API_KEY || '';
+const fathomHeaders = () => ({ 'X-Api-Key': FATHOM_KEY, Accept: 'application/json' });
+
+function trimTranscript(transcript, maxLines = 400) {
+  if (!Array.isArray(transcript)) return [];
+  const sliced = transcript.slice(0, maxLines).map(t => ({
+    speaker:   t.speaker?.display_name ?? 'Unknown',
+    timestamp: t.timestamp,
+    text:      t.text,
+  }));
+  if (transcript.length > maxLines) {
+    sliced.push({ speaker: 'system', timestamp: null, text: `…[truncated ${transcript.length - maxLines} more lines]` });
+  }
+  return sliced;
+}
+
+function briefMeeting(m) {
+  return {
+    recording_id: m.recording_id,
+    title:        m.meeting_title || m.title,
+    url:          m.url,
+    started_at:   m.recording_start_time || m.scheduled_start_time,
+    ended_at:     m.recording_end_time   || m.scheduled_end_time,
+    language:     m.transcript_language,
+    invitees:     (m.calendar_invitees ?? []).map(i => i.name || i.email).filter(Boolean),
+  };
+}
+
+const FATHOM_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'list_meetings',
+      description: 'List recent Fathom meetings (brief). Use to find a meeting by title, date range, or recorder. Does NOT return transcripts — call get_transcript for that.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit:          { type: 'integer', description: 'Max meetings to return (default 20, max 50)' },
+          created_after:  { type: 'string',  description: 'ISO 8601 timestamp, e.g. 2026-05-01T00:00:00Z' },
+          created_before: { type: 'string',  description: 'ISO 8601 timestamp' },
+          recorded_by:    { type: 'string',  description: 'Recorder email to filter by' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_transcript',
+      description: 'Get the full transcript of a specific Fathom recording. Returns speakers, timestamps and text.',
+      parameters: {
+        type: 'object',
+        properties: {
+          recordingId: { type: 'integer', description: 'Fathom recording_id (number)' },
+        },
+        required: ['recordingId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_summary',
+      description: 'Get the AI-generated summary (markdown) for a Fathom recording.',
+      parameters: {
+        type: 'object',
+        properties: {
+          recordingId: { type: 'integer', description: 'Fathom recording_id (number)' },
+        },
+        required: ['recordingId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_meetings',
+      description: 'Search recent Fathom meetings whose title, summary, or transcript contains the query string. Use when the user asks "what did we discuss about X" or similar.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query:         { type: 'string',  description: 'Text to search for (case-insensitive substring match)' },
+          days_back:     { type: 'integer', description: 'How many days back to scan (default 30, max 180)' },
+          limit:         { type: 'integer', description: 'Max matched meetings to return (default 10, max 25)' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+];
+
+async function fathomFetch(path) {
+  const r = await fetch(`${FATHOM_BASE}${path}`, { headers: fathomHeaders() });
+  if (!r.ok) {
+    const txt = (await r.text()).slice(0, 200);
+    console.error(`[Fathom ${r.status}] ${path} :: ${txt}`);
+    throw new Error(`Fathom ${r.status} at ${path}${txt ? ` :: ${txt}` : ''}`);
+  }
+  return r.json();
+}
+
+async function executeFathomTool(name, args) {
+  switch (name) {
+    case 'list_meetings': {
+      const limit  = Math.min(args.limit || 20, 50);
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (args.created_after)  params.set('created_after',  args.created_after);
+      if (args.created_before) params.set('created_before', args.created_before);
+      if (args.recorded_by)    params.append('recorded_by[]', args.recorded_by);
+      const data = await fathomFetch(`/meetings?${params}`);
+      const items = data.items ?? [];
+      return { returned: items.length, next_cursor: data.next_cursor ?? null, meetings: items.map(briefMeeting) };
+    }
+
+    case 'get_transcript': {
+      const data = await fathomFetch(`/recordings/${args.recordingId}/transcript`);
+      return { recording_id: args.recordingId, lines: trimTranscript(data.transcript) };
+    }
+
+    case 'get_summary': {
+      const data = await fathomFetch(`/recordings/${args.recordingId}/summary`);
+      return {
+        recording_id: args.recordingId,
+        template:     data.summary?.template_name,
+        markdown:     data.summary?.markdown_formatted ?? '',
+      };
+    }
+
+    case 'search_meetings': {
+      const q        = String(args.query || '').toLowerCase().trim();
+      if (!q) return { matched: 0, meetings: [] };
+      const days     = Math.min(args.days_back || 30, 180);
+      const limit    = Math.min(args.limit || 10, 25);
+      const after    = new Date(Date.now() - days * 86_400_000).toISOString();
+      const params   = new URLSearchParams({
+        limit: '50',
+        created_after: after,
+        include_summary: 'true',
+        include_transcript: 'true',
+      });
+      const data    = await fathomFetch(`/meetings?${params}`);
+      const matches = (data.items ?? []).filter(m => {
+        const hay = [
+          m.meeting_title, m.title,
+          m.default_summary,
+          Array.isArray(m.transcript) ? m.transcript.map(t => t.text).join(' ') : '',
+        ].join(' ').toLowerCase();
+        return hay.includes(q);
+      }).slice(0, limit).map(briefMeeting);
+      return { matched: matches.length, days_back: days, meetings: matches };
+    }
+
+    default:
+      throw new Error(`Unknown Fathom tool: ${name}`);
+  }
+}
+
+app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey)     return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+  if (!FATHOM_KEY) return res.status(503).json({ error: 'FATHOM_API_KEY not configured' });
+
+  const { message, history = [], userEmail } = req.body ?? {};
+  if (!message) return res.status(400).json({ error: 'message is required' });
+
+  const nowIso  = new Date().toISOString();
+  const userCtx = userEmail
+    ? `The current user's email is "${userEmail}". When they say "my meetings" or "recorded by me", filter with recorded_by="${userEmail}".`
+    : '';
+
+  const systemPrompt =
+    'You are a Fathom meetings assistant for Dynamica Labs. ' +
+    'Help users query their recorded calls: find meetings, read transcripts, summarise discussions, extract action items. ' +
+    'Always use tools to retrieve live data — never invent meeting titles, dates, recording IDs, or transcript content. ' +
+    `Today is ${nowIso}. Convert relative dates ("last week", "yesterday") to absolute ISO 8601 timestamps for tool calls. ` +
+    'Workflow rules: ' +
+    '(1) When the user asks for a summary or transcript of a specific meeting, you MUST first call list_meetings (or search_meetings) to obtain the real recording_id, then call get_summary/get_transcript with that id. ' +
+    '(2) The list_meetings result does NOT include summary/transcript content — never claim "no summary available" based on the list alone. If the user wants a summary, always call get_summary by recording_id. ' +
+    '(3) Use recorded_by ONLY when the user explicitly says "my meetings"/"recorded by me". Filtering by other people\'s emails (e.g. "from Igor") will likely return empty unless that person is the recorder — better to list without filter and pick by attendee/title. ' +
+    '(4) Prefer search_meetings when the user asks about a topic; prefer list_meetings when asking for recent calls. ' +
+    'Respond in the same language the user writes in (Russian, Ukrainian, or English). ' +
+    'When citing a meeting, include its title and Fathom URL. Format with bullet lists for multiple items. ' +
+    userCtx;
+
+  const msgs = [
+    { role: 'system', content: systemPrompt },
+    ...history.slice(-20),
+    { role: 'user', content: message },
+  ];
+
+  const toolResults = [];
+
+  try {
+    for (let i = 0; i < 6; i++) {
+      const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-4o', messages: msgs, tools: FATHOM_TOOLS, tool_choice: 'auto', temperature: 0.3, max_tokens: 2000 }),
+      });
+      const data = await upstream.json();
+      if (!upstream.ok) throw new Error(data.error?.message || `OpenAI error ${upstream.status}`);
+
+      const choice = data.choices[0];
+      msgs.push(choice.message);
+
+      if (choice.finish_reason !== 'tool_calls') {
+        return res.json({ reply: choice.message.content, toolResults });
+      }
+
+      for (const tc of choice.message.tool_calls) {
+        let result;
+        try {
+          const args = JSON.parse(tc.function.arguments);
+          result = await executeFathomTool(tc.function.name, args);
+          toolResults.push({ name: tc.function.name, args, result });
+        } catch (err) {
+          result = { error: err.message };
+          toolResults.push({ name: tc.function.name, error: err.message });
+        }
+        msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+      }
+    }
+    res.json({ reply: 'Превышен лимит шагов. Попробуйте переформулировать запрос.', toolResults });
+  } catch (err) {
+    console.error('[Fathom Agent error]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
     azure: Object.fromEntries(Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: !!v.pat }])),
-    jira: { hasToken: !!jiraToken }
+    jira:   { hasToken:  !!jiraToken },
+    fathom: { hasApiKey: !!FATHOM_KEY },
   });
 });
 

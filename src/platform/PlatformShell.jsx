@@ -1,6 +1,7 @@
 import { useState, Suspense } from 'react';
 import Sidebar from './Sidebar.jsx';
 import { APP_REGISTRY, APP_COMPONENTS } from './AppRegistry.js';
+import VoiceFab from '../components/VoiceFab.jsx';
 
 function AppLoader() {
   return (
@@ -38,6 +39,7 @@ export default function PlatformShell({ session, onLogout, theme, themeMode, set
           )}
         </Suspense>
       </div>
+      <VoiceFab />
     </div>
   );
 }

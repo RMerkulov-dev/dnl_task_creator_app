@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { PROJECT_LIST } from '../../config/projects.js';
 
-const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
-const CLOUD_ID = PROJECT_LIST.find(p => p.jira)?.jira.cloudId ?? '';
+const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
 function getBestMimeType() {
   const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
@@ -40,11 +38,10 @@ function SendIcon() {
 // ─── Tool pills ───────────────────────────────────────────────────────────────
 
 const TOOL_META = {
-  search_jira:   { icon: '🔍', label: r => r?.returned != null ? `Found ${r.returned} issue${r.returned !== 1 ? 's' : ''}` : 'Searched Jira' },
-  get_issue:     { icon: '📋', label: r => r?.key ? r.key : 'Got issue' },
-  list_projects: { icon: '📁', label: r => r?.projects ? `${r.projects.length} projects` : 'Projects' },
-  list_sprints:  { icon: '🗓️', label: r => r?.sprints ? `${r.sprints.length} sprints` : 'Sprints' },
-  create_issue:  { icon: '✅', label: r => r?.key ? `Created ${r.key}` : 'Created issue' },
+  list_meetings:   { icon: '🎥', label: r => r?.returned != null ? `${r.returned} meeting${r.returned !== 1 ? 's' : ''}` : 'Listed meetings' },
+  get_transcript:  { icon: '📝', label: r => r?.lines ? `Transcript (${r.lines.length} lines)` : 'Got transcript' },
+  get_summary:     { icon: '✨', label: r => r?.template ? `Summary (${r.template})` : 'Got summary' },
+  search_meetings: { icon: '🔍', label: r => r?.matched != null ? `Matched ${r.matched}` : 'Searched' },
 };
 
 function ToolPills({ toolResults }) {
@@ -52,7 +49,7 @@ function ToolPills({ toolResults }) {
   return (
     <div className="ba-tool-pills">
       {toolResults.map((t, i) => {
-        const meta = TOOL_META[t.name] ?? { icon: '⚙️', label: () => t.name };
+        const meta  = TOOL_META[t.name] ?? { icon: '⚙️', label: () => t.name };
         const isErr = !!t.error;
         return (
           <span key={i} className={`ba-tool-pill${isErr ? ' error' : ''}`}>
@@ -64,18 +61,24 @@ function ToolPills({ toolResults }) {
   );
 }
 
-// ─── Message bubble ───────────────────────────────────────────────────────────
+// ─── Message rendering ────────────────────────────────────────────────────────
+
+function formatInline(text) {
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code class="ba-inline-code">$1</code>')
+    // Fathom share/call URLs → clickable
+    .replace(/(https?:\/\/fathom\.video\/[^\s)]+)/g, '<a class="ba-issue-link" href="$1" target="_blank" rel="noreferrer">fathom ↗</a>');
+}
 
 function AssistantText({ text }) {
-  // Render markdown-ish: **bold**, bullet lists, numbered lists, links
   const lines = text.split('\n');
   return (
     <div className="ba-msg-text">
       {lines.map((line, i) => {
-        // Skip empty lines (render as spacing)
         if (!line.trim()) return <br key={i} />;
 
-        // Bullet list
         const bulletMatch = line.match(/^[\s]*[-•*]\s+(.*)/);
         if (bulletMatch) return (
           <div key={i} className="ba-list-item">
@@ -84,7 +87,6 @@ function AssistantText({ text }) {
           </div>
         );
 
-        // Numbered list
         const numMatch = line.match(/^[\s]*(\d+)\.\s+(.*)/);
         if (numMatch) return (
           <div key={i} className="ba-list-item">
@@ -97,15 +99,6 @@ function AssistantText({ text }) {
       })}
     </div>
   );
-}
-
-function formatInline(text) {
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`(.+?)`/g, '<code class="ba-inline-code">$1</code>')
-    // Issue keys like NSMG-1234 → links
-    .replace(/\b([A-Z]{2,10}-\d+)\b/g, '<a class="ba-issue-link" href="https://dynamicalabs.atlassian.net/browse/$1" target="_blank" rel="noreferrer">$1 ↗</a>');
 }
 
 function ChatMessage({ msg }) {
@@ -141,7 +134,7 @@ function ThinkingBubble() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export default function JiraBaAgentApp({ user, onLogout }) {
+export default function FathomAgentApp({ user, onLogout }) {
   const [messages,     setMessages]     = useState([]);
   const [input,        setInput]        = useState('');
   const [loading,      setLoading]      = useState(false);
@@ -155,20 +148,16 @@ export default function JiraBaAgentApp({ user, onLogout }) {
   const chunksRef   = useRef([]);
   const audioCtxRef = useRef(null);
 
-  // Auto-scroll
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
-  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 160) + 'px';
   }, [input]);
-
-  // ─── Send message ────────────────────────────────────────────────────────
 
   const send = useCallback(async (text) => {
     const trimmed = text.trim();
@@ -188,10 +177,10 @@ export default function JiraBaAgentApp({ user, onLogout }) {
     setLoading(true);
     try {
       const history = prevMessages.map(m => ({ role: m.role === 'error' ? 'assistant' : m.role, content: m.content }));
-      const res  = await fetch('/api/ba-agent', {
+      const res  = await fetch('/api/fathom-agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, history, cloudId: CLOUD_ID, userEmail: user }),
+        body: JSON.stringify({ message, history, userEmail: user }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Server error');
@@ -269,22 +258,20 @@ export default function JiraBaAgentApp({ user, onLogout }) {
       <header className="header">
         <div className="header-logo"><img src={LOGO} alt="Dynamica Labs" /></div>
         <div className="header-sep" />
-        <span className="header-title">Jira BA Agent</span>
+        <span className="header-title">Fathom Agent</span>
         <div className="header-spacer" />
         {user && <span className="header-user">{user}</span>}
         <button className="btn btn-ghost" onClick={onLogout} style={{ marginLeft: 12 }}>Sign out</button>
       </header>
 
       <main className="ba-main">
-
-        {/* ── Chat area ── */}
         <div className="ba-chat">
           {messages.length === 0 && !loading && (
             <div className="ba-empty">
-              <p className="ba-empty-title">Hi! I'm Jira BA Agent.</p>
+              <p className="ba-empty-title">Hi! I'm Fathom Agent.</p>
               <p className="ba-empty-sub">
-                Ask about issues, sprints, epics — by text or voice.<br/>
-                For example: <em>"Which issues are assigned to Dima in the current NSMG sprint?"</em>
+                Ask about meetings and transcripts — by text or voice.<br/>
+                For example: <em>"What did we discuss with the client last week?"</em>, <em>"Show the summary of the last call"</em>
               </p>
             </div>
           )}
@@ -293,7 +280,6 @@ export default function JiraBaAgentApp({ user, onLogout }) {
           <div ref={bottomRef} />
         </div>
 
-        {/* ── Input bar ── */}
         <div className="ba-input-bar">
           {error && <p className="ba-input-error">⚠ {error}</p>}
           <div className="ba-input-row">
@@ -311,7 +297,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
             <textarea
               ref={textareaRef}
               className="ba-textarea"
-              placeholder="Спроси что-нибудь о Jira…"
+              placeholder="Спроси что-нибудь о встречах в Fathom…"
               value={input}
               rows={1}
               onChange={e => setInput(e.target.value)}
@@ -331,7 +317,6 @@ export default function JiraBaAgentApp({ user, onLogout }) {
             </button>
           </div>
         </div>
-
       </main>
     </div>
   );
