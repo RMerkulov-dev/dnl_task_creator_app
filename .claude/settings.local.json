@@ -49,7 +49,17 @@
       "Bash(xargs kill -9)",
       "Bash(curl -sS -X POST http://localhost:3001/api/fathom-agent -H 'Content-Type: application/json' -d '{\"message\":\"Покажи последние встречи и дай саммери первой\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\"}')",
       "Bash(python3 -c 'import sys,json; d=json.load\\(sys.stdin\\); print\\(\"REPLY:\", d.get\\(\"reply\",\"\"\\)[:500]\\); print\\(\"--- TOOLS ---\"\\); [print\\(t.get\\(\"name\"\\), t.get\\(\"args\"\\), \"->\", \"ERR: \"+t.get\\(\"error\",\"\"\\) if t.get\\(\"error\"\\) else \"OK \\(\"+str\\(list\\(\\(t.get\\(\"result\"\\) or {}\\).keys\\(\\)\\)\\)+\"\\)\"\\) for t in d.get\\(\"toolResults\",[]\\)]')",
-      "Bash(python3 -c 'import sys,json; d=json.load\\(sys.stdin\\); print\\(\"REPLY:\", d.get\\(\"reply\",\"\"\\)[:500]\\); print\\(\"--- TOOLS ---\"\\); [print\\(t.get\\(\"name\"\\), t.get\\(\"args\"\\), \"->\", \"ERR: \"+t.get\\(\"error\",\"\"\\) if t.get\\(\"error\"\\) else \"OK\"\\) for t in d.get\\(\"toolResults\",[]\\)]')"
+      "Bash(python3 -c 'import sys,json; d=json.load\\(sys.stdin\\); print\\(\"REPLY:\", d.get\\(\"reply\",\"\"\\)[:500]\\); print\\(\"--- TOOLS ---\"\\); [print\\(t.get\\(\"name\"\\), t.get\\(\"args\"\\), \"->\", \"ERR: \"+t.get\\(\"error\",\"\"\\) if t.get\\(\"error\"\\) else \"OK\"\\) for t in d.get\\(\"toolResults\",[]\\)]')",
+      "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{\"message\":\"Все реквесты с Comission module за 2 недели созданные\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\",\"cloudId\":\"ede50bd6-614f-4723-b64b-76ef4be362d5\"}')",
+      "Bash(python3 -c 'import sys,json; d=json.load\\(sys.stdin\\); print\\(\"REPLY:\", d.get\\(\"reply\",\"\"\\)[:400]\\); print\\(\"--- TOOLS ---\"\\); [print\\(t.get\\(\"name\"\\), \"args=\", t.get\\(\"args\"\\), \"->\", \"ERR: \"+t.get\\(\"error\",\"\"\\) if t.get\\(\"error\"\\) else f\"returned={\\(t.get\\(\\\\\"result\\\\\"\\) or {}\\).get\\(\\\\\"returned\\\\\", \\\\\"?\\\\\"\\)}\"\\) for t in d.get\\(\"toolResults\",[]\\)]')",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{\"message\":\"Покажи задачи\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\",\"cloudId\":\"ede50bd6-614f-4723-b64b-76ef4be362d5\"}')",
+      "Bash(curl -sS -X POST http://localhost:3001/api/fathom-agent -H 'Content-Type: application/json' -d '{\"message\":\"Покажи саммари\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\"}')",
+      "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(grep *)",
+      "Bash(perl -i -pe 's/await fetch\\\\\\(\\\\`\\\\$\\\\{base\\\\}/await fetchWithRetry\\(`\\\\${base}/g; s/await fetch\\\\\\(\\\\`\\\\$\\\\{agileBase\\\\}/await fetchWithRetry\\(`\\\\${agileBase}/g; s/await fetch\\\\\\(\\\\`\\\\$\\\\{FATHOM_BASE\\\\}/await fetchWithRetry\\(`\\\\${FATHOM_BASE}/g' api/index.js)",
+      "Bash(node -e \"import\\('./api/index.js'\\).then\\(\\(\\) => console.log\\('imports OK'\\)\\).catch\\(e => { console.error\\('FAIL:', e.message\\); process.exit\\(1\\); }\\)\")",
+      "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{\"message\":\"покажи задачи на Viktor Kalantai в статусе Dev Ready\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\",\"cloudId\":\"ede50bd6-614f-4723-b64b-76ef4be362d5\"}')"
     ]
   }
 }

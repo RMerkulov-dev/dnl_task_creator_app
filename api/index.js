@@ -37,6 +37,34 @@ async function readBody(req) {
   });
 }
 
+// `fetch failed` and similar undici errors are transient (DNS hiccup, TCP reset).
+// Retry once before bubbling up; map to a human message for the chat UI.
+function isTransientFetchError(err) {
+  const m = err?.message || '';
+  return m === 'fetch failed' || /ECONN(REFUSED|RESET)|ETIMEDOUT|EAI_AGAIN|ENOTFOUND/i.test(m + (err?.cause?.code || ''));
+}
+
+async function fetchWithRetry(url, init, attempts = 2) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      lastErr = err;
+      if (!isTransientFetchError(err) || i === attempts - 1) throw err;
+      await new Promise(r => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+function humaniseFetchError(err) {
+  if (isTransientFetchError(err)) {
+    return 'Не удалось связаться с внешним сервисом (Jira / OpenAI). Проверьте сеть и попробуйте ещё раз.';
+  }
+  return err.message;
+}
+
 async function proxyTo(req, res, upstreamUrl, authHeader) {
   const isBody = !['GET', 'HEAD'].includes(req.method);
   const body = isBody ? await readBody(req) : undefined;
@@ -64,7 +92,12 @@ async function proxyTo(req, res, upstreamUrl, authHeader) {
        .set('Content-Type', upstream.headers.get('content-type') || 'application/json')
        .send(text);
   } catch (err) {
-    console.error(`[Proxy error] ${upstreamUrl}:`, err.message);
+    // Transient network failures (offline org, DNS hiccup) get a quieter log —
+    // they're expected when an Azure org is unreachable and only the client UI
+    // needs to know via the 503.
+    const quiet = isTransientFetchError(err);
+    if (quiet) console.warn(`[Proxy unreachable] ${upstreamUrl}`);
+    else       console.error(`[Proxy error] ${upstreamUrl}:`, err.message);
     res.status(503).json({ error: err.message });
   }
 }
@@ -164,7 +197,63 @@ app.post('/api/transcribe', async (req, res) => {
 
 // ─── Jira BA Agent ───────────────────────────────────────────────────────────
 
+// Shared "ask the user" tool used by both Jira and Fathom agents.
+// When the LLM emits this, the request handler short-circuits and returns
+// a clarification payload that the UI renders as clickable options.
+const ASK_USER_TOOL = {
+  type: 'function',
+  function: {
+    name: 'ask_user',
+    description:
+      'Ask the user a clarifying question with 2–4 mutually exclusive options. ' +
+      'Use ONLY when the request is genuinely ambiguous and the answer will significantly change which tools/parameters you call next (e.g. which project, which date range, summary vs transcript). ' +
+      'Do NOT use for trivia, formatting preferences, or anything you can infer from context or solve by trying a sensible default first. ' +
+      'Phrase the question in the same language the user wrote in. Call ask_user alone — never combine with other tool calls in the same turn.',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'The clarifying question to display to the user' },
+        options:  {
+          type: 'array',
+          description: '2–4 distinct, mutually exclusive options. Keep labels short (1–5 words).',
+          items: {
+            type: 'object',
+            properties: {
+              label:       { type: 'string', description: 'The visible choice (short, imperative or noun)' },
+              description: { type: 'string', description: 'Optional one-line explanation of what this option means' },
+            },
+            required: ['label'],
+          },
+          minItems: 2,
+          maxItems: 4,
+        },
+        multiSelect: { type: 'boolean', description: 'Allow multiple options to be selected (default false)' },
+      },
+      required: ['question', 'options'],
+    },
+  },
+};
+
+function findAskUserCall(toolCalls) {
+  return (toolCalls || []).find(tc => tc.function?.name === 'ask_user');
+}
+
+function buildClarificationFromCall(tc) {
+  try {
+    const args = JSON.parse(tc.function.arguments || '{}');
+    if (!args.question || !Array.isArray(args.options) || args.options.length < 2) return null;
+    return {
+      question:    args.question,
+      options:     args.options.filter(o => o && o.label).slice(0, 4),
+      multiSelect: !!args.multiSelect,
+    };
+  } catch {
+    return null;
+  }
+}
+
 const JIRA_TOOLS = [
+  ASK_USER_TOOL,
   {
     type: 'function',
     function: {
@@ -246,7 +335,7 @@ async function executeJiraTool(name, args, cloudId) {
   switch (name) {
     case 'search_jira': {
       const max = Math.min(args.maxResults || 20, 50);
-      const res = await fetch(`${base}/search/jql`, {
+      const res = await fetchWithRetry(`${base}/search/jql`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -274,7 +363,7 @@ async function executeJiraTool(name, args, cloudId) {
     }
 
     case 'get_issue': {
-      const res  = await fetch(`${base}/issue/${encodeURIComponent(args.issueKey)}`, { headers });
+      const res  = await fetchWithRetry(`${base}/issue/${encodeURIComponent(args.issueKey)}`, { headers });
       const data = await res.json();
       if (!res.ok) throw new Error(data.errorMessages?.join(', ') || `${args.issueKey} not found`);
       const f = data.fields;
@@ -300,18 +389,18 @@ async function executeJiraTool(name, args, cloudId) {
     }
 
     case 'list_projects': {
-      const res  = await fetch(`${base}/project/search?maxResults=50&orderBy=name`, { headers });
+      const res  = await fetchWithRetry(`${base}/project/search?maxResults=50&orderBy=name`, { headers });
       const data = await res.json();
       if (!res.ok) throw new Error('Failed to list projects');
       return { projects: (data.values ?? []).map(p => ({ key: p.key, name: p.name })) };
     }
 
     case 'list_sprints': {
-      const boardsRes  = await fetch(`${agileBase}/board?projectKeyOrId=${encodeURIComponent(args.projectKey)}&maxResults=5`, { headers });
+      const boardsRes  = await fetchWithRetry(`${agileBase}/board?projectKeyOrId=${encodeURIComponent(args.projectKey)}&maxResults=5`, { headers });
       const boardsData = await boardsRes.json();
       if (!boardsData.values?.length) return { sprints: [] };
       const boardId    = boardsData.values[0].id;
-      const sprintsRes  = await fetch(`${agileBase}/board/${boardId}/sprint?state=active,future&maxResults=20`, { headers });
+      const sprintsRes  = await fetchWithRetry(`${agileBase}/board/${boardId}/sprint?state=active,future&maxResults=20`, { headers });
       const sprintsData = await sprintsRes.json();
       return {
         sprints: (sprintsData.values ?? []).map(s => ({
@@ -331,7 +420,7 @@ async function executeJiraTool(name, args, cloudId) {
       if (args.labels?.length) fields.labels = args.labels;
       if (args.parentKey)   fields.parent = { key: args.parentKey };
 
-      const res  = await fetch(`${base}/issue`, { method: 'POST', headers, body: JSON.stringify({ fields }) });
+      const res  = await fetchWithRetry(`${base}/issue`, { method: 'POST', headers, body: JSON.stringify({ fields }) });
       const data = await res.json();
       if (!res.ok) throw new Error(Object.values(data.errors ?? {}).join(', ') || data.errorMessages?.join(', ') || 'Create failed');
       return { key: data.key, url: `https://dynamicalabs.atlassian.net/browse/${data.key}` };
@@ -357,6 +446,21 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
     'You are a Jira Business Analyst assistant for Dynamica Labs. ' +
     'Help users query and manage Jira: find issues, check sprints, create tasks, summarise epics. ' +
     'Always use tools to retrieve live data — never invent issue keys or counts. ' +
+    'Known Jira project keys: ABS, ABSPO, NSMG, NSMGM, HTH. These are the ONLY valid values for `project = ...` in JQL. ' +
+    `Today is ${new Date().toISOString()}. ` +
+    'Before doing real work, call ask_user when the request is genuinely ambiguous AND the answer changes which tools/parameters you would call. ' +
+    'Good triggers: ' +
+    '— user mentions a feature/module name without saying the project (offer ABS / NSMG / NSMGM / HTH / "search across all"); ' +
+    '— "show me my tasks" without time range (offer "current sprint" / "last 7 days" / "all open"); ' +
+    '— "what\'s the status of X" when X matches multiple issues (offer the top candidates); ' +
+    '— creating an issue with under-specified fields (offer common defaults). ' +
+    'Bad triggers: trivial follow-ups, formatting preferences, things you can solve by trying a sensible default first, anything inferrable from prior turns. Never ask more than one clarifying question in a row. ' +
+    'JQL construction rules: ' +
+    '(A) Use `project = KEY` ONLY when the user names a known project key (case-insensitive match against the list above) or its obvious nickname (e.g. "Hydrotec" → HTH, "Marker" → NSMGM). ' +
+    '(B) If the user mentions any other term (a feature, module, component, epic name, e.g. "Comission module", "Seminar Registration", "Payment flow") — do NOT put it after `project = `. Instead, search across projects with `text ~ "term"` (covers summary, description, comments). ' +
+    '(C) For date filters use absolute JQL like `created >= "2026-04-29"` or relative `created >= -14d`. ' +
+    '(D) When search_jira returns 0, you MUST retry at least once with a broadened query before reporting "none found": drop the project filter, switch to `text ~ "..."`, try `labels = "..."` or `component = "..."`, or use OR across alternate spellings. Only after a broadened retry also returns 0 may you tell the user nothing was found. ' +
+    '(E) If you are unsure what project a feature belongs to, call list_projects first. ' +
     'Respond in the same language the user writes in (Russian, Ukrainian, or English). ' +
     'Output rules: ' +
     '(1) When search_jira or multiple get_issue calls return 2 or more issues, the UI auto-renders them as a structured table — do NOT repeat each issue\'s fields in prose. Just give a one-line intro ("Here are 12 matching issues:") and add a brief insight/aggregate if useful (e.g. "8 of them are In Progress, all assigned to Dima"). ' +
@@ -374,7 +478,7 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
 
   try {
     for (let i = 0; i < 6; i++) {
-      const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+      const upstream = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'gpt-4o', messages: msgs, tools: JIRA_TOOLS, tool_choice: 'auto', temperature: 0.3, max_tokens: 2000 }),
@@ -387,6 +491,16 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
 
       if (choice.finish_reason !== 'tool_calls') {
         return res.json({ reply: choice.message.content, toolResults });
+      }
+
+      const askCall = findAskUserCall(choice.message.tool_calls);
+      if (askCall) {
+        const clarification = buildClarificationFromCall(askCall);
+        return res.json({
+          reply: clarification?.question || 'Уточните, пожалуйста, что именно вас интересует.',
+          clarification,
+          toolResults,
+        });
       }
 
       for (const tc of choice.message.tool_calls) {
@@ -405,7 +519,7 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
     res.json({ reply: 'Превышен лимит шагов. Попробуйте переформулировать запрос.', toolResults });
   } catch (err) {
     console.error('[BA Agent error]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: humaniseFetchError(err) });
   }
 });
 
@@ -441,6 +555,7 @@ function briefMeeting(m) {
 }
 
 const FATHOM_TOOLS = [
+  ASK_USER_TOOL,
   {
     type: 'function',
     function: {
@@ -504,7 +619,7 @@ const FATHOM_TOOLS = [
 ];
 
 async function fathomFetch(path) {
-  const r = await fetch(`${FATHOM_BASE}${path}`, { headers: fathomHeaders() });
+  const r = await fetchWithRetry(`${FATHOM_BASE}${path}`, { headers: fathomHeaders() });
   if (!r.ok) {
     const txt = (await r.text()).slice(0, 200);
     console.error(`[Fathom ${r.status}] ${path} :: ${txt}`);
@@ -587,6 +702,12 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
     'Help users query their recorded calls: find meetings, read transcripts, summarise discussions, extract action items. ' +
     'Always use tools to retrieve live data — never invent meeting titles, dates, recording IDs, or transcript content. ' +
     `Today is ${nowIso}. Convert relative dates ("last week", "yesterday") to absolute ISO 8601 timestamps for tool calls. ` +
+    'Before doing real work, call ask_user when the request is genuinely ambiguous AND the answer changes which tools/parameters you would call. ' +
+    'Good triggers: ' +
+    '— user asks about "the meeting with X" or "the call about Y" when multiple meetings match (offer the top 2–4 candidate meetings by title/date); ' +
+    '— "summarise" without scope (offer "today" / "this week" / "specific meeting"); ' +
+    '— ambiguous topic search (offer narrowing by date range or by participant). ' +
+    'Bad triggers: trivial follow-ups, things you can solve by trying a sensible default first, anything inferrable from prior turns. Never ask more than one clarifying question in a row. ' +
     'Workflow rules: ' +
     '(1) When the user asks for a summary or transcript of a specific meeting, you MUST first call list_meetings (or search_meetings) to obtain the real recording_id, then call get_summary/get_transcript with that id. ' +
     '(2) The list_meetings result does NOT include summary/transcript content — never claim "no summary available" based on the list alone. If the user wants a summary, always call get_summary by recording_id. ' +
@@ -608,7 +729,7 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
 
   try {
     for (let i = 0; i < 6; i++) {
-      const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
+      const upstream = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: 'gpt-4o', messages: msgs, tools: FATHOM_TOOLS, tool_choice: 'auto', temperature: 0.3, max_tokens: 2000 }),
@@ -621,6 +742,16 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
 
       if (choice.finish_reason !== 'tool_calls') {
         return res.json({ reply: choice.message.content, toolResults });
+      }
+
+      const askCall = findAskUserCall(choice.message.tool_calls);
+      if (askCall) {
+        const clarification = buildClarificationFromCall(askCall);
+        return res.json({
+          reply: clarification?.question || 'Уточните, пожалуйста, что именно вас интересует.',
+          clarification,
+          toolResults,
+        });
       }
 
       for (const tc of choice.message.tool_calls) {
@@ -639,7 +770,7 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
     res.json({ reply: 'Превышен лимит шагов. Попробуйте переформулировать запрос.', toolResults });
   } catch (err) {
     console.error('[Fathom Agent error]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: humaniseFetchError(err) });
   }
 });
 

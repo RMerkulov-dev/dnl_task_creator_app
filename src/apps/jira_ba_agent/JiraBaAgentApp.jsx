@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
+import AgentClarification from '../../components/AgentClarification.jsx';
 
 const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 const CLOUD_ID = PROJECT_LIST.find(p => p.jira)?.jira.cloudId ?? '';
@@ -238,7 +239,7 @@ function IssuesTable({ issues }) {
   );
 }
 
-function ChatMessage({ msg }) {
+function ChatMessage({ msg, isLast, onClarificationAnswer }) {
   if (msg.role === 'user') {
     return (
       <div className="ba-msg ba-msg-user">
@@ -260,6 +261,13 @@ function ChatMessage({ msg }) {
       <ToolPills toolResults={msg.toolResults} />
       {showTable && <IssuesTable issues={issues} />}
       <AssistantText text={msg.content} />
+      {msg.clarification && (
+        <AgentClarification
+          clarification={msg.clarification}
+          onAnswer={onClarificationAnswer}
+          locked={!isLast}
+        />
+      )}
     </div>
   );
 }
@@ -310,12 +318,11 @@ export default function JiraBaAgentApp({ user, onLogout }) {
     setError('');
 
     const userMsg = { role: 'user', content: trimmed };
-    setMessages(prev => {
-      const next = [...prev, userMsg];
-      sendToBackend(trimmed, next.slice(0, -1));
-      return next;
-    });
-  }, [loading]); // eslint-disable-line
+    // NOTE: pure updater (no side effects). StrictMode double-invokes the
+    // updater in dev — calling sendToBackend inside would fire two HTTP requests.
+    setMessages(prev => [...prev, userMsg]);
+    sendToBackend(trimmed, messages);
+  }, [loading, messages]); // eslint-disable-line
 
   async function sendToBackend(message, prevMessages) {
     setLoading(true);
@@ -328,7 +335,12 @@ export default function JiraBaAgentApp({ user, onLogout }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Server error');
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply, toolResults: data.toolResults ?? [] }]);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.reply,
+        toolResults: data.toolResults ?? [],
+        clarification: data.clarification || null,
+      }]);
     } catch (err) {
       setMessages(prev => [...prev, { role: 'error', content: err.message }]);
     } finally {
@@ -421,7 +433,14 @@ export default function JiraBaAgentApp({ user, onLogout }) {
               </p>
             </div>
           )}
-          {messages.map((msg, i) => <ChatMessage key={i} msg={msg} />)}
+          {messages.map((msg, i) => (
+            <ChatMessage
+              key={i}
+              msg={msg}
+              isLast={i === messages.length - 1}
+              onClarificationAnswer={answer => send(answer)}
+            />
+          ))}
           {loading && <ThinkingBubble />}
           <div ref={bottomRef} />
         </div>

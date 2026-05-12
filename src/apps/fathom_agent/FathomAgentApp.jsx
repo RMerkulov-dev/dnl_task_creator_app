@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import AgentClarification from '../../components/AgentClarification.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -101,7 +102,7 @@ function AssistantText({ text }) {
   );
 }
 
-function ChatMessage({ msg }) {
+function ChatMessage({ msg, isLast, onClarificationAnswer }) {
   if (msg.role === 'user') {
     return (
       <div className="ba-msg ba-msg-user">
@@ -120,6 +121,13 @@ function ChatMessage({ msg }) {
     <div className="ba-msg ba-msg-assistant">
       <ToolPills toolResults={msg.toolResults} />
       <AssistantText text={msg.content} />
+      {msg.clarification && (
+        <AgentClarification
+          clarification={msg.clarification}
+          onAnswer={onClarificationAnswer}
+          locked={!isLast}
+        />
+      )}
     </div>
   );
 }
@@ -192,12 +200,11 @@ export default function FathomAgentApp({ user, onLogout }) {
     setError('');
 
     const userMsg = { role: 'user', content: trimmed };
-    setMessages(prev => {
-      const next = [...prev, userMsg];
-      sendToBackend(trimmed, next.slice(0, -1));
-      return next;
-    });
-  }, [loading]); // eslint-disable-line
+    // NOTE: pure updater (no side effects). StrictMode double-invokes the
+    // updater in dev — calling sendToBackend inside would fire two HTTP requests.
+    setMessages(prev => [...prev, userMsg]);
+    sendToBackend(trimmed, messages);
+  }, [loading, messages]); // eslint-disable-line
 
   async function sendToBackend(message, prevMessages) {
     setLoading(true);
@@ -217,7 +224,12 @@ export default function FathomAgentApp({ user, onLogout }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Server error');
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply, toolResults: data.toolResults ?? [] }]);
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.reply,
+        toolResults: data.toolResults ?? [],
+        clarification: data.clarification || null,
+      }]);
     } catch (err) {
       const msg = err.name === 'AbortError'
         ? (controller.signal.reason === 'timeout'
@@ -320,7 +332,14 @@ export default function FathomAgentApp({ user, onLogout }) {
               </p>
             </div>
           )}
-          {messages.map((msg, i) => <ChatMessage key={i} msg={msg} />)}
+          {messages.map((msg, i) => (
+            <ChatMessage
+              key={i}
+              msg={msg}
+              isLast={i === messages.length - 1}
+              onClarificationAnswer={answer => send(answer)}
+            />
+          ))}
           {loading && <ThinkingBubble startedAt={loadingStart} onCancel={cancelRequest} />}
           <div ref={bottomRef} />
         </div>
