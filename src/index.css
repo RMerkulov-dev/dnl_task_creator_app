@@ -2048,6 +2048,50 @@ html, body, #root {
   30%            { transform: translateY(-5px); opacity: 1; }
 }
 
+.ba-thinking-rich {
+  padding: 12px 16px;
+}
+
+.ba-thinking-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ba-thinking-hint {
+  color: var(--text-2);
+  font-size: 13px;
+  margin-left: 4px;
+}
+
+.ba-thinking-timer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+  background: var(--bg-input);
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.ba-thinking-cancel {
+  padding: 3px 9px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ba-thinking-cancel:hover {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+}
+
 /* Input bar */
 .ba-input-bar {
   padding: 12px 0 20px;
@@ -2303,6 +2347,144 @@ html, body, #root {
 
 .theme-toggle-opt:not(.active):hover {
   color: var(--text-1);
+}
+
+/* ─── Jira issues table (BA Agent) ──────────────────────────────────────── */
+
+.ba-issues-card {
+  margin: 10px 0 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.ba-issues-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.ba-issues-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ba-issues-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ba-issues-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ba-issues-copy-btn:hover {
+  background: var(--border);
+}
+
+.ba-issues-scroll {
+  max-height: 480px;
+  overflow: auto;
+}
+
+.ba-issues-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.ba-issues-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-input);
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+
+.ba-issues-table tbody tr {
+  border-top: 1px solid var(--border);
+  transition: background 0.12s;
+}
+
+.ba-issues-table tbody tr:first-child { border-top: none; }
+.ba-issues-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+.ba-issues-table td {
+  padding: 9px 12px;
+  vertical-align: top;
+  color: var(--text-1);
+}
+
+.ba-issues-table td:first-child { white-space: nowrap; }
+
+.ba-issues-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  background: rgba(38, 132, 255, 0.12);
+  border: 1px solid rgba(38, 132, 255, 0.35);
+  border-radius: 5px;
+  color: #2684ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ba-issues-key:hover {
+  background: rgba(38, 132, 255, 0.22);
+  border-color: rgba(38, 132, 255, 0.6);
+}
+
+.ba-issues-key-link {
+  margin-left: 4px;
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.ba-issues-key-link:hover { color: var(--text-1); }
+
+.ba-issues-summary {
+  min-width: 280px;
+  max-width: 520px;
+  line-height: 1.4;
+}
+
+.ba-issues-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 /* ─── Voice FAB ─────────────────────────────────────────────────────────── */

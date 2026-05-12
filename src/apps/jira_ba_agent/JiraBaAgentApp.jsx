@@ -108,6 +108,136 @@ function formatInline(text) {
     .replace(/\b([A-Z]{2,10}-\d+)\b/g, '<a class="ba-issue-link" href="https://dynamicalabs.atlassian.net/browse/$1" target="_blank" rel="noreferrer">$1 ↗</a>');
 }
 
+// ─── Issues table (rendered from tool results) ────────────────────────────────
+
+const JIRA_BASE = 'https://dynamicalabs.atlassian.net/browse/';
+
+function collectIssues(toolResults) {
+  if (!toolResults?.length) return [];
+  const seen = new Map();
+  for (const t of toolResults) {
+    if (t.error || !t.result) continue;
+    if (t.name === 'search_jira' && Array.isArray(t.result.issues)) {
+      for (const i of t.result.issues) {
+        if (i?.key && !seen.has(i.key)) seen.set(i.key, i);
+      }
+    }
+    if (t.name === 'get_issue' && t.result.key) {
+      if (!seen.has(t.result.key)) seen.set(t.result.key, t.result);
+    }
+  }
+  return Array.from(seen.values());
+}
+
+function CopyIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.8"/>
+      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function issuesToMarkdown(issues) {
+  const header = '| Key | Summary | Status | Assignee | Priority | Type |\n|---|---|---|---|---|---|';
+  const rows = issues.map(i =>
+    `| [${i.key}](${JIRA_BASE}${i.key}) | ${(i.summary ?? '').replace(/\|/g, '\\|')} | ${i.status ?? ''} | ${i.assignee ?? ''} | ${i.priority ?? ''} | ${i.type ?? ''} |`
+  );
+  return [header, ...rows].join('\n');
+}
+
+function issuesToTSV(issues) {
+  const header = ['Key', 'Summary', 'Status', 'Assignee', 'Priority', 'Type'].join('\t');
+  const rows = issues.map(i => [
+    i.key, i.summary ?? '', i.status ?? '', i.assignee ?? '', i.priority ?? '', i.type ?? ''
+  ].map(c => String(c).replace(/\t/g, ' ').replace(/\n/g, ' ')).join('\t'));
+  return [header, ...rows].join('\n');
+}
+
+function IssuesTable({ issues }) {
+  const [copiedAll,  setCopiedAll]  = useState(false);
+  const [copiedKey,  setCopiedKey]  = useState(null);
+
+  async function copyAll(format) {
+    const text = format === 'tsv' ? issuesToTSV(issues) : issuesToMarkdown(issues);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedAll(format);
+      setTimeout(() => setCopiedAll(false), 1500);
+    } catch { /* noop */ }
+  }
+
+  async function copyKey(key) {
+    try {
+      await navigator.clipboard.writeText(key);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1200);
+    } catch { /* noop */ }
+  }
+
+  return (
+    <div className="ba-issues-card">
+      <div className="ba-issues-header">
+        <span className="ba-issues-count">{issues.length} issue{issues.length !== 1 ? 's' : ''}</span>
+        <div className="ba-issues-actions">
+          <button className="ba-issues-copy-btn" onClick={() => copyAll('md')} title="Copy as Markdown table">
+            {copiedAll === 'md' ? <CheckIcon /> : <CopyIcon />}
+            <span>{copiedAll === 'md' ? 'Copied' : 'Markdown'}</span>
+          </button>
+          <button className="ba-issues-copy-btn" onClick={() => copyAll('tsv')} title="Copy as TSV (Excel/Sheets)">
+            {copiedAll === 'tsv' ? <CheckIcon /> : <CopyIcon />}
+            <span>{copiedAll === 'tsv' ? 'Copied' : 'TSV'}</span>
+          </button>
+        </div>
+      </div>
+      <div className="ba-issues-scroll">
+        <table className="ba-issues-table">
+          <thead>
+            <tr>
+              <th>Key</th>
+              <th>Summary</th>
+              <th>Status</th>
+              <th>Assignee</th>
+              <th>Priority</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            {issues.map(i => (
+              <tr key={i.key}>
+                <td>
+                  <button
+                    className="ba-issues-key"
+                    onClick={() => copyKey(i.key)}
+                    title={`Copy ${i.key}`}
+                  >
+                    {copiedKey === i.key ? <CheckIcon /> : null}
+                    {i.key}
+                  </button>
+                  <a className="ba-issues-key-link" href={`${JIRA_BASE}${i.key}`} target="_blank" rel="noreferrer" title="Open in Jira">↗</a>
+                </td>
+                <td className="ba-issues-summary">{i.summary}</td>
+                <td><span className="ba-issues-chip">{i.status || '—'}</span></td>
+                <td>{i.assignee || '—'}</td>
+                <td>{i.priority || '—'}</td>
+                <td>{i.type || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ChatMessage({ msg }) {
   if (msg.role === 'user') {
     return (
@@ -123,9 +253,12 @@ function ChatMessage({ msg }) {
       </div>
     );
   }
+  const issues = collectIssues(msg.toolResults);
+  const showTable = issues.length >= 2;
   return (
     <div className="ba-msg ba-msg-assistant">
       <ToolPills toolResults={msg.toolResults} />
+      {showTable && <IssuesTable issues={issues} />}
       <AssistantText text={msg.content} />
     </div>
   );

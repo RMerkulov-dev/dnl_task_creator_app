@@ -124,10 +124,32 @@ function ChatMessage({ msg }) {
   );
 }
 
-function ThinkingBubble() {
+function ThinkingBubble({ startedAt, onCancel }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const id = setInterval(() => setSecs(Math.floor((Date.now() - startedAt) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  const hint =
+    secs < 3  ? 'Думаю…' :
+    secs < 8  ? 'Ищу встречи в Fathom…' :
+    secs < 20 ? 'Читаю транскрипты…' :
+                'Всё ещё работаю — большие транскрипты, потерпите…';
+
   return (
-    <div className="ba-msg ba-msg-assistant ba-thinking">
-      <span className="ba-dot" /><span className="ba-dot" /><span className="ba-dot" />
+    <div className="ba-msg ba-msg-assistant ba-thinking-rich">
+      <div className="ba-thinking-row">
+        <span className="ba-dot" /><span className="ba-dot" /><span className="ba-dot" />
+        <span className="ba-thinking-hint">{hint}</span>
+        <span className="ba-thinking-timer">{secs}s</span>
+        {onCancel && secs >= 5 && (
+          <button className="ba-thinking-cancel" onClick={onCancel} title="Прервать">
+            Отмена
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -138,6 +160,7 @@ export default function FathomAgentApp({ user, onLogout }) {
   const [messages,     setMessages]     = useState([]);
   const [input,        setInput]        = useState('');
   const [loading,      setLoading]      = useState(false);
+  const [loadingStart, setLoadingStart] = useState(0);
   const [recording,    setRecording]    = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [error,        setError]        = useState('');
@@ -147,6 +170,9 @@ export default function FathomAgentApp({ user, onLogout }) {
   const mrRef       = useRef(null);
   const chunksRef   = useRef([]);
   const audioCtxRef = useRef(null);
+  const abortRef    = useRef(null);
+
+  const REQUEST_TIMEOUT_MS = 90_000;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -175,21 +201,40 @@ export default function FathomAgentApp({ user, onLogout }) {
 
   async function sendToBackend(message, prevMessages) {
     setLoading(true);
+    setLoadingStart(Date.now());
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const timeoutId = setTimeout(() => controller.abort('timeout'), REQUEST_TIMEOUT_MS);
+
     try {
       const history = prevMessages.map(m => ({ role: m.role === 'error' ? 'assistant' : m.role, content: m.content }));
       const res  = await fetch('/api/fathom-agent', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, history, userEmail: user }),
+        body:    JSON.stringify({ message, history, userEmail: user }),
+        signal:  controller.signal,
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Server error');
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply, toolResults: data.toolResults ?? [] }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'error', content: err.message }]);
+      const msg = err.name === 'AbortError'
+        ? (controller.signal.reason === 'timeout'
+            ? `Запрос превысил ${REQUEST_TIMEOUT_MS / 1000}s — прервано. Попробуйте уточнить вопрос.`
+            : 'Запрос отменён.')
+        : err.message;
+      setMessages(prev => [...prev, { role: 'error', content: msg }]);
     } finally {
+      clearTimeout(timeoutId);
+      abortRef.current = null;
       setLoading(false);
+      setLoadingStart(0);
     }
+  }
+
+  function cancelRequest() {
+    abortRef.current?.abort('user');
   }
 
   // ─── Voice recording ─────────────────────────────────────────────────────
@@ -276,7 +321,7 @@ export default function FathomAgentApp({ user, onLogout }) {
             </div>
           )}
           {messages.map((msg, i) => <ChatMessage key={i} msg={msg} />)}
-          {loading && <ThinkingBubble />}
+          {loading && <ThinkingBubble startedAt={loadingStart} onCancel={cancelRequest} />}
           <div ref={bottomRef} />
         </div>
 

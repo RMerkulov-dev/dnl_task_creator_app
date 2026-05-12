@@ -358,7 +358,10 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
     'Help users query and manage Jira: find issues, check sprints, create tasks, summarise epics. ' +
     'Always use tools to retrieve live data — never invent issue keys or counts. ' +
     'Respond in the same language the user writes in (Russian, Ukrainian, or English). ' +
-    'Format responses clearly: use bullet lists or numbered lists for multiple issues. ' +
+    'Output rules: ' +
+    '(1) When search_jira or multiple get_issue calls return 2 or more issues, the UI auto-renders them as a structured table — do NOT repeat each issue\'s fields in prose. Just give a one-line intro ("Here are 12 matching issues:") and add a brief insight/aggregate if useful (e.g. "8 of them are In Progress, all assigned to Dima"). ' +
+    '(2) For a single issue, you may describe it in detail. ' +
+    '(3) Use bullets only for items that are NOT issues (e.g. sprints, projects). ' +
     userCtx;
 
   const msgs = [
@@ -589,6 +592,8 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
     '(2) The list_meetings result does NOT include summary/transcript content — never claim "no summary available" based on the list alone. If the user wants a summary, always call get_summary by recording_id. ' +
     '(3) Use recorded_by ONLY when the user explicitly says "my meetings"/"recorded by me". Filtering by other people\'s emails (e.g. "from Igor") will likely return empty unless that person is the recorder — better to list without filter and pick by attendee/title. ' +
     '(4) Prefer search_meetings when the user asks about a topic; prefer list_meetings when asking for recent calls. ' +
+    '(5) NEVER give up after a single failed lookup. If search_meetings returns matched=0, you MUST fall back: call list_meetings for the relevant time window (e.g. created_after=today 00:00Z for "today", or last 7 days otherwise), then call get_transcript on the most plausible candidates by title/attendees. Only after exhausting these steps may you say nothing was found. ' +
+    '(6) When the user asks what a specific person said about a topic, attendees in the list are the key signal — pick meetings where that person is in invitees, then read the transcript. ' +
     'Respond in the same language the user writes in (Russian, Ukrainian, or English). ' +
     'When citing a meeting, include its title and Fathom URL. Format with bullet lists for multiple items. ' +
     userCtx;
