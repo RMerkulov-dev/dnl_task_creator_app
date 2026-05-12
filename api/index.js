@@ -127,11 +127,11 @@ const BASE_PROMPT =
   'дедлайн, релиз, деплой, тестирование, интеграция, ' +
   'требования, функциональность, приоритет, оценка, ревью.';
 
-// Voice transcription (OpenAI Whisper)
+// Voice transcription (Groq Whisper — OpenAI-compatible endpoint)
 app.post('/api/transcribe', async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    return res.status(503).json({ error: 'OPENAI_API_KEY is not configured on the server.' });
+    return res.status(503).json({ error: 'GROQ_API_KEY is not configured on the server.' });
   }
 
   const language    = req.query.language || '';
@@ -142,13 +142,14 @@ app.post('/api/transcribe', async (req, res) => {
 
   const formData = new FormData();
   formData.append('file',        new Blob([body], { type: contentType }), 'audio.webm');
-  formData.append('model',       'whisper-1');
+  formData.append('model',       'whisper-large-v3-turbo');
   formData.append('prompt',      prompt);
   formData.append('temperature', '0');
+  formData.append('response_format', 'json');
   if (language) formData.append('language', language);
 
   try {
-    const upstream = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+    const upstream = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: formData,

@@ -1214,6 +1214,7 @@ body {
 .voice-wrap {
   width: 100%;
   max-width: 680px;
+  margin: auto;
   display: flex;
   flex-direction: column;
   gap: 28px;
