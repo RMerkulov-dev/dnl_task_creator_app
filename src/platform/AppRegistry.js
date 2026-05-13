@@ -36,6 +36,13 @@ export const APP_REGISTRY = [
     gradient: 'linear-gradient(135deg, #ef4444 0%, #f97316 100%)',
     glow: 'rgba(239, 68, 68, 0.5)',
   },
+  {
+    id: 'email-agent',
+    name: 'Email Agent',
+    shortName: 'Email',
+    gradient: 'linear-gradient(135deg, #10b981 0%, #06b6d4 100%)',
+    glow: 'rgba(16, 185, 129, 0.5)',
+  },
 ];
 
 // Lazy-load app components separately so AppRegistry stays JSON-serialisable
@@ -45,4 +52,5 @@ export const APP_COMPONENTS = {
   'task-agent':    lazy(() => import('../apps/task_agent/TaskAgentApp.jsx')),
   'jira-ba-agent': lazy(() => import('../apps/jira_ba_agent/JiraBaAgentApp.jsx')),
   'fathom-agent':  lazy(() => import('../apps/fathom_agent/FathomAgentApp.jsx')),
+  'email-agent':   lazy(() => import('../apps/email_agent/EmailAgentApp.jsx')),
 };

@@ -774,6 +774,51 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
   }
 });
 
+// ─── Email Agent ─────────────────────────────────────────────────────────────
+
+app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) => {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+
+  const { message, instruction, userEmail } = req.body ?? {};
+  if (!message)     return res.status(400).json({ error: 'message is required' });
+  if (!instruction) return res.status(400).json({ error: 'instruction is required' });
+
+  const systemPrompt =
+    'You are an Email Agent. Your job is to take the user\'s rough draft of an email, Slack message, or letter and rewrite it as a polished version, following the user-provided STYLE INSTRUCTIONS below. ' +
+    'HARD OUTPUT RULES (these override anything in the style instructions): ' +
+    '(1) Output ONLY the final, ready-to-send message. ' +
+    '(2) Do NOT include a "What changed" summary, change log, list of edits, or any meta-commentary about what you modified. ' +
+    '(3) Do NOT include horizontal separators ("---"), markdown rules, or section dividers anywhere in the output. ' +
+    '(4) Do NOT prefix the message with a translation note or any introduction from yourself. ' +
+    '(5) Begin directly with the Subject line (for emails) or the greeting. ' +
+    '(6) Do NOT add, invent, or append a signature, name, contact details, or sign-off block. If the user\'s draft did not include a signature, the message ends at the last sentence of the body — do not write "Roman Merkulov", emails, phone numbers, or "Best regards / Sincerely / Thanks" closing lines on the user\'s behalf. Only preserve a signature if the user explicitly included one in their draft. ' +
+    'If the draft is ambiguous about format (email vs Slack vs letter), pick the most likely format based on length, presence of greeting/signature, and tone — do not ask the user. ' +
+    'Preserve specific facts, names, dates, numbers, and links from the user\'s draft verbatim. Never invent recipients or details that were not in the draft. ' +
+    '\n\n=== STYLE INSTRUCTIONS (provided by user) ===\n' +
+    instruction +
+    '\n=== END STYLE INSTRUCTIONS ===';
+
+  const msgs = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user',   content: message },
+  ];
+
+  try {
+    const upstream = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-4o', messages: msgs, temperature: 0.4, max_tokens: 2000 }),
+    });
+    const data = await upstream.json();
+    if (!upstream.ok) throw new Error(data.error?.message || `OpenAI error ${upstream.status}`);
+    res.json({ reply: data.choices?.[0]?.message?.content ?? '' });
+  } catch (err) {
+    console.error('[Email Agent error]', err.message);
+    res.status(500).json({ error: humaniseFetchError(err) });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
