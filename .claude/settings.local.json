@@ -59,7 +59,8 @@
       "Bash(grep *)",
       "Bash(perl -i -pe 's/await fetch\\\\\\(\\\\`\\\\$\\\\{base\\\\}/await fetchWithRetry\\(`\\\\${base}/g; s/await fetch\\\\\\(\\\\`\\\\$\\\\{agileBase\\\\}/await fetchWithRetry\\(`\\\\${agileBase}/g; s/await fetch\\\\\\(\\\\`\\\\$\\\\{FATHOM_BASE\\\\}/await fetchWithRetry\\(`\\\\${FATHOM_BASE}/g' api/index.js)",
       "Bash(node -e \"import\\('./api/index.js'\\).then\\(\\(\\) => console.log\\('imports OK'\\)\\).catch\\(e => { console.error\\('FAIL:', e.message\\); process.exit\\(1\\); }\\)\")",
-      "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{\"message\":\"покажи задачи на Viktor Kalantai в статусе Dev Ready\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\",\"cloudId\":\"ede50bd6-614f-4723-b64b-76ef4be362d5\"}')"
+      "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{\"message\":\"покажи задачи на Viktor Kalantai в статусе Dev Ready\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\",\"cloudId\":\"ede50bd6-614f-4723-b64b-76ef4be362d5\"}')",
+      "Bash(node --check src/components/Dashboard.jsx)"
     ]
   }
 }

@@ -170,7 +170,21 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     if (!selectedIteration) return;
     let cancelled = false;
     getStories(proj.azure.proxyKey, proj.azure.project, selectedIteration)
-      .then(all => { if (!cancelled) setStories(all); })
+      .then(async filtered => {
+        if (cancelled) return;
+        if (filtered.length > 0) {
+          setStories(filtered);
+          return;
+        }
+        // Fallback: sprint has no stories with child tasks — show all open stories
+        // so the Parent Story selector doesn't disappear.
+        try {
+          const all = await getStories(proj.azure.proxyKey, proj.azure.project);
+          if (!cancelled) setStories(all);
+        } catch {
+          if (!cancelled) setStories([]);
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedIteration]);
