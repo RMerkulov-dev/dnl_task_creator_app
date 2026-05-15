@@ -25,10 +25,31 @@ function getDefaultTitlePrefix(projId, boardName, jiraProj) {
   return '';
 }
 
+// ─── Rich-text emptiness check ─────────────────────────────────────────────
+// Tiptap leaves "<p></p>" / "<p><br></p>" when the editor is empty.
+function isDescriptionEmpty(html) {
+  if (!html) return true;
+  const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim();
+  return text.length === 0;
+}
+
+// ─── Story list cleanup ────────────────────────────────────────────────────
+// Drops "Backlog Review" bucket stories and dedupes by title (keeps first occurrence).
+function cleanStories(stories) {
+  const seen = new Set();
+  const out = [];
+  for (const s of stories) {
+    const t = (s.title || '').trim();
+    if (t.toLowerCase() === 'backlog review') continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push(s);
+  }
+  return out;
+}
+
 // ─── localStorage helpers ──────────────────────────────────────────────────
 const LS_KEY = 'dnl-task-filters';
-
-//Test
 
 function loadSaved() {
   try { return JSON.parse(localStorage.getItem(LS_KEY)) || {}; } catch { return {}; }
@@ -67,6 +88,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   const [mode,        setMode]        = useState('create');
   const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
+  const [formError,   setFormError]   = useState('');
 
   // ── Edit mode state ───────────────────────────────────────────────────────
   const [epicId,       setEpicId]       = useState('');
@@ -143,7 +165,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     if (features.story) {
       loads.push(
         getStories(azure.proxyKey, azure.project)
-          .then(all => { if (loadIdRef.current === currentLoadId) setStories(all); })
+          .then(all => { if (loadIdRef.current === currentLoadId) setStories(cleanStories(all)); })
           .catch(e => { if (loadIdRef.current === currentLoadId) setExtrasErr(e.message); })
       );
     }
@@ -172,15 +194,16 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     getStories(proj.azure.proxyKey, proj.azure.project, selectedIteration)
       .then(async filtered => {
         if (cancelled) return;
-        if (filtered.length > 0) {
-          setStories(filtered);
+        const cleanedFiltered = cleanStories(filtered);
+        if (cleanedFiltered.length > 0) {
+          setStories(cleanedFiltered);
           return;
         }
         // Fallback: sprint has no stories with child tasks — show all open stories
         // so the Parent Story selector doesn't disappear.
         try {
           const all = await getStories(proj.azure.proxyKey, proj.azure.project);
-          if (!cancelled) setStories(all);
+          if (!cancelled) setStories(cleanStories(all));
         } catch {
           if (!cancelled) setStories([]);
         }
@@ -207,6 +230,12 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       setSelectedJiraProj(saved.jiraProject);
     }
   }, [loadingExtras, proj.id]);
+
+  // ── Clear form error once the user fixes the missing field ───────────────
+  useEffect(() => {
+    if (!formError) return;
+    if (title.trim() && !isDescriptionEmpty(description)) setFormError('');
+  }, [title, description, formError]);
 
   // ── Persist filter selections ─────────────────────────────────────────────
   useEffect(() => {
@@ -253,6 +282,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     setFetchErr('');
     setIdMode('azure');
     setCreateFromJira(false);
+    setFormError('');
   }
 
   function handleModeChange(m) {
@@ -405,7 +435,15 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      setFormError('Title is required');
+      return;
+    }
+    if (isDescriptionEmpty(description)) {
+      setFormError('Description is required');
+      return;
+    }
+    setFormError('');
     runSync();
   }
 
@@ -417,7 +455,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   }
 
   // ── Validation ────────────────────────────────────────────────────────────
-  const canSubmit = title.trim() && (mode === 'create' || epicId.trim() || createFromJira);
+  const hasDescription = !isDescriptionEmpty(description);
+  const canSubmit = title.trim() && hasDescription
+    && (mode === 'create' || epicId.trim() || createFromJira);
   const { features } = proj;
   const showExtrasSection = features.iteration || features.story || features.board || features.jiraProject;
 
@@ -532,8 +572,12 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
 
                 {/* Submit */}
                 <button type="submit" className="btn btn-primary"
-                  style={{ marginBottom: 24 }}
-                  disabled={!canSubmit || syncing}>
+                  style={{
+                    marginBottom: formError ? 8 : 24,
+                    ...(canSubmit ? {} : { opacity: 0.32, cursor: 'not-allowed' }),
+                  }}
+                  aria-disabled={!canSubmit}
+                  disabled={syncing}>
                   {syncing ? (
                     <>
                       <span className="spinner"
@@ -542,6 +586,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
                     </>
                   ) : mode === 'create' ? 'Create Task ↗' : 'Save Changes ↗'}
                 </button>
+                {formError && (
+                  <p className="error-msg" style={{ marginBottom: 24 }}>⚠ {formError}</p>
+                )}
 
                 {/* Project */}
                 <div className="field">
