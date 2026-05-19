@@ -60,9 +60,122 @@ async function fetchWithRetry(url, init, attempts = 2) {
 
 function humaniseFetchError(err) {
   if (isTransientFetchError(err)) {
-    return 'Не удалось связаться с внешним сервисом (Jira / OpenAI). Проверьте сеть и попробуйте ещё раз.';
+    return 'Could not reach external service (Jira / OpenRouter). Check your network and try again.';
   }
   return err.message;
+}
+
+// ─── OpenRouter (DeepSeek V4 Pro planner + V4 Flash executor) ────────────────
+
+const OPENROUTER_URL      = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_PLANNER  = process.env.OPENROUTER_PLANNER_MODEL  || 'deepseek/deepseek-v4-pro';
+const OPENROUTER_EXECUTOR = process.env.OPENROUTER_EXECUTOR_MODEL || 'deepseek/deepseek-v4-flash';
+const OPENROUTER_REFERER  = process.env.OPENROUTER_REFERER        || 'https://task-creator.dynamicalabs.com';
+const OPENROUTER_TITLE    = 'Dynamica Task Creator';
+
+function openRouterHeaders(apiKey) {
+  return {
+    Authorization:  `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'HTTP-Referer': OPENROUTER_REFERER,
+    'X-Title':      OPENROUTER_TITLE,
+  };
+}
+
+async function callOpenRouter(apiKey, body) {
+  const upstream = await fetchWithRetry(OPENROUTER_URL, {
+    method:  'POST',
+    headers: openRouterHeaders(apiKey),
+    body:    JSON.stringify(body),
+  });
+  const data = await upstream.json();
+  if (!upstream.ok) throw new Error(data.error?.message || `OpenRouter error ${upstream.status}`);
+  return data;
+}
+
+// V4 Flash / V4 Pro are reasoning models — when the budget is tight or the
+// model never breaks out of the reasoning phase, `content` comes back null and
+// the actual answer is in `reasoning`. Always prefer content; fall back so the
+// caller never gets an empty string.
+function extractReply(message) {
+  return (message?.content || message?.reasoning || '').trim();
+}
+
+// Compact human-readable description of available tools (for the planner only).
+function summariseTools(tools) {
+  return tools.map(t => {
+    const props = Object.entries(t.function.parameters?.properties || {})
+      .map(([k, v]) => `${k}:${v.type || 'any'}`)
+      .join(', ');
+    return `- ${t.function.name}(${props}) — ${t.function.description}`;
+  }).join('\n');
+}
+
+// Ask V4 Pro for a structured plan. The plan is shown to the user for
+// approval/edits before any tool is called. Returns one of three modes:
+//   - "plan":    a numbered execution plan the user can approve or revise
+//   - "clarify": the planner needs the user to choose between options first
+//   - "direct":  trivial request, no confirmation needed; executor runs immediately
+async function buildPlan(apiKey, { domain, systemPrompt, tools, history, message }) {
+  const plannerSystem =
+    `You are a planning model for a ${domain} agent. The plan you produce is SHOWN TO THE USER for approval before any work runs. ` +
+    'It must read like a clear, friendly summary of what you intend to do — not like a technical script.\n\n' +
+    'Decide between three response modes:\n' +
+    '1) "plan" — Write a step-by-step plan a non-technical user can read in a few seconds. RULES:\n' +
+    '   • ALWAYS write the plan in ENGLISH, no matter what language the user used.\n' +
+    '   • 2 to 5 steps. Each step on its own line, prefixed with "1.", "2.", … (a number, a period, a space).\n' +
+    '   • Start each step with a short bold title using **markdown**, then a dash, then one human sentence describing it. ' +
+    'Example: "1. **Find the meeting** — locate the most recent call with Ion about the Vendor Report."\n' +
+    '   • Describe WHAT you will do and WHERE you will look in plain English (e.g. "in your Fathom meetings from the last 14 days", "across all known Jira projects"). ' +
+    'NEVER mention internal function names, tool names, API endpoints, JQL strings, or parameter names. ' +
+    'Say "search your meetings" instead of "call search_meetings(query=…)". Say "look in the NSMG project" instead of "project = NSMG".\n' +
+    '   • Do not include preamble, conclusion, or commentary — just the numbered steps.\n' +
+    '2) "clarify" — Use ONLY when information needed to plan is genuinely missing AND would change what you do (e.g. user mentions a feature without saying which project, or "my tasks" without any time scope). ' +
+    'Provide 2-4 mutually exclusive options. The question and option labels MUST be in ENGLISH.\n' +
+    '3) "direct" — Use ONLY for greetings, thanks, acknowledgements, or trivial questions that need no work at all.\n\n' +
+    'OUTPUT FORMAT — respond with VALID JSON, ONLY the object, no markdown fences, no prose around it:\n' +
+    '{\n' +
+    '  "mode": "plan" | "clarify" | "direct",\n' +
+    '  "plan": "1. **Title** — sentence.\\n2. **Title** — sentence." (when mode=plan, else empty string),\n' +
+    '  "question": "…" (when mode=clarify, else empty string),\n' +
+    '  "options": [{"label":"…","description":"…"}, …] (when mode=clarify, else empty array)\n' +
+    '}\n\n' +
+    `=== AGENT INSTRUCTIONS (for your reference; do NOT quote them in the plan) ===\n${systemPrompt}\n\n` +
+    `=== CAPABILITIES YOU HAVE (for your reference; describe them in plain English in the plan, never by name) ===\n${tools && tools.length ? summariseTools(tools) : '(no tools — produce a writing plan: outline format, tone, structure)'}`;
+
+  const data = await callOpenRouter(apiKey, {
+    model:           OPENROUTER_PLANNER,
+    messages: [
+      { role: 'system', content: plannerSystem },
+      ...history.slice(-10),
+      { role: 'user',   content: message },
+    ],
+    response_format: { type: 'json_object' },
+    temperature:     0.2,
+    // V4 Pro reasons before emitting content. Keep budget generous so the
+    // JSON object isn't truncated mid-output.
+    max_tokens:      4000,
+  });
+
+  const raw = extractReply(data.choices?.[0]?.message);
+  // The model usually emits clean JSON when response_format is set, but be
+  // defensive: strip stray markdown fences and fall back to treating the
+  // whole reply as a plan if JSON.parse fails.
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned);
+    const mode = ['plan', 'clarify', 'direct'].includes(parsed.mode) ? parsed.mode : 'plan';
+    return {
+      mode,
+      plan:     typeof parsed.plan === 'string' ? parsed.plan.trim() : '',
+      question: typeof parsed.question === 'string' ? parsed.question.trim() : '',
+      options:  Array.isArray(parsed.options)
+        ? parsed.options.filter(o => o && typeof o.label === 'string').slice(0, 4)
+        : [],
+    };
+  } catch {
+    return { mode: 'plan', plan: cleaned || raw, question: '', options: [] };
+  }
 }
 
 async function proxyTo(req, res, upstreamUrl, authHeader) {
@@ -432,10 +545,10 @@ async function executeJiraTool(name, args, cloudId) {
 }
 
 app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { message, history = [], cloudId, userEmail } = req.body ?? {};
+  const { message, history = [], cloudId, userEmail, confirmedPlan } = req.body ?? {};
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   const userCtx = userEmail
@@ -468,36 +581,83 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
     '(3) Use bullets only for items that are NOT issues (e.g. sprints, projects). ' +
     userCtx;
 
-  const msgs = [
-    { role: 'system', content: systemPrompt },
-    ...history.slice(-20),
-    { role: 'user', content: message },
-  ];
-
   const toolResults = [];
 
   try {
-    for (let i = 0; i < 6; i++) {
-      const upstream = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'gpt-4o', messages: msgs, tools: JIRA_TOOLS, tool_choice: 'auto', temperature: 0.3, max_tokens: 2000 }),
+    // ── STAGE 1: produce a plan unless the user has already confirmed one ──
+    let plan = '';
+    if (confirmedPlan) {
+      plan = String(confirmedPlan).trim();
+    } else {
+      const planResult = await buildPlan(apiKey, {
+        domain:       'Jira Business Analyst',
+        systemPrompt,
+        tools:        JIRA_TOOLS,
+        history,
+        message,
       });
-      const data = await upstream.json();
-      if (!upstream.ok) throw new Error(data.error?.message || `OpenAI error ${upstream.status}`);
+
+      if (planResult.mode === 'clarify' && planResult.question && planResult.options.length >= 2) {
+        return res.json({
+          stage:         'clarify',
+          reply:         planResult.question,
+          clarification: { question: planResult.question, options: planResult.options },
+          toolResults:   [],
+        });
+      }
+
+      if (planResult.mode === 'plan' && planResult.plan) {
+        return res.json({
+          stage:                'plan',
+          plan:                 planResult.plan,
+          awaitingConfirmation: true,
+          toolResults:          [],
+        });
+      }
+
+      // mode === 'direct' or empty plan → run executor without a plan notice
+      plan = '';
+    }
+
+    // ── STAGE 2: execute with the (confirmed) plan injected as guidance ──
+    const planNotice = plan
+      ? `=== EXECUTION PLAN (approved by user) ===\n${plan}\n=== END PLAN ===\nFollow this plan. If a tool result shows the plan is wrong, adapt and explain in the reply. Your reply to the user must be in the user's language.`
+      : '';
+
+    const msgs = [
+      { role: 'system', content: systemPrompt },
+      ...(planNotice ? [{ role: 'system', content: planNotice }] : []),
+      ...history.slice(-20),
+      { role: 'user', content: message },
+    ];
+
+    for (let i = 0; i < 6; i++) {
+      const data = await callOpenRouter(apiKey, {
+        model:       OPENROUTER_EXECUTOR,
+        messages:    msgs,
+        tools:       JIRA_TOOLS,
+        tool_choice: 'auto',
+        temperature: 0.3,
+        // V4 Flash spends tokens on reasoning before producing content/tool_calls.
+        // Be generous so a final answer isn't truncated mid-thought.
+        max_tokens:  4000,
+      });
 
       const choice = data.choices[0];
       msgs.push(choice.message);
 
       if (choice.finish_reason !== 'tool_calls') {
-        return res.json({ reply: choice.message.content, toolResults });
+        const reply = extractReply(choice.message)
+          || 'The model returned an empty response. Below is the data we managed to retrieve.';
+        return res.json({ stage: 'done', reply, toolResults });
       }
 
       const askCall = findAskUserCall(choice.message.tool_calls);
       if (askCall) {
         const clarification = buildClarificationFromCall(askCall);
         return res.json({
-          reply: clarification?.question || 'Уточните, пожалуйста, что именно вас интересует.',
+          stage:         'clarify',
+          reply:         clarification?.question || 'Please clarify what exactly you need.',
           clarification,
           toolResults,
         });
@@ -516,10 +676,12 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
         msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
       }
     }
-    res.json({ reply: 'Превышен лимит шагов. Попробуйте переформулировать запрос.', toolResults });
+    res.json({ stage: 'done', reply: 'Step limit reached. Try rephrasing your request.', toolResults });
   } catch (err) {
     console.error('[BA Agent error]', err.message);
-    res.status(500).json({ error: humaniseFetchError(err) });
+    // Return any tool results we managed to collect before the failure, so the
+    // UI can still show the work that was done.
+    res.status(500).json({ error: humaniseFetchError(err), toolResults });
   }
 });
 
@@ -528,6 +690,15 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
 const FATHOM_BASE   = 'https://api.fathom.ai/external/v1';
 const FATHOM_KEY    = process.env.FATHOM_API_KEY || '';
 const fathomHeaders = () => ({ 'X-Api-Key': FATHOM_KEY, Accept: 'application/json' });
+
+// Allowlist for the Fathom Agent. Frontend already hides the app for other
+// users, but enforce on the server too so the endpoint can't be hit directly.
+// Override via env (FATHOM_ALLOWED_EMAILS, comma-separated) if the list grows.
+const FATHOM_ALLOWED_EMAILS = (process.env.FATHOM_ALLOWED_EMAILS
+  || 'roman.merkulov@dynamicalabs.com')
+  .split(',')
+  .map(s => s.trim().toLowerCase())
+  .filter(Boolean);
 
 function trimTranscript(transcript, maxLines = 400) {
   if (!Array.isArray(transcript)) return [];
@@ -685,12 +856,19 @@ async function executeFathomTool(name, args) {
 }
 
 app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey)     return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey)     return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
   if (!FATHOM_KEY) return res.status(503).json({ error: 'FATHOM_API_KEY not configured' });
 
-  const { message, history = [], userEmail } = req.body ?? {};
+  const { message, history = [], userEmail, confirmedPlan } = req.body ?? {};
   if (!message) return res.status(400).json({ error: 'message is required' });
+
+  // Enforce per-user allowlist on the server. Frontend already hides the app,
+  // but the endpoint must reject direct requests from other users too.
+  const normalisedEmail = (userEmail || '').trim().toLowerCase();
+  if (!normalisedEmail || !FATHOM_ALLOWED_EMAILS.includes(normalisedEmail)) {
+    return res.status(403).json({ error: 'Fathom Agent is not available for your account.' });
+  }
 
   const nowIso  = new Date().toISOString();
   const userCtx = userEmail
@@ -719,36 +897,83 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
     'When citing a meeting, include its title and Fathom URL. Format with bullet lists for multiple items. ' +
     userCtx;
 
-  const msgs = [
-    { role: 'system', content: systemPrompt },
-    ...history.slice(-20),
-    { role: 'user', content: message },
-  ];
-
   const toolResults = [];
 
   try {
-    for (let i = 0; i < 6; i++) {
-      const upstream = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'gpt-4o', messages: msgs, tools: FATHOM_TOOLS, tool_choice: 'auto', temperature: 0.3, max_tokens: 2000 }),
+    // ── STAGE 1: produce a plan unless the user has already confirmed one ──
+    let plan = '';
+    if (confirmedPlan) {
+      plan = String(confirmedPlan).trim();
+    } else {
+      const planResult = await buildPlan(apiKey, {
+        domain:       'Fathom meetings',
+        systemPrompt,
+        tools:        FATHOM_TOOLS,
+        history,
+        message,
       });
-      const data = await upstream.json();
-      if (!upstream.ok) throw new Error(data.error?.message || `OpenAI error ${upstream.status}`);
+
+      if (planResult.mode === 'clarify' && planResult.question && planResult.options.length >= 2) {
+        return res.json({
+          stage:         'clarify',
+          reply:         planResult.question,
+          clarification: { question: planResult.question, options: planResult.options },
+          toolResults:   [],
+        });
+      }
+
+      if (planResult.mode === 'plan' && planResult.plan) {
+        return res.json({
+          stage:                'plan',
+          plan:                 planResult.plan,
+          awaitingConfirmation: true,
+          toolResults:          [],
+        });
+      }
+
+      // mode === 'direct' or empty plan → run executor without a plan notice
+      plan = '';
+    }
+
+    // ── STAGE 2: execute with the (confirmed) plan injected as guidance ──
+    const planNotice = plan
+      ? `=== EXECUTION PLAN (approved by user) ===\n${plan}\n=== END PLAN ===\nFollow this plan. If a tool result shows the plan is wrong, adapt and explain in the reply. Your reply to the user must be in the user's language.`
+      : '';
+
+    const msgs = [
+      { role: 'system', content: systemPrompt },
+      ...(planNotice ? [{ role: 'system', content: planNotice }] : []),
+      ...history.slice(-20),
+      { role: 'user', content: message },
+    ];
+
+    for (let i = 0; i < 6; i++) {
+      const data = await callOpenRouter(apiKey, {
+        model:       OPENROUTER_EXECUTOR,
+        messages:    msgs,
+        tools:       FATHOM_TOOLS,
+        tool_choice: 'auto',
+        temperature: 0.3,
+        // V4 Flash spends tokens on reasoning before producing content/tool_calls.
+        // Be generous so a final answer isn't truncated mid-thought.
+        max_tokens:  4000,
+      });
 
       const choice = data.choices[0];
       msgs.push(choice.message);
 
       if (choice.finish_reason !== 'tool_calls') {
-        return res.json({ reply: choice.message.content, toolResults });
+        const reply = extractReply(choice.message)
+          || 'The model returned an empty response. Below is the data we managed to retrieve.';
+        return res.json({ stage: 'done', reply, toolResults });
       }
 
       const askCall = findAskUserCall(choice.message.tool_calls);
       if (askCall) {
         const clarification = buildClarificationFromCall(askCall);
         return res.json({
-          reply: clarification?.question || 'Уточните, пожалуйста, что именно вас интересует.',
+          stage:         'clarify',
+          reply:         clarification?.question || 'Please clarify what exactly you need.',
           clarification,
           toolResults,
         });
@@ -767,18 +992,18 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
         msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
       }
     }
-    res.json({ reply: 'Превышен лимит шагов. Попробуйте переформулировать запрос.', toolResults });
+    res.json({ stage: 'done', reply: 'Step limit reached. Try rephrasing your request.', toolResults });
   } catch (err) {
     console.error('[Fathom Agent error]', err.message);
-    res.status(500).json({ error: humaniseFetchError(err) });
+    res.status(500).json({ error: humaniseFetchError(err), toolResults });
   }
 });
 
 // ─── Email Agent ─────────────────────────────────────────────────────────────
 
 app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) => {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: 'OPENAI_API_KEY not configured' });
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
   const { message, instruction, userEmail } = req.body ?? {};
   if (!message)     return res.status(400).json({ error: 'message is required' });
@@ -799,20 +1024,34 @@ app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) =
     instruction +
     '\n=== END STYLE INSTRUCTIONS ===';
 
-  const msgs = [
-    { role: 'system', content: systemPrompt },
-    { role: 'user',   content: message },
-  ];
-
   try {
-    const upstream = await fetchWithRetry('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-4o', messages: msgs, temperature: 0.4, max_tokens: 2000 }),
+    const plan = await buildPlan(apiKey, {
+      domain:       'email rewriting',
+      systemPrompt,
+      tools:        [],
+      history:      [],
+      message,
     });
-    const data = await upstream.json();
-    if (!upstream.ok) throw new Error(data.error?.message || `OpenAI error ${upstream.status}`);
-    res.json({ reply: data.choices?.[0]?.message?.content ?? '' });
+
+    const planNotice = plan && plan !== 'DIRECT'
+      ? `=== REWRITE PLAN (from planner, English — internal only) ===\n${plan}\n=== END PLAN ===\nApply this plan when rewriting. Still obey the HARD OUTPUT RULES above. The plan itself is in English for internal reasoning; the rewritten message must be in the same language as the user's draft.`
+      : '';
+
+    const msgs = [
+      { role: 'system', content: systemPrompt },
+      ...(planNotice ? [{ role: 'system', content: planNotice }] : []),
+      { role: 'user',   content: message },
+    ];
+
+    const data = await callOpenRouter(apiKey, {
+      model:       OPENROUTER_EXECUTOR,
+      messages:    msgs,
+      temperature: 0.4,
+      // V4 Flash reasons before answering; keep budget generous so the
+      // rewritten message isn't truncated.
+      max_tokens:  4000,
+    });
+    res.json({ reply: extractReply(data.choices?.[0]?.message) });
   } catch (err) {
     console.error('[Email Agent error]', err.message);
     res.status(500).json({ error: humaniseFetchError(err) });

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import AgentClarification from '../../components/AgentClarification.jsx';
+import AgentPlan from '../../components/AgentPlan.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -102,7 +103,7 @@ function AssistantText({ text }) {
   );
 }
 
-function ChatMessage({ msg, isLast, onClarificationAnswer }) {
+function ChatMessage({ msg, isLast, onClarificationAnswer, onApprovePlan, onCancelPlan }) {
   if (msg.role === 'user') {
     return (
       <div className="ba-msg ba-msg-user">
@@ -111,9 +112,26 @@ function ChatMessage({ msg, isLast, onClarificationAnswer }) {
     );
   }
   if (msg.role === 'error') {
+    // Even when the server fails mid-flight, render whatever tool results
+    // already came back so the user can see the partial work.
     return (
       <div className="ba-msg ba-msg-error">
-        <p className="ba-msg-text">⚠ {msg.content}</p>
+        <ToolPills toolResults={msg.toolResults} />
+        <p className="ba-msg-text">⚠ {msg.content || 'Unknown error'}</p>
+      </div>
+    );
+  }
+  if (msg.awaitingConfirmation) {
+    const locked = msg.confirmed || msg.cancelled || !isLast;
+    return (
+      <div className="ba-msg ba-msg-assistant ba-msg-with-plan">
+        <AgentPlan
+          plan={msg.plan}
+          onApprove={editedPlan => onApprovePlan(msg, editedPlan)}
+          onCancel={() => onCancelPlan(msg)}
+          locked={locked}
+        />
+        {msg.cancelled && <p className="ba-msg-text" style={{ opacity: 0.6 }}>Plan cancelled.</p>}
       </div>
     );
   }
@@ -141,10 +159,10 @@ function ThinkingBubble({ startedAt, onCancel }) {
   }, [startedAt]);
 
   const hint =
-    secs < 3  ? 'Думаю…' :
-    secs < 8  ? 'Ищу встречи в Fathom…' :
-    secs < 20 ? 'Читаю транскрипты…' :
-                'Всё ещё работаю — большие транскрипты, потерпите…';
+    secs < 3  ? 'Thinking…' :
+    secs < 8  ? 'Searching Fathom meetings…' :
+    secs < 20 ? 'Reading transcripts…' :
+                'Still working — large transcripts, hang tight…';
 
   return (
     <div className="ba-msg ba-msg-assistant ba-thinking-rich">
@@ -153,8 +171,8 @@ function ThinkingBubble({ startedAt, onCancel }) {
         <span className="ba-thinking-hint">{hint}</span>
         <span className="ba-thinking-timer">{secs}s</span>
         {onCancel && secs >= 5 && (
-          <button className="ba-thinking-cancel" onClick={onCancel} title="Прервать">
-            Отмена
+          <button className="ba-thinking-cancel" onClick={onCancel} title="Cancel">
+            Cancel
           </button>
         )}
       </div>
@@ -206,7 +224,16 @@ export default function FathomAgentApp({ user, onLogout }) {
     sendToBackend(trimmed, messages);
   }, [loading, messages]); // eslint-disable-line
 
-  async function sendToBackend(message, prevMessages) {
+  // Build history payload for the backend. Plan-card messages are internal
+  // scaffolding — they're injected via system message on confirmation, not
+  // replayed as conversation, so we skip them here.
+  function toHistoryPayload(prevMessages) {
+    return prevMessages
+      .filter(m => !m.awaitingConfirmation)
+      .map(m => ({ role: m.role === 'error' ? 'assistant' : m.role, content: m.content || '' }));
+  }
+
+  async function sendToBackend(message, prevMessages, opts = {}) {
     setLoading(true);
     setLoadingStart(Date.now());
 
@@ -215,34 +242,84 @@ export default function FathomAgentApp({ user, onLogout }) {
     const timeoutId = setTimeout(() => controller.abort('timeout'), REQUEST_TIMEOUT_MS);
 
     try {
-      const history = prevMessages.map(m => ({ role: m.role === 'error' ? 'assistant' : m.role, content: m.content }));
+      const history = toHistoryPayload(prevMessages);
       const res  = await fetch('/api/fathom-agent', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ message, history, userEmail: user }),
+        body:    JSON.stringify({
+          message,
+          history,
+          userEmail: user,
+          ...(opts.confirmedPlan ? { confirmedPlan: opts.confirmedPlan } : {}),
+        }),
         signal:  controller.signal,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Server error');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || `Server error ${res.status}`);
+        err.toolResults = data.toolResults ?? [];
+        throw err;
+      }
+
+      // Stage 1: planner returned a plan that needs user approval.
+      if (data.stage === 'plan' && data.plan) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          plan: data.plan,
+          awaitingConfirmation: true,
+          confirmed: false,
+          cancelled: false,
+          toolResults: [],
+        }]);
+        return;
+      }
+
+      // Default: normal assistant turn (stage='done' or 'clarify').
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: data.reply,
+        content: data.reply || '',
         toolResults: data.toolResults ?? [],
         clarification: data.clarification || null,
       }]);
     } catch (err) {
       const msg = err.name === 'AbortError'
         ? (controller.signal.reason === 'timeout'
-            ? `Запрос превысил ${REQUEST_TIMEOUT_MS / 1000}s — прервано. Попробуйте уточнить вопрос.`
-            : 'Запрос отменён.')
-        : err.message;
-      setMessages(prev => [...prev, { role: 'error', content: msg }]);
+            ? `Request exceeded ${REQUEST_TIMEOUT_MS / 1000}s and was cancelled. Try narrowing your question.`
+            : 'Request cancelled.')
+        : (err.message || 'Unknown error');
+      setMessages(prev => [...prev, {
+        role: 'error',
+        content: msg,
+        toolResults: err.toolResults ?? [],
+      }]);
     } finally {
       clearTimeout(timeoutId);
       abortRef.current = null;
       setLoading(false);
       setLoadingStart(0);
     }
+  }
+
+  // User clicked Approve (or Run after editing) on a plan card.
+  // Re-send the original user query along with the (possibly edited) plan;
+  // the backend skips the planner and goes straight to the executor.
+  function approvePlan(planMsg, editedPlan) {
+    if (loading) return;
+    const idx = messages.indexOf(planMsg);
+    if (idx < 0) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx].role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+
+    const originalText = messages[userIdx].content;
+    const priorHistory = messages.slice(0, userIdx);
+
+    setMessages(prev => prev.map(m => m === planMsg ? { ...m, confirmed: true } : m));
+    sendToBackend(originalText, priorHistory, { confirmedPlan: editedPlan });
+  }
+
+  function cancelPlan(planMsg) {
+    setMessages(prev => prev.map(m => m === planMsg ? { ...m, cancelled: true } : m));
   }
 
   function cancelRequest() {
@@ -279,7 +356,7 @@ export default function FathomAgentApp({ user, onLogout }) {
       mr.start();
       setRecording(true);
     } catch {
-      setError('Нет доступа к микрофону.');
+      setError('No microphone access.');
     }
   }
 
@@ -294,10 +371,10 @@ export default function FathomAgentApp({ user, onLogout }) {
     try {
       const res  = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': mimeType }, body: blob });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Ошибка расшифровки');
+      if (!res.ok) throw new Error(data.error || 'Transcription error');
       const text = (data.text || '').trim();
       if (text) setInput(prev => prev ? `${prev} ${text}` : text);
-      else setError('Не удалось распознать речь.');
+      else setError('Could not recognize speech.');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -338,6 +415,8 @@ export default function FathomAgentApp({ user, onLogout }) {
               msg={msg}
               isLast={i === messages.length - 1}
               onClarificationAnswer={answer => send(answer)}
+              onApprovePlan={approvePlan}
+              onCancelPlan={cancelPlan}
             />
           ))}
           {loading && <ThinkingBubble startedAt={loadingStart} onCancel={cancelRequest} />}
@@ -351,7 +430,7 @@ export default function FathomAgentApp({ user, onLogout }) {
               className={`ba-mic-btn${recording ? ' ba-mic-btn-stop' : ''}${transcribing ? ' ba-mic-btn-busy' : ''}`}
               onClick={recording ? stopRecording : startRecording}
               disabled={loading || transcribing}
-              title={recording ? 'Остановить запись' : 'Голосовой ввод'}
+              title={recording ? 'Stop recording' : 'Voice input'}
             >
               {transcribing
                 ? <span className="spinner" style={{ width: 16, height: 16 }} />
@@ -361,7 +440,7 @@ export default function FathomAgentApp({ user, onLogout }) {
             <textarea
               ref={textareaRef}
               className="ba-textarea"
-              placeholder="Спроси что-нибудь о встречах в Fathom…"
+              placeholder="Ask anything about your Fathom meetings…"
               value={input}
               rows={1}
               onChange={e => setInput(e.target.value)}
@@ -375,7 +454,7 @@ export default function FathomAgentApp({ user, onLogout }) {
               className="ba-send-btn"
               onClick={() => send(input)}
               disabled={!canSend}
-              title="Отправить"
+              title="Send"
             >
               <SendIcon />
             </button>

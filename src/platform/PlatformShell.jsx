@@ -1,6 +1,6 @@
 import { useState, Suspense } from 'react';
 import Sidebar from './Sidebar.jsx';
-import { APP_REGISTRY, APP_COMPONENTS } from './AppRegistry.js';
+import { APP_REGISTRY, APP_COMPONENTS, isAppAllowedForUser } from './AppRegistry.js';
 import VoiceFab from '../components/VoiceFab.jsx';
 
 function AppLoader() {
@@ -12,9 +12,18 @@ function AppLoader() {
 }
 
 export default function PlatformShell({ session, onLogout, theme, themeMode, setThemeMode }) {
-  const [activeId, setActiveId] = useState(APP_REGISTRY[0].id);
+  const allowedApps = APP_REGISTRY.filter(app => isAppAllowedForUser(app, session.email));
+  const defaultAppId = allowedApps[0]?.id ?? APP_REGISTRY[0].id;
+  const [activeId, setActiveId] = useState(defaultAppId);
 
-  const AppComponent = APP_COMPONENTS[activeId];
+  // Guard against stale activeId (e.g. logged-in user without rights to the
+  // last-selected app) by falling back to the first app they CAN see.
+  const activeApp = APP_REGISTRY.find(a => a.id === activeId);
+  const effectiveId = activeApp && isAppAllowedForUser(activeApp, session.email)
+    ? activeId
+    : defaultAppId;
+
+  const AppComponent = APP_COMPONENTS[effectiveId];
 
   return (
     <div className="platform-shell">

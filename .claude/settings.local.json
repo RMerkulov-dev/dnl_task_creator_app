@@ -60,7 +60,14 @@
       "Bash(perl -i -pe 's/await fetch\\\\\\(\\\\`\\\\$\\\\{base\\\\}/await fetchWithRetry\\(`\\\\${base}/g; s/await fetch\\\\\\(\\\\`\\\\$\\\\{agileBase\\\\}/await fetchWithRetry\\(`\\\\${agileBase}/g; s/await fetch\\\\\\(\\\\`\\\\$\\\\{FATHOM_BASE\\\\}/await fetchWithRetry\\(`\\\\${FATHOM_BASE}/g' api/index.js)",
       "Bash(node -e \"import\\('./api/index.js'\\).then\\(\\(\\) => console.log\\('imports OK'\\)\\).catch\\(e => { console.error\\('FAIL:', e.message\\); process.exit\\(1\\); }\\)\")",
       "Bash(curl -sS -X POST http://localhost:3001/api/ba-agent -H 'Content-Type: application/json' -d '{\"message\":\"покажи задачи на Viktor Kalantai в статусе Dev Ready\",\"userEmail\":\"roman.merkulov@dynamicalabs.com\",\"cloudId\":\"ede50bd6-614f-4723-b64b-76ef4be362d5\"}')",
-      "Bash(node --check src/components/Dashboard.jsx)"
+      "Bash(node --check src/components/Dashboard.jsx)",
+      "WebFetch(domain:openrouter.ai)",
+      "Bash(node --check api/index.js)",
+      "Bash(curl -s 'https://openrouter.ai/api/v1/models')",
+      "Bash(node -e 'let s=\"\";process.stdin.on\\(\"data\",d=>s+=d\\).on\\(\"end\",\\(\\)=>{const j=JSON.parse\\(s\\);const ds=j.data.filter\\(m=>m.id.includes\\(\"deepseek\"\\)\\);console.log\\(\"Found\",ds.length,\"deepseek models:\"\\);ds.forEach\\(m=>console.log\\(\" -\",m.id\\)\\);}\\)')",
+      "Bash(npx --no-install vite build --logLevel=error)",
+      "Bash(npx --no-install vite build)",
+      "Bash(node -e 'let s=\"\";process.stdin.on\\(\"data\",d=>s+=d\\).on\\(\"end\",\\(\\)=>{const j=JSON.parse\\(s\\);const m=j.choices[0].message;const txt=m.content||m.reasoning||\"\";console.log\\(\"CONTENT:\"\\);console.log\\(txt\\);}\\)')"
     ]
   }
 }

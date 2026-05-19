@@ -1,4 +1,4 @@
-import { APP_REGISTRY } from './AppRegistry.js';
+import { APP_REGISTRY, isAppAllowedForUser } from './AppRegistry.js';
 
 function TaskCreatorIcon() {
   return (
@@ -129,7 +129,7 @@ export default function Sidebar({ activeId, onSelect, user, onLogout }) {
   return (
     <aside className="platform-sidebar">
       <nav className="sidebar-nav">
-        {APP_REGISTRY.map(app => {
+        {APP_REGISTRY.filter(app => isAppAllowedForUser(app, user)).map(app => {
           const IconComp = ICON_MAP[app.id];
           const isActive = app.id === activeId;
           return (

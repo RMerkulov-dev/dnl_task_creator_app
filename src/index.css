@@ -1940,6 +1940,16 @@ html, body, #root {
   gap: 8px;
 }
 
+/* Plan-card bubbles need more breathing room than a regular chat reply. */
+.ba-msg-with-plan {
+  max-width: min(720px, 100%);
+  width: 100%;
+}
+
+.ba-msg-with-plan .agent-plan {
+  margin-top: 0;
+}
+
 .ba-msg-error {
   align-self: flex-start;
   background: rgba(220, 38, 38, 0.08);
@@ -2432,6 +2442,194 @@ html, body, #root {
 }
 
 .agent-clar-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ─── Plan confirmation card ────────────────────────────────────────────── */
+
+.agent-plan {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: rgba(91, 99, 254, 0.08);
+  border: 1px solid rgba(91, 99, 254, 0.3);
+  border-radius: 10px;
+}
+
+.agent-plan.locked {
+  opacity: 0.6;
+}
+
+.agent-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.agent-plan-icon {
+  font-size: 14px;
+}
+
+.agent-plan-title {
+  flex: 1;
+}
+
+.agent-plan-body {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-plan-steps {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-plan-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
+.agent-plan-step-num {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #5b63fe 0%, #8b5cf6 100%);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: 0 1px 3px rgba(91, 99, 254, 0.35);
+  margin-top: 1px;
+}
+
+.agent-plan-step-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-plan-step-title {
+  font-weight: 600;
+  color: var(--text-1);
+  font-size: 13px;
+}
+
+.agent-plan-step-body {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agent-plan-step-body code,
+.agent-plan-note code {
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.agent-plan-note {
+  font-size: 12px;
+  color: var(--text-2);
+  font-style: italic;
+  padding-left: 32px;
+}
+
+.agent-plan-edit {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 260px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  background: var(--bg-input);
+  border: 1px solid rgba(91, 99, 254, 0.5);
+  border-radius: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.6;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.agent-plan-edit:focus {
+  border-color: rgba(91, 99, 254, 0.8);
+}
+
+.agent-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.agent-plan-btn {
+  padding: 7px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s, opacity 0.15s;
+}
+
+.agent-plan-btn:hover:not(:disabled) {
+  background: rgba(91, 99, 254, 0.15);
+  border-color: rgba(91, 99, 254, 0.5);
+  transform: translateY(-1px);
+}
+
+.agent-plan-btn.ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+
+.agent-plan-btn.primary {
+  background: linear-gradient(135deg, #5b63fe 0%, #8b5cf6 100%);
+  border-color: transparent;
+  color: #fff;
+}
+
+.agent-plan-btn.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6f76ff 0%, #9b6dff 100%);
+}
+
+.agent-plan-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }

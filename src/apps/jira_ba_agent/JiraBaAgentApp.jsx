@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
 import AgentClarification from '../../components/AgentClarification.jsx';
+import AgentPlan from '../../components/AgentPlan.jsx';
 
 const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 const CLOUD_ID = PROJECT_LIST.find(p => p.jira)?.jira.cloudId ?? '';
@@ -239,7 +240,7 @@ function IssuesTable({ issues }) {
   );
 }
 
-function ChatMessage({ msg, isLast, onClarificationAnswer }) {
+function ChatMessage({ msg, isLast, onClarificationAnswer, onApprovePlan, onCancelPlan }) {
   if (msg.role === 'user') {
     return (
       <div className="ba-msg ba-msg-user">
@@ -248,9 +249,28 @@ function ChatMessage({ msg, isLast, onClarificationAnswer }) {
     );
   }
   if (msg.role === 'error') {
+    // Even when the server fails mid-flight, render any partial tool results
+    // so the user can still see what was done before the error.
+    const issues = collectIssues(msg.toolResults);
     return (
       <div className="ba-msg ba-msg-error">
-        <p className="ba-msg-text">⚠ {msg.content}</p>
+        <ToolPills toolResults={msg.toolResults} />
+        {issues.length >= 2 && <IssuesTable issues={issues} />}
+        <p className="ba-msg-text">⚠ {msg.content || 'Unknown error'}</p>
+      </div>
+    );
+  }
+  if (msg.awaitingConfirmation) {
+    const locked = msg.confirmed || msg.cancelled || !isLast;
+    return (
+      <div className="ba-msg ba-msg-assistant ba-msg-with-plan">
+        <AgentPlan
+          plan={msg.plan}
+          onApprove={editedPlan => onApprovePlan(msg, editedPlan)}
+          onCancel={() => onCancelPlan(msg)}
+          locked={locked}
+        />
+        {msg.cancelled && <p className="ba-msg-text" style={{ opacity: 0.6 }}>Plan cancelled.</p>}
       </div>
     );
   }
@@ -324,28 +344,85 @@ export default function JiraBaAgentApp({ user, onLogout }) {
     sendToBackend(trimmed, messages);
   }, [loading, messages]); // eslint-disable-line
 
-  async function sendToBackend(message, prevMessages) {
+  // Plan-card messages are internal scaffolding — they're injected via system
+  // prompt on confirmation, not replayed in conversation history.
+  function toHistoryPayload(prevMessages) {
+    return prevMessages
+      .filter(m => !m.awaitingConfirmation)
+      .map(m => ({ role: m.role === 'error' ? 'assistant' : m.role, content: m.content || '' }));
+  }
+
+  async function sendToBackend(message, prevMessages, opts = {}) {
     setLoading(true);
     try {
-      const history = prevMessages.map(m => ({ role: m.role === 'error' ? 'assistant' : m.role, content: m.content }));
+      const history = toHistoryPayload(prevMessages);
       const res  = await fetch('/api/ba-agent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, history, cloudId: CLOUD_ID, userEmail: user }),
+        body: JSON.stringify({
+          message,
+          history,
+          cloudId: CLOUD_ID,
+          userEmail: user,
+          ...(opts.confirmedPlan ? { confirmedPlan: opts.confirmedPlan } : {}),
+        }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Server error');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const e = new Error(data.error || `Server error ${res.status}`);
+        e.toolResults = data.toolResults ?? [];
+        throw e;
+      }
+
+      // Stage 1: planner returned a plan that needs user approval.
+      if (data.stage === 'plan' && data.plan) {
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          plan: data.plan,
+          awaitingConfirmation: true,
+          confirmed: false,
+          cancelled: false,
+          toolResults: [],
+        }]);
+        return;
+      }
+
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: data.reply,
+        content: data.reply || '',
         toolResults: data.toolResults ?? [],
         clarification: data.clarification || null,
       }]);
     } catch (err) {
-      setMessages(prev => [...prev, { role: 'error', content: err.message }]);
+      setMessages(prev => [...prev, {
+        role: 'error',
+        content: err.message || 'Unknown error',
+        toolResults: err.toolResults ?? [],
+      }]);
     } finally {
       setLoading(false);
     }
+  }
+
+  // User approved (and possibly edited) a plan — re-send original query
+  // with the confirmed plan so backend skips planner and runs executor.
+  function approvePlan(planMsg, editedPlan) {
+    if (loading) return;
+    const idx = messages.indexOf(planMsg);
+    if (idx < 0) return;
+    let userIdx = idx - 1;
+    while (userIdx >= 0 && messages[userIdx].role !== 'user') userIdx--;
+    if (userIdx < 0) return;
+
+    const originalText = messages[userIdx].content;
+    const priorHistory = messages.slice(0, userIdx);
+
+    setMessages(prev => prev.map(m => m === planMsg ? { ...m, confirmed: true } : m));
+    sendToBackend(originalText, priorHistory, { confirmedPlan: editedPlan });
+  }
+
+  function cancelPlan(planMsg) {
+    setMessages(prev => prev.map(m => m === planMsg ? { ...m, cancelled: true } : m));
   }
 
   // ─── Voice recording ─────────────────────────────────────────────────────
@@ -378,7 +455,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
       mr.start();
       setRecording(true);
     } catch {
-      setError('Нет доступа к микрофону.');
+      setError('No microphone access.');
     }
   }
 
@@ -393,10 +470,10 @@ export default function JiraBaAgentApp({ user, onLogout }) {
     try {
       const res  = await fetch('/api/transcribe', { method: 'POST', headers: { 'Content-Type': mimeType }, body: blob });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Ошибка расшифровки');
+      if (!res.ok) throw new Error(data.error || 'Transcription error');
       const text = (data.text || '').trim();
       if (text) setInput(prev => prev ? `${prev} ${text}` : text);
-      else setError('Не удалось распознать речь.');
+      else setError('Could not recognize speech.');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -439,6 +516,8 @@ export default function JiraBaAgentApp({ user, onLogout }) {
               msg={msg}
               isLast={i === messages.length - 1}
               onClarificationAnswer={answer => send(answer)}
+              onApprovePlan={approvePlan}
+              onCancelPlan={cancelPlan}
             />
           ))}
           {loading && <ThinkingBubble />}
@@ -453,7 +532,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
               className={`ba-mic-btn${recording ? ' ba-mic-btn-stop' : ''}${transcribing ? ' ba-mic-btn-busy' : ''}`}
               onClick={recording ? stopRecording : startRecording}
               disabled={loading || transcribing}
-              title={recording ? 'Остановить запись' : 'Голосовой ввод'}
+              title={recording ? 'Stop recording' : 'Voice input'}
             >
               {transcribing
                 ? <span className="spinner" style={{ width: 16, height: 16 }} />
@@ -463,7 +542,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
             <textarea
               ref={textareaRef}
               className="ba-textarea"
-              placeholder="Спроси что-нибудь о Jira…"
+              placeholder="Ask anything about Jira…"
               value={input}
               rows={1}
               onChange={e => setInput(e.target.value)}
@@ -477,7 +556,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
               className="ba-send-btn"
               onClick={() => send(input)}
               disabled={!canSend}
-              title="Отправить"
+              title="Send"
             >
               <SendIcon />
             </button>

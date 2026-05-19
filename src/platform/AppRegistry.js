@@ -35,6 +35,10 @@ export const APP_REGISTRY = [
     shortName: 'Fathom',
     gradient: 'linear-gradient(135deg, #ef4444 0%, #f97316 100%)',
     glow: 'rgba(239, 68, 68, 0.5)',
+    // Restrict visibility/access to a specific set of users. The Sidebar
+    // hides apps the current user isn't in, and the backend enforces the
+    // same allowlist (see FATHOM_ALLOWED_EMAILS in api/index.js).
+    allowedEmails: ['roman.merkulov@dynamicalabs.com'],
   },
   {
     id: 'email-agent',
@@ -44,6 +48,14 @@ export const APP_REGISTRY = [
     glow: 'rgba(16, 185, 129, 0.5)',
   },
 ];
+
+// Returns true when the user is allowed to see/use this app entry.
+// Apps without `allowedEmails` are public; otherwise the email must be in the list.
+export function isAppAllowedForUser(app, email) {
+  if (!app.allowedEmails) return true;
+  if (!email) return false;
+  return app.allowedEmails.includes(email.toLowerCase());
+}
 
 // Lazy-load app components separately so AppRegistry stays JSON-serialisable
 export const APP_COMPONENTS = {
