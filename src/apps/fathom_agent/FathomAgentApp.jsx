@@ -39,23 +39,35 @@ function SendIcon() {
 
 // ─── Tool pills ───────────────────────────────────────────────────────────────
 
-const TOOL_META = {
-  list_meetings:   { icon: '🎥', label: r => r?.returned != null ? `${r.returned} meeting${r.returned !== 1 ? 's' : ''}` : 'Listed meetings' },
-  get_transcript:  { icon: '📝', label: r => r?.lines ? `Transcript (${r.lines.length} lines)` : 'Got transcript' },
-  get_summary:     { icon: '✨', label: r => r?.template ? `Summary (${r.template})` : 'Got summary' },
-  search_meetings: { icon: '🔍', label: r => r?.matched != null ? `Matched ${r.matched}` : 'Searched' },
-};
+// Icon hints based on common verbs in MCP tool names. The Fathom MCP server
+// owns the tool catalog now, so we don't pretend to know exact names — we
+// just give the pill a plausible icon and a tidy human label.
+function iconFor(name) {
+  const n = (name || '').toLowerCase();
+  if (n.includes('summar'))                            return '✨';
+  if (n.includes('transcript'))                        return '📝';
+  if (n.includes('search') || n.includes('find'))      return '🔍';
+  if (n.includes('list')   || n.includes('meeting') || n.includes('recording') || n.includes('call')) return '🎥';
+  return '⚙️';
+}
+
+function describeResult(result) {
+  if (!result || typeof result !== 'object') return '';
+  if (typeof result.count === 'number') return `${result.count} item${result.count === 1 ? '' : 's'}`;
+  if (typeof result.blocks === 'number' && result.blocks) return `${result.blocks} block${result.blocks === 1 ? '' : 's'}`;
+  return '';
+}
 
 function ToolPills({ toolResults }) {
   if (!toolResults?.length) return null;
   return (
     <div className="ba-tool-pills">
       {toolResults.map((t, i) => {
-        const meta  = TOOL_META[t.name] ?? { icon: '⚙️', label: () => t.name };
         const isErr = !!t.error;
+        const detail = isErr ? `Error: ${t.error}` : (describeResult(t.result) || 'done');
         return (
           <span key={i} className={`ba-tool-pill${isErr ? ' error' : ''}`}>
-            {meta.icon} {isErr ? `Error: ${t.error}` : meta.label(t.result)}
+            {iconFor(t.name)} {t.name} — {detail}
           </span>
         );
       })}
@@ -182,6 +194,16 @@ function ThinkingBubble({ startedAt, onCancel }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
+// Per-user Fathom MCP access token lives in localStorage. The token is obtained
+// by opening /api/fathom/oauth/start in a popup; the popup posts the token back
+// via window.postMessage. There's no server-side token store.
+const FATHOM_TOKEN_KEY = 'fathom_oauth_token';
+
+function readStoredFathomToken() {
+  try { return localStorage.getItem(FATHOM_TOKEN_KEY) || ''; }
+  catch { return ''; }
+}
+
 export default function FathomAgentApp({ user, onLogout }) {
   const [messages,     setMessages]     = useState([]);
   const [input,        setInput]        = useState('');
@@ -190,6 +212,85 @@ export default function FathomAgentApp({ user, onLogout }) {
   const [recording,    setRecording]    = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [error,        setError]        = useState('');
+  const [fathomToken,  setFathomToken]  = useState(() => readStoredFathomToken());
+  const [connecting,   setConnecting]   = useState(false);
+  const [connectError, setConnectError] = useState('');
+  const popupRef = useRef(null);
+
+  function persistToken(token) {
+    try {
+      if (token) localStorage.setItem(FATHOM_TOKEN_KEY, token);
+      else       localStorage.removeItem(FATHOM_TOKEN_KEY);
+    } catch { /* private mode etc. */ }
+    setFathomToken(token || '');
+    // Clear failed pre-connect attempts so the user starts fresh.
+    if (token) setMessages(prev => prev.filter(m => m.role !== 'error'));
+  }
+
+  function connectFathom() {
+    setConnectError('');
+    setConnecting(true);
+    // Open BEFORE any await — Safari only honors window.open on a user gesture.
+    const w = 520, h = 720;
+    const left = Math.max(0, (window.screen.width  - w) / 2);
+    const top  = Math.max(0, (window.screen.height - h) / 2);
+    popupRef.current = window.open(
+      '/api/fathom/oauth/start',
+      'fathom-oauth',
+      `width=${w},height=${h},left=${left},top=${top}`,
+    );
+    if (!popupRef.current) {
+      setConnecting(false);
+      setConnectError('Popup was blocked. Allow popups for this site and try again.');
+      return;
+    }
+    // Watchdog: if the popup is closed before we receive a message, drop the
+    // "connecting" state so the button is interactive again.
+    const watchdog = setInterval(() => {
+      if (popupRef.current && popupRef.current.closed) {
+        clearInterval(watchdog);
+        setConnecting(false);
+      }
+    }, 500);
+  }
+
+  // Listen for OAuth result. Two channels, because window.opener.postMessage
+  // can be severed by Fathom's Cross-Origin-Opener-Policy: the popup writes to
+  // localStorage as well, and the SPA picks it up via the 'storage' event
+  // (which fires in *other* tabs/windows of the same origin).
+  useEffect(() => {
+    function applyResult(payload) {
+      if (!payload) return;
+      setConnecting(false);
+      if (payload.ok && payload.accessToken) {
+        persistToken(payload.accessToken);
+        setConnectError('');
+      } else if (payload.error) {
+        setConnectError(payload.error);
+      }
+    }
+    function onMessage(ev) {
+      if (ev.origin !== window.location.origin) return;
+      const { source, payload } = ev.data || {};
+      if (source !== 'fathom-oauth' || !payload) return;
+      applyResult(payload);
+    }
+    function onStorage(ev) {
+      if (ev.key === 'fathom_oauth_result' && ev.newValue) {
+        try { applyResult(JSON.parse(ev.newValue)?.payload); } catch { /* ignore */ }
+      } else if (ev.key === FATHOM_TOKEN_KEY) {
+        // Token slot changed in another tab (Connect or Disconnect elsewhere).
+        setFathomToken(ev.newValue || '');
+        if (ev.newValue) setConnecting(false);
+      }
+    }
+    window.addEventListener('message', onMessage);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
 
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
@@ -249,14 +350,24 @@ export default function FathomAgentApp({ user, onLogout }) {
         body:    JSON.stringify({
           message,
           history,
-          userEmail: user,
+          userEmail:   user,
+          fathomToken: fathomToken || '',
           ...(opts.confirmedPlan ? { confirmedPlan: opts.confirmedPlan } : {}),
         }),
         signal:  controller.signal,
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const err = new Error(data.error || `Server error ${res.status}`);
+        // 401 + reconnect = Fathom token died (or missing). Wipe it so the
+        // Connect screen comes back; surface a clear message.
+        if (data.reconnect) {
+          persistToken('');
+          setConnectError(data.error || 'Fathom access expired. Please reconnect.');
+        }
+        const msg = data.reconnect
+          ? (data.error || 'Fathom access expired. Click "Connect Fathom" to authorize again.')
+          : (data.error || `Server error ${res.status}`);
+        const err = new Error(msg);
         err.toolResults = data.toolResults ?? [];
         throw err;
       }
@@ -384,8 +495,10 @@ export default function FathomAgentApp({ user, onLogout }) {
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
-  const canSend = input.trim().length > 0 && !loading;
+  const canSend = input.trim().length > 0 && !loading && !!fathomToken;
   const micBusy = recording || transcribing;
+
+  const isConnected = !!fathomToken;
 
   return (
     <div className="app-shell">
@@ -395,31 +508,64 @@ export default function FathomAgentApp({ user, onLogout }) {
         <span className="header-title">Fathom Agent</span>
         <div className="header-spacer" />
         {user && <span className="header-user">{user}</span>}
+        {isConnected && (
+          <button
+            className="btn btn-ghost"
+            onClick={() => { persistToken(''); setConnectError(''); }}
+            style={{ marginLeft: 12 }}
+            title="Forget Fathom token on this device"
+          >
+            Disconnect Fathom
+          </button>
+        )}
         <button className="btn btn-ghost" onClick={onLogout} style={{ marginLeft: 12 }}>Sign out</button>
       </header>
 
       <main className="ba-main">
         <div className="ba-chat">
-          {messages.length === 0 && !loading && (
+          {!isConnected ? (
             <div className="ba-empty">
-              <p className="ba-empty-title">Hi! I'm Fathom Agent.</p>
+              <p className="ba-empty-title">Connect your Fathom account</p>
               <p className="ba-empty-sub">
-                Ask about meetings and transcripts — by text or voice.<br/>
-                For example: <em>"What did we discuss with the client last week?"</em>, <em>"Show the summary of the last call"</em>
+                Fathom Agent reads your meetings through Fathom's official MCP server.<br/>
+                Authorize once — your token stays on this device.
               </p>
+              <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+                <button
+                  className="btn"
+                  onClick={connectFathom}
+                  disabled={connecting}
+                  style={{ minWidth: 220 }}
+                >
+                  {connecting ? 'Waiting for Fathom…' : 'Connect Fathom'}
+                </button>
+                {connectError && <p className="ba-input-error" style={{ maxWidth: 480, textAlign: 'center' }}>⚠ {connectError}</p>}
+              </div>
             </div>
+          ) : (
+            <>
+              {messages.length === 0 && !loading && (
+                <div className="ba-empty">
+                  <p className="ba-empty-title">Hi! I'm Fathom Agent.</p>
+                  <p className="ba-empty-sub">
+                    Ask about meetings and transcripts — by text or voice.<br/>
+                    For example: <em>"What did we discuss with the client last week?"</em>, <em>"Show the summary of the last call"</em>
+                  </p>
+                </div>
+              )}
+              {messages.map((msg, i) => (
+                <ChatMessage
+                  key={i}
+                  msg={msg}
+                  isLast={i === messages.length - 1}
+                  onClarificationAnswer={answer => send(answer)}
+                  onApprovePlan={approvePlan}
+                  onCancelPlan={cancelPlan}
+                />
+              ))}
+              {loading && <ThinkingBubble startedAt={loadingStart} onCancel={cancelRequest} />}
+            </>
           )}
-          {messages.map((msg, i) => (
-            <ChatMessage
-              key={i}
-              msg={msg}
-              isLast={i === messages.length - 1}
-              onClarificationAnswer={answer => send(answer)}
-              onApprovePlan={approvePlan}
-              onCancelPlan={cancelPlan}
-            />
-          ))}
-          {loading && <ThinkingBubble startedAt={loadingStart} onCancel={cancelRequest} />}
           <div ref={bottomRef} />
         </div>
 
@@ -429,7 +575,7 @@ export default function FathomAgentApp({ user, onLogout }) {
             <button
               className={`ba-mic-btn${recording ? ' ba-mic-btn-stop' : ''}${transcribing ? ' ba-mic-btn-busy' : ''}`}
               onClick={recording ? stopRecording : startRecording}
-              disabled={loading || transcribing}
+              disabled={loading || transcribing || !fathomToken}
               title={recording ? 'Stop recording' : 'Voice input'}
             >
               {transcribing
@@ -440,14 +586,14 @@ export default function FathomAgentApp({ user, onLogout }) {
             <textarea
               ref={textareaRef}
               className="ba-textarea"
-              placeholder="Ask anything about your Fathom meetings…"
+              placeholder={fathomToken ? 'Ask anything about your Fathom meetings…' : 'Connect Fathom to start chatting…'}
               value={input}
               rows={1}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
               }}
-              disabled={loading || micBusy}
+              disabled={loading || micBusy || !fathomToken}
             />
 
             <button

@@ -35,10 +35,6 @@ export const APP_REGISTRY = [
     shortName: 'Fathom',
     gradient: 'linear-gradient(135deg, #ef4444 0%, #f97316 100%)',
     glow: 'rgba(239, 68, 68, 0.5)',
-    // Restrict visibility/access to a specific set of users. The Sidebar
-    // hides apps the current user isn't in, and the backend enforces the
-    // same allowlist (see FATHOM_ALLOWED_EMAILS in api/index.js).
-    allowedEmails: ['roman.merkulov@dynamicalabs.com'],
   },
   {
     id: 'email-agent',

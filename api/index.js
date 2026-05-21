@@ -1,5 +1,6 @@
 import express from 'express';
-import dotenv from 'dotenv';
+import dotenv  from 'dotenv';
+import crypto  from 'node:crypto';
 
 dotenv.config();
 
@@ -685,221 +686,408 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
   }
 });
 
-// ─── Fathom Agent ────────────────────────────────────────────────────────────
+// ─── Fathom Agent (via Fathom MCP server) ────────────────────────────────────
+//
+// We talk to Fathom through their official MCP server at https://api.fathom.ai/mcp
+// (Streamable HTTP transport, OAuth 2.1 Bearer). Every signed-in user goes
+// through their OWN OAuth handshake: the frontend opens /api/fathom/oauth/start
+// in a popup, that walks them through Fathom's consent screen, and we send the
+// resulting access_token back to the popup opener via window.postMessage. The
+// frontend stores it in localStorage and includes it in every /api/fathom-agent
+// call. On 401 from MCP, the agent returns reconnect:true so the UI can wipe
+// the token and re-open the popup.
+//
+// Tools are discovered from the MCP server at runtime and cached at module
+// scope (the catalogue is the same for all users; only the bearer differs).
 
-const FATHOM_BASE   = 'https://api.fathom.ai/external/v1';
-const FATHOM_KEY    = process.env.FATHOM_API_KEY || '';
-const fathomHeaders = () => ({ 'X-Api-Key': FATHOM_KEY, Accept: 'application/json' });
+const FATHOM_MCP_URL         = process.env.FATHOM_MCP_URL || 'https://api.fathom.ai/mcp';
+const FATHOM_OAUTH_AUTHORIZE = 'https://fathom.video/mcp/oauth/authorize';
+const FATHOM_OAUTH_TOKEN_URL = 'https://api.fathom.ai/mcp/oauth/token';
+const FATHOM_OAUTH_REGISTER  = 'https://api.fathom.ai/mcp/oauth/register';
+const MCP_PROTOCOL_VER       = '2025-06-18';
 
-// Allowlist for the Fathom Agent. Frontend already hides the app for other
-// users, but enforce on the server too so the endpoint can't be hit directly.
-// Override via env (FATHOM_ALLOWED_EMAILS, comma-separated) if the list grows.
-const FATHOM_ALLOWED_EMAILS = (process.env.FATHOM_ALLOWED_EMAILS
-  || 'roman.merkulov@dynamicalabs.com')
-  .split(',')
-  .map(s => s.trim().toLowerCase())
-  .filter(Boolean);
+// HMAC secret used to sign the OAuth `state` parameter (which carries the PKCE
+// verifier + DCR client_id across the redirect). Stable across requests on the
+// same deploy — derived from an existing long-lived secret so we don't add a
+// new required env var.
+const FATHOM_OAUTH_STATE_SECRET = process.env.FATHOM_OAUTH_STATE_SECRET
+  ? Buffer.from(process.env.FATHOM_OAUTH_STATE_SECRET)
+  : crypto.createHash('sha256')
+      .update((process.env.OPENROUTER_API_KEY || process.env.JIRA_API_TOKEN || 'dev-fathom-state'))
+      .update(':fathom-oauth-state')
+      .digest();
 
-function trimTranscript(transcript, maxLines = 400) {
-  if (!Array.isArray(transcript)) return [];
-  const sliced = transcript.slice(0, maxLines).map(t => ({
-    speaker:   t.speaker?.display_name ?? 'Unknown',
-    timestamp: t.timestamp,
-    text:      t.text,
-  }));
-  if (transcript.length > maxLines) {
-    sliced.push({ speaker: 'system', timestamp: null, text: `…[truncated ${transcript.length - maxLines} more lines]` });
+// DCR clients are cached by redirect_uri — registering once per deploy/origin
+// is enough and avoids racing the registration endpoint on each connect.
+const fathomDcrCache = new Map();
+
+// MCP servers can answer either with application/json or text/event-stream.
+// Pull the first JSON-RPC response object out of either form.
+async function parseMcpResponse(r) {
+  const ct = (r.headers.get('content-type') || '').toLowerCase();
+  if (ct.includes('text/event-stream')) {
+    const text = await r.text();
+    for (const line of text.split('\n')) {
+      if (!line.startsWith('data:')) continue;
+      const json = line.slice(5).trim();
+      if (!json) continue;
+      try {
+        const obj = JSON.parse(json);
+        if (obj.jsonrpc) return obj;
+      } catch { /* try next */ }
+    }
+    throw new Error('Fathom MCP returned an SSE stream without a JSON-RPC payload');
   }
-  return sliced;
+  // Some servers reply 202 with empty body for notifications — guard against that.
+  const text = await r.text();
+  if (!text) return null;
+  try { return JSON.parse(text); }
+  catch { throw new Error(`Fathom MCP returned non-JSON body: ${text.slice(0, 200)}`); }
 }
 
-function briefMeeting(m) {
+async function mcpRequest(token, method, params, { sessionId, isNotification } = {}) {
+  if (!token) {
+    const err = new Error('Fathom access token is missing. Click "Connect Fathom" to authorize.');
+    err.reconnect = true;
+    throw err;
+  }
+  const body = isNotification
+    ? { jsonrpc: '2.0', method, params }
+    : { jsonrpc: '2.0', id: Date.now() + Math.floor(Math.random() * 1000), method, params };
+
+  const headers = {
+    'Content-Type':         'application/json',
+    'Accept':               'application/json, text/event-stream',
+    'Authorization':        `Bearer ${token}`,
+    'MCP-Protocol-Version': MCP_PROTOCOL_VER,
+  };
+  if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+
+  const r = await fetchWithRetry(FATHOM_MCP_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+  if (r.status === 401) {
+    const err = new Error('Fathom MCP rejected your access token (401). Please reconnect Fathom.');
+    err.reconnect = true;
+    throw err;
+  }
+  const newSession = r.headers.get('mcp-session-id') || sessionId || null;
+  if (isNotification) return { sessionId: newSession };
+
+  const payload = await parseMcpResponse(r);
+  if (!r.ok) {
+    throw new Error(payload?.error?.message || `Fathom MCP HTTP ${r.status}`);
+  }
+  if (payload?.error) {
+    throw new Error(payload.error.message || `Fathom MCP error ${payload.error.code}`);
+  }
+  return { result: payload?.result, sessionId: newSession };
+}
+
+async function mcpInitSession(token) {
+  const { result, sessionId } = await mcpRequest(token, 'initialize', {
+    protocolVersion: MCP_PROTOCOL_VER,
+    capabilities:    {},
+    clientInfo:      { name: 'dnl-task-creator', version: '1.0' },
+  });
+  // Spec requires the client to send notifications/initialized after init.
+  // Failure here shouldn't kill the request — some servers tolerate skipping it.
+  try { await mcpRequest(token, 'notifications/initialized', {}, { sessionId, isNotification: true }); }
+  catch (e) { console.warn('[Fathom MCP] initialized notification failed:', e.message); }
+  return { sessionId, serverInfo: result };
+}
+
+async function mcpListTools(token, sessionId) {
+  const { result } = await mcpRequest(token, 'tools/list', {}, { sessionId });
+  return result?.tools ?? [];
+}
+
+async function mcpCallTool(token, sessionId, name, args) {
+  const { result } = await mcpRequest(token, 'tools/call', { name, arguments: args ?? {} }, { sessionId });
+  return result;
+}
+
+// Module-level cache for the discovered tool catalog. Fathom's tool list is
+// effectively static between deploys, so re-listing on every request would
+// just waste a round-trip.
+let FATHOM_TOOLS_CACHE = null;     // [{ type:'function', function:{...} }]
+let FATHOM_TOOLS_RAW   = null;     // raw MCP tool objects (for debugging)
+
+function mcpToolToOpenAi(t) {
+  // MCP `inputSchema` is already JSON Schema; OpenAI/OpenRouter accept the same shape.
+  const params = t.inputSchema && typeof t.inputSchema === 'object'
+    ? t.inputSchema
+    : { type: 'object', properties: {} };
   return {
-    recording_id: m.recording_id,
-    title:        m.meeting_title || m.title,
-    url:          m.url,
-    started_at:   m.recording_start_time || m.scheduled_start_time,
-    ended_at:     m.recording_end_time   || m.scheduled_end_time,
-    language:     m.transcript_language,
-    invitees:     (m.calendar_invitees ?? []).map(i => i.name || i.email).filter(Boolean),
+    type: 'function',
+    function: {
+      name:        t.name,
+      description: t.description || '',
+      parameters:  params,
+    },
   };
 }
 
-const FATHOM_TOOLS = [
-  ASK_USER_TOOL,
-  {
-    type: 'function',
-    function: {
-      name: 'list_meetings',
-      description: 'List recent Fathom meetings (brief). Use to find a meeting by title, date range, or recorder. Does NOT return transcripts — call get_transcript for that.',
-      parameters: {
-        type: 'object',
-        properties: {
-          limit:          { type: 'integer', description: 'Max meetings to return (default 20, max 50)' },
-          created_after:  { type: 'string',  description: 'ISO 8601 timestamp, e.g. 2026-05-01T00:00:00Z' },
-          created_before: { type: 'string',  description: 'ISO 8601 timestamp' },
-          recorded_by:    { type: 'string',  description: 'Recorder email to filter by' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_transcript',
-      description: 'Get the full transcript of a specific Fathom recording. Returns speakers, timestamps and text.',
-      parameters: {
-        type: 'object',
-        properties: {
-          recordingId: { type: 'integer', description: 'Fathom recording_id (number)' },
-        },
-        required: ['recordingId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'get_summary',
-      description: 'Get the AI-generated summary (markdown) for a Fathom recording.',
-      parameters: {
-        type: 'object',
-        properties: {
-          recordingId: { type: 'integer', description: 'Fathom recording_id (number)' },
-        },
-        required: ['recordingId'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'search_meetings',
-      description: 'Search recent Fathom meetings whose title, summary, or transcript contains the query string. Use when the user asks "what did we discuss about X" or similar.',
-      parameters: {
-        type: 'object',
-        properties: {
-          query:         { type: 'string',  description: 'Text to search for (case-insensitive substring match)' },
-          days_back:     { type: 'integer', description: 'How many days back to scan (default 30, max 180)' },
-          limit:         { type: 'integer', description: 'Max matched meetings to return (default 10, max 25)' },
-        },
-        required: ['query'],
-      },
-    },
-  },
-];
+async function ensureFathomTools(token, sessionId) {
+  if (FATHOM_TOOLS_CACHE) return FATHOM_TOOLS_CACHE;
+  const raw = await mcpListTools(token, sessionId);
+  FATHOM_TOOLS_RAW   = raw;
+  FATHOM_TOOLS_CACHE = [ASK_USER_TOOL, ...raw.map(mcpToolToOpenAi)];
+  return FATHOM_TOOLS_CACHE;
+}
 
-async function fathomFetch(path) {
-  const r = await fetchWithRetry(`${FATHOM_BASE}${path}`, { headers: fathomHeaders() });
+// Reduce an MCP tool result to (a) a string for the LLM and (b) a compact
+// summary for the UI's tool-pill row. We don't know Fathom's exact result
+// shape, so keep it generic: concatenate text content blocks, count items
+// if the result looks list-like.
+function summariseMcpResult(name, result) {
+  if (!result) return { text: '(empty)', summary: { kind: 'empty' } };
+  const blocks = Array.isArray(result.content) ? result.content : [];
+  const textParts = [];
+  let structured;
+  for (const b of blocks) {
+    if (b?.type === 'text' && typeof b.text === 'string') {
+      textParts.push(b.text);
+      // Many MCP servers JSON-encode structured results inside a text block;
+      // try to lift that for nicer UI summaries.
+      if (!structured && b.text.trim().startsWith('{')) {
+        try { structured = JSON.parse(b.text); } catch { /* not JSON */ }
+      }
+    } else if (b) {
+      textParts.push(JSON.stringify(b));
+    }
+  }
+  const text = textParts.join('\n').trim() || '(no content)';
+
+  const summary = { kind: 'mcp' };
+  if (result.isError) summary.error = true;
+  if (structured && typeof structured === 'object') {
+    // Prefer a count-like field if present, otherwise fall back to a snippet.
+    const arrKey = Object.keys(structured).find(k => Array.isArray(structured[k]));
+    if (arrKey) summary.count = structured[arrKey].length;
+  }
+  if (!summary.count && blocks.length) summary.blocks = blocks.length;
+  return { text, summary };
+}
+
+// ── OAuth helpers (PKCE state signing + DCR cache) ──────────────────────────
+
+function b64url(input) {
+  return Buffer.from(input).toString('base64')
+    .replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+function b64urlDecode(s) {
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64');
+}
+function signState(payload) {
+  const body = b64url(JSON.stringify(payload));
+  const sig  = b64url(crypto.createHmac('sha256', FATHOM_OAUTH_STATE_SECRET).update(body).digest());
+  return `${body}.${sig}`;
+}
+function verifyState(state) {
+  if (!state || typeof state !== 'string' || !state.includes('.')) return null;
+  const [body, sig] = state.split('.');
+  const expected = b64url(crypto.createHmac('sha256', FATHOM_OAUTH_STATE_SECRET).update(body).digest());
+  const a = Buffer.from(sig), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try { return JSON.parse(b64urlDecode(body).toString('utf8')); }
+  catch { return null; }
+}
+// Compute the *frontend* origin (where the popup was opened). This differs
+// from req.host in dev because Vite (frontend) sits on :3000 and proxies /api
+// requests to Express on :3001 with changeOrigin:true — so req.headers.host
+// inside Express is "localhost:3001", not the page the user is actually on.
+// Resolution order:
+//   1) APP_ORIGIN env override (explicit, e.g. "https://task-creator…").
+//   2) Referer header on /start — the popup was just opened from the SPA,
+//      so the referer is the SPA's URL.
+//   3) x-forwarded-host / host from the request (works when same-origin).
+function getAppOrigin(req, { allowReferer = false } = {}) {
+  if (process.env.APP_ORIGIN) return process.env.APP_ORIGIN.replace(/\/+$/, '');
+  if (allowReferer) {
+    const ref = req.headers.referer || req.headers.referrer;
+    if (ref) {
+      try { return new URL(ref).origin; } catch { /* ignore */ }
+    }
+  }
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host  = req.headers['x-forwarded-host']  || req.get('host');
+  return `${proto}://${host}`;
+}
+async function getOrRegisterFathomClient(redirectUri) {
+  if (fathomDcrCache.has(redirectUri)) return fathomDcrCache.get(redirectUri);
+  const r = await fetch(FATHOM_OAUTH_REGISTER, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body:    JSON.stringify({
+      client_name:                'Dynamica Task Creator (Fathom MCP)',
+      redirect_uris:              [redirectUri],
+      grant_types:                ['authorization_code'],
+      response_types:             ['code'],
+      token_endpoint_auth_method: 'none',
+      scope:                      'mcp',
+    }),
+  });
   if (!r.ok) {
-    const txt = (await r.text()).slice(0, 200);
-    console.error(`[Fathom ${r.status}] ${path} :: ${txt}`);
-    throw new Error(`Fathom ${r.status} at ${path}${txt ? ` :: ${txt}` : ''}`);
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Fathom DCR failed (${r.status}): ${txt.slice(0, 200)}`);
   }
-  return r.json();
+  const client = await r.json();
+  if (!client.client_id) throw new Error('Fathom DCR response missing client_id');
+  fathomDcrCache.set(redirectUri, client);
+  return client;
 }
 
-async function executeFathomTool(name, args) {
-  switch (name) {
-    case 'list_meetings': {
-      const limit  = Math.min(args.limit || 20, 50);
-      const params = new URLSearchParams({ limit: String(limit) });
-      if (args.created_after)  params.set('created_after',  args.created_after);
-      if (args.created_before) params.set('created_before', args.created_before);
-      if (args.recorded_by)    params.append('recorded_by[]', args.recorded_by);
-      const data = await fathomFetch(`/meetings?${params}`);
-      const items = data.items ?? [];
-      return { returned: items.length, next_cursor: data.next_cursor ?? null, meetings: items.map(briefMeeting) };
-    }
+// Step 1: redirect the popup to Fathom's consent screen.
+app.get('/api/fathom/oauth/start', async (req, res) => {
+  try {
+    const origin      = getAppOrigin(req, { allowReferer: true });
+    const redirectUri = `${origin}/api/fathom/oauth/callback`;
+    const client      = await getOrRegisterFathomClient(redirectUri);
 
-    case 'get_transcript': {
-      const data = await fathomFetch(`/recordings/${args.recordingId}/transcript`);
-      return { recording_id: args.recordingId, lines: trimTranscript(data.transcript) };
-    }
+    const verifier  = b64url(crypto.randomBytes(48));
+    const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
+    // Embed the resolved origin so the /callback handler can rebuild the
+    // exact same redirect_uri (Fathom requires byte-equal match) and also
+    // knows the target origin for window.postMessage.
+    const state     = signState({ v: verifier, c: client.client_id, o: origin, t: Date.now() });
 
-    case 'get_summary': {
-      const data = await fathomFetch(`/recordings/${args.recordingId}/summary`);
-      return {
-        recording_id: args.recordingId,
-        template:     data.summary?.template_name,
-        markdown:     data.summary?.markdown_formatted ?? '',
-      };
-    }
+    const url = new URL(FATHOM_OAUTH_AUTHORIZE);
+    url.searchParams.set('response_type',         'code');
+    url.searchParams.set('client_id',             client.client_id);
+    url.searchParams.set('redirect_uri',          redirectUri);
+    url.searchParams.set('scope',                 'mcp');
+    url.searchParams.set('state',                 state);
+    url.searchParams.set('code_challenge',        challenge);
+    url.searchParams.set('code_challenge_method', 'S256');
 
-    case 'search_meetings': {
-      const q        = String(args.query || '').toLowerCase().trim();
-      if (!q) return { matched: 0, meetings: [] };
-      const days     = Math.min(args.days_back || 30, 180);
-      const limit    = Math.min(args.limit || 10, 25);
-      const after    = new Date(Date.now() - days * 86_400_000).toISOString();
-      const params   = new URLSearchParams({
-        limit: '50',
-        created_after: after,
-        include_summary: 'true',
-        include_transcript: 'true',
-      });
-      const data    = await fathomFetch(`/meetings?${params}`);
-      const matches = (data.items ?? []).filter(m => {
-        const hay = [
-          m.meeting_title, m.title,
-          m.default_summary,
-          Array.isArray(m.transcript) ? m.transcript.map(t => t.text).join(' ') : '',
-        ].join(' ').toLowerCase();
-        return hay.includes(q);
-      }).slice(0, limit).map(briefMeeting);
-      return { matched: matches.length, days_back: days, meetings: matches };
-    }
-
-    default:
-      throw new Error(`Unknown Fathom tool: ${name}`);
+    res.redirect(url.toString());
+  } catch (err) {
+    console.error('[Fathom OAuth start]', err.message);
+    res.status(500).type('text/plain').send(`Fathom OAuth start failed: ${err.message}`);
   }
-}
+});
+
+// Step 2: Fathom redirects back here with ?code=&state=. Exchange for a token
+// and post it back to the popup opener.
+app.get('/api/fathom/oauth/callback', async (req, res) => {
+  const { code, state, error, error_description } = req.query;
+
+  // postMessage payload back to the opener; close popup either way.
+  // `targetOrigin` is whatever /start resolved as the SPA origin — same as
+  // the popup's own window.location.origin (since the popup was redirected
+  // there from Fathom). Falling back to '*' as a safety net would defeat
+  // the origin check on the listener; we keep it strict.
+  function reply(payload, targetOrigin, statusCode = 200) {
+    const json = JSON.stringify(payload).replace(/</g, '\\u003c');
+    const target = JSON.stringify(targetOrigin || '*');
+    res.status(statusCode)
+       .type('text/html; charset=utf-8')
+       .send(
+`<!doctype html><html><body style="font-family:system-ui;padding:24px;background:#0b0b14;color:#eaeaf2">
+<script>
+(function(){
+  var payload = ${json};
+  var target  = ${target};
+  // Dual handoff:
+  //   1) localStorage — survives COOP severing window.opener. Same-origin tabs
+  //      receive a 'storage' event when this changes, which the SPA listens to.
+  //   2) postMessage — fastest path when window.opener is still wired.
+  try {
+    if (payload.ok && payload.accessToken) {
+      localStorage.setItem('fathom_oauth_token', payload.accessToken);
+    }
+    // Always write the full result with a fresh timestamp so the SPA can react
+    // even if the token slot was already populated with the same value.
+    localStorage.setItem('fathom_oauth_result', JSON.stringify({ payload: payload, at: Date.now() }));
+  } catch(e){}
+  try {
+    if (window.opener) window.opener.postMessage({source:'fathom-oauth',payload:payload}, target);
+  } catch(e){}
+  document.body.innerHTML = payload.ok
+    ? '<h2 style="margin:0 0 8px">Fathom connected</h2><p style="opacity:.7">You can close this tab.</p>'
+    : '<h2 style="margin:0 0 8px">Fathom OAuth failed</h2><p style="opacity:.7">'+(payload.error||'unknown error')+'</p>';
+  setTimeout(function(){ try { window.close(); } catch(e){} }, payload.ok ? 600 : 5000);
+})();
+</script>
+</body></html>`);
+  }
+
+  // Pull the SPA origin out of the signed state so we can postMessage it back
+  // even before we trust anything else from the request.
+  const parsed = state ? verifyState(state) : null;
+  const targetOrigin = parsed?.o || null;
+
+  if (error)            return reply({ ok: false, error: `${error}${error_description ? `: ${error_description}` : ''}` }, targetOrigin, 400);
+  if (!code || !state)  return reply({ ok: false, error: 'Missing code or state on callback' }, targetOrigin, 400);
+  if (!parsed)          return reply({ ok: false, error: 'Invalid OAuth state (signature check failed)' }, targetOrigin, 400);
+  if (Date.now() - parsed.t > 10 * 60_000)  return reply({ ok: false, error: 'OAuth state expired — please retry' }, targetOrigin, 400);
+
+  try {
+    const redirectUri = `${parsed.o}/api/fathom/oauth/callback`;
+    const r = await fetch(FATHOM_OAUTH_TOKEN_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+      body:    new URLSearchParams({
+        grant_type:    'authorization_code',
+        code:          String(code),
+        redirect_uri:  redirectUri,
+        client_id:     parsed.c,
+        code_verifier: parsed.v,
+      }).toString(),
+    });
+    const text = await r.text();
+    if (!r.ok) return reply({ ok: false, error: `Token exchange failed (${r.status}): ${text.slice(0, 200)}` }, targetOrigin, 400);
+    let tok;
+    try { tok = JSON.parse(text); }
+    catch { return reply({ ok: false, error: 'Token endpoint returned non-JSON body' }, targetOrigin, 502); }
+    if (!tok.access_token) return reply({ ok: false, error: 'Token response missing access_token' }, targetOrigin, 502);
+    return reply({
+      ok:           true,
+      accessToken:  tok.access_token,
+      refreshToken: tok.refresh_token || null,
+      expiresIn:    tok.expires_in    || null,
+    }, targetOrigin);
+  } catch (err) {
+    console.error('[Fathom OAuth callback]', err.message);
+    return reply({ ok: false, error: err.message }, targetOrigin, 500);
+  }
+});
 
 app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey)     return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
-  if (!FATHOM_KEY) return res.status(503).json({ error: 'FATHOM_API_KEY not configured' });
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { message, history = [], userEmail, confirmedPlan } = req.body ?? {};
-  if (!message) return res.status(400).json({ error: 'message is required' });
-
-  // Enforce per-user allowlist on the server. Frontend already hides the app,
-  // but the endpoint must reject direct requests from other users too.
-  const normalisedEmail = (userEmail || '').trim().toLowerCase();
-  if (!normalisedEmail || !FATHOM_ALLOWED_EMAILS.includes(normalisedEmail)) {
-    return res.status(403).json({ error: 'Fathom Agent is not available for your account.' });
-  }
+  const { message, history = [], userEmail, confirmedPlan, fathomToken } = req.body ?? {};
+  if (!message)      return res.status(400).json({ error: 'message is required' });
+  if (!fathomToken)  return res.status(401).json({ error: 'Fathom is not connected. Click "Connect Fathom" to authorize.', reconnect: true });
 
   const nowIso  = new Date().toISOString();
   const userCtx = userEmail
-    ? `The current user's email is "${userEmail}". When they say "my meetings" or "recorded by me", filter with recorded_by="${userEmail}".`
+    ? `The current user's email is "${userEmail}". If a tool offers a "recorded_by" / owner filter and the user says "my meetings" or "recorded by me", pass this email.`
     : '';
 
   const systemPrompt =
     'You are a Fathom meetings assistant for Dynamica Labs. ' +
     'Help users query their recorded calls: find meetings, read transcripts, summarise discussions, extract action items. ' +
-    'Always use tools to retrieve live data — never invent meeting titles, dates, recording IDs, or transcript content. ' +
-    `Today is ${nowIso}. Convert relative dates ("last week", "yesterday") to absolute ISO 8601 timestamps for tool calls. ` +
-    'Before doing real work, call ask_user when the request is genuinely ambiguous AND the answer changes which tools/parameters you would call. ' +
-    'Good triggers: ' +
-    '— user asks about "the meeting with X" or "the call about Y" when multiple meetings match (offer the top 2–4 candidate meetings by title/date); ' +
-    '— "summarise" without scope (offer "today" / "this week" / "specific meeting"); ' +
-    '— ambiguous topic search (offer narrowing by date range or by participant). ' +
-    'Bad triggers: trivial follow-ups, things you can solve by trying a sensible default first, anything inferrable from prior turns. Never ask more than one clarifying question in a row. ' +
-    'Workflow rules: ' +
-    '(1) When the user asks for a summary or transcript of a specific meeting, you MUST first call list_meetings (or search_meetings) to obtain the real recording_id, then call get_summary/get_transcript with that id. ' +
-    '(2) The list_meetings result does NOT include summary/transcript content — never claim "no summary available" based on the list alone. If the user wants a summary, always call get_summary by recording_id. ' +
-    '(3) Use recorded_by ONLY when the user explicitly says "my meetings"/"recorded by me". Filtering by other people\'s emails (e.g. "from Igor") will likely return empty unless that person is the recorder — better to list without filter and pick by attendee/title. ' +
-    '(4) Prefer search_meetings when the user asks about a topic; prefer list_meetings when asking for recent calls. ' +
-    '(5) NEVER give up after a single failed lookup. If search_meetings returns matched=0, you MUST fall back: call list_meetings for the relevant time window (e.g. created_after=today 00:00Z for "today", or last 7 days otherwise), then call get_transcript on the most plausible candidates by title/attendees. Only after exhausting these steps may you say nothing was found. ' +
-    '(6) When the user asks what a specific person said about a topic, attendees in the list are the key signal — pick meetings where that person is in invitees, then read the transcript. ' +
-    'Respond in the same language the user writes in (Russian, Ukrainian, or English). ' +
-    'When citing a meeting, include its title and Fathom URL. Format with bullet lists for multiple items. ' +
+    'You access Fathom through tools exposed by the official Fathom MCP server. Use ONLY those tools — never invent meeting titles, IDs, transcript content, or capabilities. ' +
+    `Today is ${nowIso}. Convert relative dates ("last week", "yesterday") to absolute ISO 8601 timestamps when a tool accepts them. ` +
+    'Before doing real work, call ask_user when the request is genuinely ambiguous AND the answer changes which tools/parameters you would call (e.g. multiple meetings match a vague title, undefined time scope). ' +
+    'Never ask more than one clarifying question in a row, and never ask about anything you can resolve by trying a sensible default first. ' +
+    'Workflow guidance: ' +
+    '(1) Inspect the tool list before assuming what is available — names and arguments come from the MCP server, not from your priors. ' +
+    '(2) When the user asks about a specific meeting, first find it via a listing/search tool to obtain its real identifier, THEN call the transcript/summary tool with that identifier. ' +
+    '(3) NEVER give up after a single empty result. Broaden the time window or fall back to listing recent meetings, then read transcripts of the most plausible candidates. ' +
+    '(4) When the user asks what a specific person said about a topic, attendees on a meeting are the key signal — pick meetings where that person is listed, then read the transcript. ' +
+    'Respond in the same language the user writes in (Russian, Ukrainian, or English). When citing a meeting, include its title and Fathom URL. Use bullet lists for multiple items. ' +
     userCtx;
 
   const toolResults = [];
 
   try {
+    // ── Open a fresh MCP session for this request and make sure tools are cached.
+    const { sessionId } = await mcpInitSession(fathomToken);
+    const tools = await ensureFathomTools(fathomToken, sessionId);
+
     // ── STAGE 1: produce a plan unless the user has already confirmed one ──
     let plan = '';
     if (confirmedPlan) {
@@ -908,7 +1096,7 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
       const planResult = await buildPlan(apiKey, {
         domain:       'Fathom meetings',
         systemPrompt,
-        tools:        FATHOM_TOOLS,
+        tools,
         history,
         message,
       });
@@ -951,11 +1139,9 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
       const data = await callOpenRouter(apiKey, {
         model:       OPENROUTER_EXECUTOR,
         messages:    msgs,
-        tools:       FATHOM_TOOLS,
+        tools,
         tool_choice: 'auto',
         temperature: 0.3,
-        // V4 Flash spends tokens on reasoning before producing content/tool_calls.
-        // Be generous so a final answer isn't truncated mid-thought.
         max_tokens:  4000,
       });
 
@@ -980,22 +1166,32 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
       }
 
       for (const tc of choice.message.tool_calls) {
-        let result;
+        const name = tc.function.name;
+        let args;
+        try { args = JSON.parse(tc.function.arguments || '{}'); }
+        catch { args = {}; }
+
         try {
-          const args = JSON.parse(tc.function.arguments);
-          result = await executeFathomTool(tc.function.name, args);
-          toolResults.push({ name: tc.function.name, args, result });
+          const raw     = await mcpCallTool(fathomToken, sessionId, name, args);
+          const { text, summary } = summariseMcpResult(name, raw);
+          toolResults.push({ name, args, result: summary });
+          msgs.push({ role: 'tool', tool_call_id: tc.id, content: text });
         } catch (err) {
-          result = { error: err.message };
-          toolResults.push({ name: tc.function.name, error: err.message });
+          if (err.reconnect) throw err; // bubble up so the outer catch returns reconnect flag
+          toolResults.push({ name, error: err.message });
+          msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) });
         }
-        msgs.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
       }
     }
     res.json({ stage: 'done', reply: 'Step limit reached. Try rephrasing your request.', toolResults });
   } catch (err) {
     console.error('[Fathom Agent error]', err.message);
-    res.status(500).json({ error: humaniseFetchError(err), toolResults });
+    const status = err.reconnect ? 401 : 500;
+    res.status(status).json({
+      error: humaniseFetchError(err),
+      toolResults,
+      ...(err.reconnect ? { reconnect: true } : {}),
+    });
   }
 });
 
@@ -1064,7 +1260,7 @@ app.get('/api/health', (req, res) => {
     ok: true,
     azure: Object.fromEntries(Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: !!v.pat }])),
     jira:   { hasToken:  !!jiraToken },
-    fathom: { hasApiKey: !!FATHOM_KEY },
+    fathom: { mcpUrl: FATHOM_MCP_URL, authMode: 'per-user OAuth' },
   });
 });
 

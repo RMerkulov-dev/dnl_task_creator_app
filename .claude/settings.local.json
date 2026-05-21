@@ -67,7 +67,13 @@
       "Bash(node -e 'let s=\"\";process.stdin.on\\(\"data\",d=>s+=d\\).on\\(\"end\",\\(\\)=>{const j=JSON.parse\\(s\\);const ds=j.data.filter\\(m=>m.id.includes\\(\"deepseek\"\\)\\);console.log\\(\"Found\",ds.length,\"deepseek models:\"\\);ds.forEach\\(m=>console.log\\(\" -\",m.id\\)\\);}\\)')",
       "Bash(npx --no-install vite build --logLevel=error)",
       "Bash(npx --no-install vite build)",
-      "Bash(node -e 'let s=\"\";process.stdin.on\\(\"data\",d=>s+=d\\).on\\(\"end\",\\(\\)=>{const j=JSON.parse\\(s\\);const m=j.choices[0].message;const txt=m.content||m.reasoning||\"\";console.log\\(\"CONTENT:\"\\);console.log\\(txt\\);}\\)')"
+      "Bash(node -e 'let s=\"\";process.stdin.on\\(\"data\",d=>s+=d\\).on\\(\"end\",\\(\\)=>{const j=JSON.parse\\(s\\);const m=j.choices[0].message;const txt=m.content||m.reasoning||\"\";console.log\\(\"CONTENT:\"\\);console.log\\(txt\\);}\\)')",
+      "Bash(curl -s -i -X POST https://api.fathom.ai/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'X-Api-Key: j_HdQb0yiUaTBRVhtYTRVw.4-YaeTSGIjeiG0IdBIrb1M15p9l6XnJPCuW6RVkAKLU' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"dnl-task-creator\",\"version\":\"1.0\"}}}')",
+      "Bash(curl -s -i -X POST https://api.fathom.ai/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' -H 'Authorization: Bearer j_HdQb0yiUaTBRVhtYTRVw.4-YaeTSGIjeiG0IdBIrb1M15p9l6XnJPCuW6RVkAKLU' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"dnl-task-creator\",\"version\":\"1.0\"}}}')",
+      "Bash(curl *)",
+      "Bash(node --check scripts/fathom-oauth.js)",
+      "Bash(npx --yes esbuild --loader:.jsx=jsx --log-level=error --bundle src/apps/fathom_agent/FathomAgentApp.jsx --external:react --external:react-dom --external:../../components/AgentClarification.jsx --external:../../components/AgentPlan.jsx)",
+      "Bash(env)"
     ]
   }
 }
