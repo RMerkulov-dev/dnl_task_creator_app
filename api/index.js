@@ -1256,11 +1256,27 @@ app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) =
 
 // Health check
 app.get('/api/health', (req, res) => {
+  // Report what /api/fathom/oauth/start would compute right now — this is the
+  // single most common source of "redirect_uri points at a dead domain" bugs.
+  const resolvedOrigin       = getAppOrigin(req, { allowReferer: false });
+  const refererBackedOrigin  = getAppOrigin(req, { allowReferer: true });
   res.json({
     ok: true,
-    azure: Object.fromEntries(Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: !!v.pat }])),
-    jira:   { hasToken:  !!jiraToken },
-    fathom: { mcpUrl: FATHOM_MCP_URL, authMode: 'per-user OAuth' },
+    azure:  Object.fromEntries(Object.entries(AZURE_ORGS).map(([k, v]) => [k, { target: v.target || null, hasPat: !!v.pat }])),
+    jira:   { hasToken: !!jiraToken },
+    fathom: {
+      mcpUrl:   FATHOM_MCP_URL,
+      authMode: 'per-user OAuth',
+      // What redirect_uri will be sent to Fathom on /api/fathom/oauth/start.
+      // If this points at a domain that doesn't resolve, the popup will fail
+      // after authorization with DNS_PROBE_FINISHED_NXDOMAIN.
+      resolvedRedirectOrigin:    resolvedOrigin,
+      refererBackedOrigin,
+      appOriginEnv:              process.env.APP_ORIGIN || null,
+      seenHostHeader:            req.get('host')                  || null,
+      seenXForwardedHostHeader:  req.headers['x-forwarded-host']  || null,
+      seenXForwardedProtoHeader: req.headers['x-forwarded-proto'] || null,
+    },
   });
 });
 
