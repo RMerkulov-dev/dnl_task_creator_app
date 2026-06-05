@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
-import { getJiraProjects, searchJiraUsers, getChildIssues, deleteIssue } from '../../services/jira.js';
+import { getJiraProjects, searchJiraUsers, getChildIssues } from '../../services/jira.js';
 import { loadIssue, loadUserFields, findSprintField, loadSprintsForProject, cloneInSameProject, bulkMoveForest, moveToProject } from './jiraAgent.js';
 
 const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
@@ -400,7 +400,7 @@ function MoveResultNode({ node, depth }) {
   );
 }
 
-// ─── Shared issue list (Move / Delete) ────────────────────────────────────────
+// ─── Shared issue list (Move) ─────────────────────────────────────────────────
 
 function IssueList({ items, onKeyChange, onLoad, onRemove, onAdd, showChildren }) {
   return (
@@ -501,11 +501,6 @@ export default function TaskAgentApp({ user, onLogout }) {
   const moveIdRef = useRef(1);
   const [moveItems, setMoveItems] = useState([{ id: 0, key: '', source: null, loadErr: '', loading: false, children: [], loadingChildren: false }]);
 
-  // Delete state
-  const deleteIdRef = useRef(1);
-  const [deleteItems, setDeleteItems] = useState([{ id: 0, key: '', source: null, loadErr: '', loading: false }]);
-  const [deleteResults, setDeleteResults] = useState([]);
-
   // Shared
   const [targetProject,   setTargetProject]   = useState('');
   const [projects,        setProjects]        = useState([]);
@@ -556,7 +551,6 @@ export default function TaskAgentApp({ user, onLogout }) {
     setTargetProject('');
     resetSource();
     setMoveItems([{ id: 0, key: '', source: null, loadErr: '', loading: false, children: [], loadingChildren: false }]);
-    setDeleteItems([{ id: 0, key: '', source: null, loadErr: '', loading: false }]);
   }
 
   async function handleLoad() {
@@ -649,34 +643,6 @@ export default function TaskAgentApp({ user, onLogout }) {
       }
     } catch (err) {
       setMoveItems(prev => prev.map(m => m.id === id ? { ...m, loadErr: err.message, loading: false } : m));
-    }
-  }
-
-  // ─── Delete item helpers ──────────────────────────────────────────────────
-
-  function addDeleteItem() {
-    const id = deleteIdRef.current++;
-    setDeleteItems(prev => [...prev, { id, key: '', source: null, loadErr: '', loading: false }]);
-  }
-
-  function removeDeleteItem(id) {
-    setDeleteItems(prev => prev.filter(d => d.id !== id));
-  }
-
-  function updateDeleteItemKey(id, key) {
-    setDeleteItems(prev => prev.map(d => d.id === id ? { ...d, key, source: null, loadErr: '' } : d));
-  }
-
-  async function loadDeleteItem(id) {
-    const item = deleteItems.find(d => d.id === id);
-    const raw  = item?.key.trim().toUpperCase();
-    if (!raw) return;
-    setDeleteItems(prev => prev.map(d => d.id === id ? { ...d, loading: true, source: null, loadErr: '' } : d));
-    try {
-      const issue = await loadIssue(CLOUD_ID, raw);
-      setDeleteItems(prev => prev.map(d => d.id === id ? { ...d, key: issue.key, source: issue, loading: false } : d));
-    } catch (err) {
-      setDeleteItems(prev => prev.map(d => d.id === id ? { ...d, loadErr: err.message, loading: false } : d));
     }
   }
 
@@ -819,25 +785,6 @@ export default function TaskAgentApp({ user, onLogout }) {
     }
   }
 
-  async function executeDelete() {
-    setShowConfirm(false);
-    const loaded = deleteItems.filter(d => d.source);
-    setDeleteResults(loaded.map(d => ({ key: d.key, summary: d.source.summary, status: 'idle', error: null })));
-    setRunning(true);
-    setShowProgress(true);
-
-    for (let i = 0; i < loaded.length; i++) {
-      setDeleteResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'running' } : r));
-      try {
-        await deleteIssue(CLOUD_ID, loaded[i].key);
-        setDeleteResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'done' } : r));
-      } catch (err) {
-        setDeleteResults(prev => prev.map((r, idx) => idx === i ? { ...r, status: 'error', error: err.message } : r));
-      }
-    }
-    setRunning(false);
-  }
-
   function handleAction() {
     if (mode === 'clone') executeClone();
     else setShowConfirm(true);
@@ -863,35 +810,22 @@ export default function TaskAgentApp({ user, onLogout }) {
           ? remaining
           : [{ id: moveIdRef.current++, key: '', source: null, loadErr: '', loading: false, children: [], loadingChildren: false }];
       });
-    } else {
-      const doneKeys = new Set(deleteResults.filter(r => r.status === 'done').map(r => r.key));
-      setDeleteResults([]);
-      setDeleteItems(prev => {
-        const remaining = prev.filter(d => !doneKeys.has(d.key));
-        return remaining.length > 0
-          ? remaining
-          : [{ id: deleteIdRef.current++, key: '', source: null, loadErr: '', loading: false }];
-      });
     }
   }
 
   // ─── Derived state ────────────────────────────────────────────────────────
 
   const loadedMoveItems    = moveItems.filter(m => m.source);
-  const loadedDeleteItems  = deleteItems.filter(d => d.source);
   const anyLoadingChildren = moveItems.some(m => m.loadingChildren);
 
   const canRun = mode === 'clone'
     ? !!source && !running && !loadingUserFields && !loadingSprints
-    : mode === 'move'
-      ? loadedMoveItems.length > 0 && !running && !!targetProject && !anyLoadingChildren
-      : loadedDeleteItems.length > 0 && !running;
+    : loadedMoveItems.length > 0 && !running && !!targetProject && !anyLoadingChildren;
 
   const allCloneDone = steps.length > 0 && steps.every(s => s?.status === 'done' || s?.status === 'skipped');
   const hasCloneErr  = steps.some(s => s?.status === 'error');
   const allMoveDone  = moveResults.length > 0 && moveResults.every(treeAllSettled);
   const allMoveOk    = moveResults.length > 0 && moveResults.every(treeAllOk);
-  const allDeleteDone = deleteResults.length > 0 && deleteResults.every(r => r.status === 'done' || r.status === 'error');
 
   const modalTitle = mode === 'clone'
     ? running
@@ -899,17 +833,11 @@ export default function TaskAgentApp({ user, onLogout }) {
       : result
         ? (hasCloneErr ? '✓ Cloned (with warnings)' : '✓ Cloned successfully')
         : '⚠ Error'
-    : mode === 'move'
-      ? running
-        ? `Moving to ${targetProject}…`
-        : allMoveDone
-          ? (allMoveOk ? '✓ Moved successfully' : '✓ Moved (with errors)')
-          : 'Moving…'
-      : running
-        ? 'Deleting issues…'
-        : allDeleteDone
-          ? (deleteResults.every(r => r.status === 'done') ? '✓ Deleted successfully' : '✓ Deleted (with errors)')
-          : 'Deleting…';
+    : running
+      ? `Moving to ${targetProject}…`
+      : allMoveDone
+        ? (allMoveOk ? '✓ Moved successfully' : '✓ Moved (with errors)')
+        : 'Moving…';
 
   return (
     <div className="app-shell">
@@ -934,14 +862,12 @@ export default function TaskAgentApp({ user, onLogout }) {
 
           <div className="card-heading">
             <h2 className="card-title">
-              {mode === 'clone' ? 'Clone Issue' : mode === 'move' ? 'Move Issues' : 'Delete Issues'}
+              {mode === 'clone' ? 'Clone Issue' : 'Move Issues'}
             </h2>
             <p className="card-sub">
               {mode === 'clone'
                 ? 'Duplicate a Jira issue with all its fields into the same project'
-                : mode === 'move'
-                  ? 'Move one or more Jira issues (with children) to a different project'
-                  : 'Permanently delete one or more Jira issues'}
+                : 'Move one or more Jira issues (with children) to a different project'}
             </p>
           </div>
 
@@ -958,11 +884,6 @@ export default function TaskAgentApp({ user, onLogout }) {
                 className={`seg-btn ${mode === 'move' ? 'active' : ''}`}
                 onClick={() => handleModeChange('move')}>
                 Move
-              </button>
-              <button type="button"
-                className={`seg-btn ${mode === 'delete' ? 'active' : ''}`}
-                onClick={() => handleModeChange('delete')}>
-                Delete
               </button>
             </div>
           </div>
@@ -1124,93 +1045,41 @@ export default function TaskAgentApp({ user, onLogout }) {
             </>
           )}
 
-          {/* ── Delete mode ── */}
-          {mode === 'delete' && (
-            <>
-              <IssueList
-                items={deleteItems}
-                onKeyChange={updateDeleteItemKey}
-                onLoad={loadDeleteItem}
-                onRemove={removeDeleteItem}
-                onAdd={addDeleteItem}
-                showChildren={false}
-              />
-
-              {loadedDeleteItems.length > 0 && (
-                <button
-                  className="btn btn-danger"
-                  style={{ marginTop: 24, width: '100%' }}
-                  disabled={!canRun}
-                  onClick={handleAction}
-                >
-                  Delete {loadedDeleteItems.length} Issue{loadedDeleteItems.length !== 1 ? 's' : ''} ↗
-                </button>
-              )}
-            </>
-          )}
-
         </div>
       </main>
 
-      {/* ── Confirmation modal (Move & Delete) ── */}
+      {/* ── Confirmation modal (Move) ── */}
       {showConfirm && (
         <div className="overlay">
           <div className="modal">
-            {mode === 'move' ? (
-              <>
-                <p className="modal-title">Confirm Move</p>
-                <p style={{ color: 'var(--text-2)', margin: '12px 0 8px', lineHeight: 1.6, fontSize: 14 }}>
-                  The following issue{loadedMoveItems.length !== 1 ? 's' : ''} will be moved to{' '}
-                  <strong style={{ color: 'var(--text-1)' }}>{targetProject}</strong> and{' '}
-                  <strong style={{ color: 'var(--red)' }}>permanently deleted</strong> from their current project{loadedMoveItems.length !== 1 ? 's' : ''}.
-                </p>
-                <ul style={{ margin: '0 0 20px', paddingLeft: 0 }}>
-                  {loadedMoveItems.map(m => (
-                    <ConfirmTreeNode
-                      key={m.key}
-                      node={{
-                        key: m.key,
-                        summary: m.source.summary,
-                        issueTypeName: m.source.issueTypeName,
-                        children: m.children,
-                      }}
-                      depth={0}
-                    />
-                  ))}
-                </ul>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn btn-primary" onClick={executeMove} style={{ flex: 1 }}>
-                    Yes, Move
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => setShowConfirm(false)} style={{ flex: 1 }}>
-                    Cancel
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="modal-title">Confirm Delete</p>
-                <p style={{ color: 'var(--text-2)', margin: '12px 0 8px', lineHeight: 1.6, fontSize: 14 }}>
-                  The following {loadedDeleteItems.length} issue{loadedDeleteItems.length !== 1 ? 's' : ''} will be{' '}
-                  <strong style={{ color: 'var(--red)' }}>permanently deleted</strong>. This cannot be undone.
-                </p>
-                <ul style={{ margin: '0 0 20px', paddingLeft: 18 }}>
-                  {loadedDeleteItems.map(d => (
-                    <li key={d.key} style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>
-                      <strong style={{ color: 'var(--text-1)' }}>{d.key}</strong> — {d.source.summary}
-                    </li>
-                  ))}
-                </ul>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button className="btn btn-danger" onClick={executeDelete} style={{ flex: 1 }}>
-                    Yes, Delete
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => setShowConfirm(false)} style={{ flex: 1 }}>
-                    Cancel
-                  </button>
-                </div>
-              </>
-            )}
+            <p className="modal-title">Confirm Move</p>
+            <p style={{ color: 'var(--text-2)', margin: '12px 0 8px', lineHeight: 1.6, fontSize: 14 }}>
+              The following issue{loadedMoveItems.length !== 1 ? 's' : ''} will be moved to{' '}
+              <strong style={{ color: 'var(--text-1)' }}>{targetProject}</strong> and{' '}
+              <strong style={{ color: 'var(--red)' }}>permanently deleted</strong> from their current project{loadedMoveItems.length !== 1 ? 's' : ''}.
+            </p>
+            <ul style={{ margin: '0 0 20px', paddingLeft: 0 }}>
+              {loadedMoveItems.map(m => (
+                <ConfirmTreeNode
+                  key={m.key}
+                  node={{
+                    key: m.key,
+                    summary: m.source.summary,
+                    issueTypeName: m.source.issueTypeName,
+                    children: m.children,
+                  }}
+                  depth={0}
+                />
+              ))}
+            </ul>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-primary" onClick={executeMove} style={{ flex: 1 }}>
+                Yes, Move
+              </button>
+              <button className="btn btn-ghost" onClick={() => setShowConfirm(false)} style={{ flex: 1 }}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1277,28 +1146,6 @@ export default function TaskAgentApp({ user, onLogout }) {
                 </ul>
 
                 {!running && allMoveDone && (
-                  <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleCloseModal}>
-                    Done
-                  </button>
-                )}
-              </>
-            )}
-
-            {mode === 'delete' && (
-              <>
-                <ul className="step-list" style={{ marginTop: 12 }}>
-                  {deleteResults.map(r => (
-                    <li key={r.key} className="step-item">
-                      <StepIcon status={r.status === 'running' ? 'pending' : r.status} />
-                      <div className="step-body">
-                        <p className="step-name">{r.key} — {r.summary}</p>
-                        {r.error && <p className="step-error">{r.error}</p>}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-
-                {!running && allDeleteDone && (
                   <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleCloseModal}>
                     Done
                   </button>
