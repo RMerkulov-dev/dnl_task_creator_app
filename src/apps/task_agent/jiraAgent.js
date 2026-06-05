@@ -2,9 +2,17 @@ import {
   getIssueFull,
   getProjectIssueTypes,
   getCreateMetaFields,
+  getEditMetaFields,
+  editIssueFieldsRaw,
   createRawIssue,
   addIssueLink,
   deleteIssue,
+  bulkMoveIssues,
+  getBulkTaskStatus,
+  getTransitions,
+  transitionIssue,
+  getWorklogs,
+  addWorklog,
   getJiraUrl,
   getBoardsForProject,
   getSprintsForBoard,
@@ -20,6 +28,14 @@ const EXCLUDE_FIELDS = new Set([
   'timespent', 'timetracking', 'timeestimate', 'timeoriginalestimate',
   'aggregatetimespent', 'aggregatetimeestimate', 'aggregatetimeoriginalestimate',
   'creator', 'reporter',
+]);
+
+// Cross-project hierarchy links reference issues in the source project and are
+// invalid in the target — handled separately (parent is re-set per moved tree).
+const HIERARCHY_FIELDS = new Set([
+  'parent',
+  'customfield_10014', // Epic Link — older Jira Cloud
+  'customfield_10018', // Parent Link — newer hierarchy field
 ]);
 
 // ADF media nodes carry attachment IDs from the source issue, which are
@@ -92,6 +108,96 @@ function buildPayload(sourceFields, targetProjectKey, targetIssueTypeId, allowed
   }
 
   return fields;
+}
+
+// ─── Field recovery (post-create edit pass) ─────────────────────────────────────
+// A cross-project create can only set fields on the target's *create* screen.
+// Many filled fields (assignee, custom fields, components, versions, …) live on
+// the edit screen instead and would otherwise be lost. After the issue exists we
+// read its editmeta and set every remaining source field that is editable,
+// remapping option/component/version values by name (their IDs differ per
+// project). Fields Jira still rejects are dropped one-by-one and the edit is
+// retried, so a single incompatible field never blocks the rest.
+
+// Match source value(s) against an editmeta field's allowedValues by name/value
+// and return the target-project IDs (option/component/version/select fields).
+function matchAllowedValues(raw, allowedValues) {
+  const index = new Map();
+  for (const a of allowedValues) {
+    if (a.value != null) index.set(String(a.value).toLowerCase(), a.id);
+    if (a.name  != null) index.set(String(a.name).toLowerCase(),  a.id);
+  }
+  const resolve = (v) => {
+    const k = (v && typeof v === 'object') ? (v.value ?? v.name ?? v.id) : v;
+    if (k == null) return undefined;
+    const id = index.get(String(k).toLowerCase());
+    return id != null ? { id } : undefined;
+  };
+  if (Array.isArray(raw)) {
+    const out = raw.map(resolve).filter(v => v !== undefined);
+    return out.length ? out : undefined;
+  }
+  return resolve(raw);
+}
+
+// Normalize a source value for the target field using its editmeta schema.
+function normalizeForMeta(key, raw, meta) {
+  if (raw === null || raw === undefined) return undefined;
+  const schema = meta?.schema ?? {};
+
+  // User pickers — carry the account, never the display name / cached profile.
+  if (schema.type === 'user') {
+    return raw.accountId ? { accountId: raw.accountId } : undefined;
+  }
+  if (schema.type === 'array' && schema.items === 'user') {
+    const users = (Array.isArray(raw) ? raw : [])
+      .map(u => (u?.accountId ? { accountId: u.accountId } : null))
+      .filter(Boolean);
+    return users.length ? users : undefined;
+  }
+
+  // Option / component / version / select fields — remap IDs by name.
+  if (Array.isArray(meta?.allowedValues) && meta.allowedValues.length) {
+    return matchAllowedValues(raw, meta.allowedValues);
+  }
+
+  return simplifyValue(key, raw);
+}
+
+// Set every filled source field that is editable on the freshly created issue
+// but was not already set during create. Best-effort: never throws.
+async function recoverFields(cloudId, newKey, sourceFields, alreadySetKeys) {
+  let editMeta;
+  try {
+    editMeta = await getEditMetaFields(cloudId, newKey);
+  } catch {
+    return; // editmeta unavailable — nothing we can safely recover
+  }
+
+  const skip = new Set([...EXCLUDE_FIELDS, ...HIERARCHY_FIELDS, ...alreadySetKeys]);
+  skip.add('project'); skip.add('issuetype'); skip.add('summary');
+
+  let fields = {};
+  for (const [key, raw] of Object.entries(sourceFields)) {
+    if (skip.has(key)) continue;
+    const meta = editMeta[key];
+    if (!meta) continue; // not editable on the target issue
+    const value = normalizeForMeta(key, raw, meta);
+    if (value !== undefined) fields[key] = value;
+  }
+  if (!Object.keys(fields).length) return;
+
+  // PUT, then drop any field Jira rejects and retry until it goes through.
+  for (let attempt = 0; attempt < 5 && Object.keys(fields).length; attempt++) {
+    const res = await editIssueFieldsRaw(cloudId, newKey, fields);
+    if (res.ok) return;
+    const bad = Object.keys(res.errors ?? {});
+    let removed = false;
+    for (const b of bad) {
+      if (b in fields) { delete fields[b]; removed = true; }
+    }
+    if (!removed) return; // error not tied to a specific field — give up quietly
+  }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -187,6 +293,8 @@ export async function cloneInSameProject(cloudId, issue, { summaryOverride, fiel
     const result  = await createRawIssue(cloudId, payload);
     newKey = result.key;
     newUrl = getJiraUrl(newKey);
+    // Recover any filled fields that weren't on the create screen.
+    try { await recoverFields(cloudId, newKey, raw.fields, Object.keys(payload)); } catch { /* best-effort */ }
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;
@@ -204,8 +312,198 @@ export async function cloneInSameProject(cloudId, issue, { summaryOverride, fiel
   return { newKey, newUrl };
 }
 
-// Move to a different project. Steps: 0 target info, 1 create, 2 link, 3 delete source
-// parentKey: if provided, set parent to this key (used when moving children after parent move)
+// ─── Cross-project move (native Bulk Move API) ──────────────────────────────────
+// Jira's public REST API has no single-issue cross-project move, but the Bulk
+// operations API does a real native move that preserves comments, attachments,
+// worklogs, history and status — none of the clone+delete data loss. The op is
+// asynchronous: we submit a batch and poll the task to completion.
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Read a tree node's metadata regardless of whether it's a loaded root
+// ({ source }) or a descendant ({ raw }).
+function nodeMeta(node) {
+  const fields = node.source?.raw?.fields ?? node.raw?.fields ?? {};
+  return {
+    key:           node.key,
+    id:            node.source?.id ?? node.raw?.id ?? node.source?.raw?.id ?? null,
+    issueTypeName: node.source?.issueTypeName ?? fields.issuetype?.name ?? '',
+    isSubtask:     !!fields.issuetype?.subtask,
+  };
+}
+
+// Flatten the move forest depth-first, tagging each node with its tree parent.
+function flattenForest(roots) {
+  const out = [];
+  const walk = (node, parent) => {
+    const m = nodeMeta(node);
+    m.parentId  = parent?.id  ?? null;
+    m.parentKey = parent?.key ?? null;
+    m.parentInSet = !!parent;
+    out.push(m);
+    for (const child of node.children ?? []) walk(child, m);
+  };
+  for (const r of roots) walk(r, null);
+  return out;
+}
+
+// Move a forest of issues (roots + descendants) to another project in one native
+// bulk operation. `roots` are move-tree nodes. onProgress(percent, statusText)
+// reports poll progress. Resolves to a Map<sourceKey, { newKey, newUrl }>.
+// Issue IDs are stable across a move, so we resolve new keys by ID afterwards.
+export async function bulkMoveForest(cloudId, roots, targetProjectKey, onProgress) {
+  const flat = flattenForest(roots);
+  if (!flat.length) return new Map();
+
+  // Resolve target issue types by name (fall back to first standard type).
+  const types = await getProjectIssueTypes(cloudId, targetProjectKey);
+  if (!types.length) throw new Error(`No issue types found in project ${targetProjectKey}`);
+  const byName = new Map(types.map(t => [t.name.toLowerCase(), t]));
+  const firstStandard = types.find(t => !t.subtask) ?? types[0];
+  const targetType = (name) => byName.get((name || '').toLowerCase()) ?? firstStandard;
+
+  // Build targetToSourcesMapping. Subtasks whose parent is also in the move set
+  // ride along automatically (inferSubtaskTypeDefault), so we don't list them —
+  // listing every standard issue is enough and avoids cross-project parent refs.
+  const mapping = {};
+  const addToGroup = (key, idOrKey) => {
+    if (!mapping[key]) {
+      mapping[key] = {
+        inferClassificationDefaults: true,
+        inferFieldDefaults:          true,
+        inferStatusDefaults:         true,
+        inferSubtaskTypeDefault:     true,
+        issueIdsOrKeys:              [],
+      };
+    }
+    mapping[key].issueIdsOrKeys.push(String(idOrKey));
+  };
+
+  for (const m of flat) {
+    if (m.isSubtask && m.parentInSet) continue; // moves with its parent
+    const tt = targetType(m.issueTypeName);
+    const ref = m.id ?? m.key;
+    if (tt.subtask) {
+      const parentRef = m.parentId ?? m.parentKey;
+      if (!parentRef) continue; // a subtask with no parent can't be placed — skip
+      addToGroup(`${targetProjectKey},${tt.id},${parentRef}`, ref);
+    } else {
+      addToGroup(`${targetProjectKey},${tt.id}`, ref);
+    }
+  }
+
+  if (!Object.keys(mapping).length) throw new Error('Nothing to move after grouping issues.');
+
+  // Submit the batch. A failure *here* means nothing has moved yet (endpoint
+  // unavailable, no permission, bad mapping) — flag it so the caller can safely
+  // fall back to clone+delete. A failure *after* submission is not flagged,
+  // because the move may be partially applied and retrying would duplicate.
+  let taskId;
+  try {
+    ({ taskId } = await bulkMoveIssues(cloudId, mapping, false));
+  } catch (err) {
+    err.bulkUnavailable = true;
+    throw err;
+  }
+  if (!taskId) {
+    const err = new Error('Bulk move did not return a task id.');
+    err.bulkUnavailable = true;
+    throw err;
+  }
+
+  // Poll until the task settles.
+  const DONE = new Set(['COMPLETE', 'FAILED', 'CANCELLED', 'DEAD']);
+  let last;
+  for (let i = 0; i < 600; i++) { // ~15 min ceiling at 1.5s intervals
+    await sleep(1500);
+    last = await getBulkTaskStatus(cloudId, taskId);
+    onProgress?.(last.progressPercent ?? 0, last.status);
+    if (DONE.has(last.status)) break;
+  }
+  if (!last || last.status !== 'COMPLETE') {
+    const bad = last?.invalidOrInaccessibleIssueCount;
+    throw new Error(
+      `Bulk move ${last?.status ?? 'timed out'}` +
+      (bad ? ` — ${bad} issue(s) invalid or inaccessible` : '')
+    );
+  }
+
+  // Resolve the new key for every moved issue by its (stable) ID.
+  const results = new Map();
+  for (const m of flat) {
+    try {
+      const data = await getIssueFull(cloudId, m.id ?? m.key);
+      results.set(m.key, { newKey: data.key, newUrl: getJiraUrl(data.key) });
+    } catch {
+      results.set(m.key, { newKey: null, newUrl: null });
+    }
+  }
+  return results;
+}
+
+// ─── Legacy clone+delete move (fallback only) ───────────────────────────────────
+// Used when the native Bulk Move API is unavailable. Creates a copy in the target
+// project, best-effort migrates status/worklogs/fields, then deletes the source.
+// Lossy compared to bulk move: comments, attachments and history are NOT carried.
+
+// A freshly created issue starts in the workflow's initial status. Walk transitions
+// greedily toward the source status (workflows differ between projects). Best-effort.
+async function replicateStatus(cloudId, newKey, targetStatusName) {
+  if (!targetStatusName) return;
+  const wanted = targetStatusName.trim().toLowerCase();
+  try {
+    const current = await getIssueFull(cloudId, newKey);
+    if (current.fields?.status?.name?.trim().toLowerCase() === wanted) return;
+  } catch { /* fall through and try transitions anyway */ }
+
+  const visited = new Set();
+  for (let hops = 0; hops < 10; hops++) {
+    const transitions = await getTransitions(cloudId, newKey);
+    if (!transitions.length) return;
+    const direct = transitions.find(t => t.to?.name?.trim().toLowerCase() === wanted);
+    if (direct) { await transitionIssue(cloudId, newKey, direct.id); return; }
+    const next = transitions.find(t => t.to?.name && !visited.has(t.to.name.trim().toLowerCase()));
+    if (!next) return;
+    visited.add(next.to.name.trim().toLowerCase());
+    await transitionIssue(cloudId, newKey, next.id);
+  }
+}
+
+// Worklogs live on the source issue and vanish when it is deleted. Re-create each
+// on the new issue (the REST API records them under the *current* user, so the
+// original author is preserved in the comment text).
+function buildWorklogComment(originalComment, authorName, startedIso) {
+  const date = startedIso ? startedIso.slice(0, 10) : '';
+  const noteText = `Originally logged by ${authorName}${date ? ` on ${date}` : ''}`;
+  const content = [
+    { type: 'paragraph', content: [{ type: 'text', text: noteText, marks: [{ type: 'em' }] }] },
+  ];
+  if (originalComment && typeof originalComment === 'object' && Array.isArray(originalComment.content)) {
+    content.push(...originalComment.content);
+  } else if (typeof originalComment === 'string' && originalComment.trim()) {
+    content.push({ type: 'paragraph', content: [{ type: 'text', text: originalComment }] });
+  }
+  return { type: 'doc', version: 1, content };
+}
+
+async function migrateWorklogs(cloudId, sourceKey, newKey) {
+  let worklogs;
+  try { worklogs = await getWorklogs(cloudId, sourceKey); } catch { return; }
+  for (const w of worklogs) {
+    if (!w.timeSpentSeconds) continue;
+    const authorName = w.author?.displayName ?? w.author?.accountId ?? 'unknown user';
+    try {
+      await addWorklog(cloudId, newKey, {
+        timeSpentSeconds: w.timeSpentSeconds,
+        started:          w.started,
+        comment:          buildWorklogComment(w.comment, authorName, w.started),
+      });
+    } catch { /* skip an entry Jira rejects, keep the rest */ }
+  }
+}
+
+// Move a single issue via clone+delete. parentKey re-parents children after the
+// parent has moved. Returns { newKey, newUrl, sourceDeleted }.
 export async function moveToProject(cloudId, issue, targetProjectKey, { fieldOverrides = {}, parentKey = null }, onStep) {
   const { key: sourceKey, issueTypeName, raw } = issue;
 
@@ -227,7 +525,9 @@ export async function moveToProject(cloudId, issue, targetProjectKey, { fieldOve
   onStep(1, 'pending');
   let newKey, newUrl;
   try {
-    // Strip all cross-project fields: parent refs, project-specific IDs
+    // The source sprint belongs to the source board and is usually closed — Jira
+    // rejects it on the target. Treat it as a cross-project field and drop it.
+    const sprintInfo = findSprintField(raw.fields);
     const moveOverrides = {
       parent:            parentKey ? { key: parentKey } : undefined,
       customfield_10014: undefined, // Epic Link — older Jira Cloud
@@ -235,12 +535,18 @@ export async function moveToProject(cloudId, issue, targetProjectKey, { fieldOve
       components:        undefined, // component IDs are project-specific
       fixVersions:       undefined,
       versions:          undefined,
+      ...(sprintInfo ? { [sprintInfo.fieldId]: undefined } : {}),
       ...fieldOverrides,
     };
     const payload = buildPayload(raw.fields, targetProjectKey, targetIssueTypeId, allowedFieldKeys, false, moveOverrides);
     const result  = await createRawIssue(cloudId, payload);
     newKey = result.key;
     newUrl = getJiraUrl(newKey);
+    const recoverSkip = Object.keys(payload);
+    if (sprintInfo && !(sprintInfo.fieldId in fieldOverrides)) recoverSkip.push(sprintInfo.fieldId);
+    try { await recoverFields(cloudId, newKey, raw.fields, recoverSkip); } catch { /* best-effort */ }
+    try { await replicateStatus(cloudId, newKey, raw.fields?.status?.name); } catch { /* best-effort */ }
+    try { await migrateWorklogs(cloudId, sourceKey, newKey); } catch { /* best-effort */ }
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;

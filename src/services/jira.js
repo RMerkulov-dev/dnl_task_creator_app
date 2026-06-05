@@ -344,6 +344,38 @@ export async function getCreateMetaFields(cloudId, projectKey, issueTypeId) {
   return data.fields ?? {};
 }
 
+// Fields editable on an existing issue. Used after a cross-project create to
+// recover fields that aren't on the target project's *create* screen but can
+// still be set via edit (assignee, custom fields, components, versions, …).
+export async function getEditMetaFields(cloudId, issueKey) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/editmeta`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getEditMetaFields');
+  return data.fields ?? {};
+}
+
+// Edit an issue's fields, returning field-level errors instead of throwing so
+// the caller can drop rejected fields and retry. Never throws on a Jira error.
+export async function editIssueFieldsRaw(cloudId, issueKey, fields) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+  } catch (err) {
+    return { ok: false, errors: {}, errorMessages: [err.message] };
+  }
+  if (res.status === 204) return { ok: true };
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
+  if (res.ok) return { ok: true };
+  return { ok: false, errors: data.errors ?? {}, errorMessages: data.errorMessages ?? [] };
+}
+
 export async function getJiraProjects(cloudId) {
   const url = `${jiraBase(cloudId)}/project/search?maxResults=100&orderBy=name`;
   const res = await fetch(url);
@@ -374,6 +406,68 @@ export async function addIssueLink(cloudId, outwardKey, inwardKey, linkTypeName 
     }),
   });
   return parseJira(res, 'addIssueLink');
+}
+
+// Native cross-project move via Jira's Bulk operations API. Preserves comments,
+// attachments, worklogs, history and status — unlike a clone+delete. Returns a
+// { taskId } to poll with getBulkTaskStatus. `targetToSourcesMapping` keys are
+// "<projectIdOrKey>,<issueTypeId>[,<parentIdOrKey>]" (parent only for subtasks).
+export async function bulkMoveIssues(cloudId, targetToSourcesMapping, sendBulkNotification = false) {
+  const url = `${jiraBase(cloudId)}/bulk/issues/move`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sendBulkNotification, targetToSourcesMapping }),
+  });
+  return parseJira(res, 'bulkMoveIssues');
+}
+
+// Poll a bulk operation. status ∈ ENQUEUED|RUNNING|COMPLETE|FAILED|CANCEL_REQUESTED|CANCELLED|DEAD.
+export async function getBulkTaskStatus(cloudId, taskId) {
+  const url = `${jiraBase(cloudId)}/bulk/queue/${encodeURIComponent(taskId)}`;
+  const res = await fetch(url);
+  return parseJira(res, 'getBulkTaskStatus');
+}
+
+// ─── Legacy clone+delete move helpers (fallback when Bulk Move is unavailable) ──
+
+// All worklog entries on an issue (author, time spent, start date, comment).
+export async function getWorklogs(cloudId, issueKey) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/worklog?maxResults=1000`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getWorklogs');
+  return data.worklogs ?? [];
+}
+
+// Add a single worklog entry. `worklog` is the raw API body:
+// { timeSpentSeconds, started, comment? } — comment must be ADF on API v3.
+export async function addWorklog(cloudId, issueKey, worklog) {
+  // adjustEstimate=leave keeps the remaining estimate untouched per entry.
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/worklog?adjustEstimate=leave`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(worklog),
+  });
+  return parseJira(res, 'addWorklog');
+}
+
+// Available workflow transitions for an issue, each with the status it leads to.
+export async function getTransitions(cloudId, issueKey) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/transitions`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getTransitions');
+  return data.transitions ?? [];
+}
+
+export async function transitionIssue(cloudId, issueKey, transitionId) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/transitions`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transition: { id: transitionId } }),
+  });
+  return parseJira(res, 'transitionIssue');
 }
 
 export async function deleteIssue(cloudId, issueKey) {

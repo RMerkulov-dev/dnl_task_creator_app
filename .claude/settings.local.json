@@ -73,7 +73,16 @@
       "Bash(curl *)",
       "Bash(node --check scripts/fathom-oauth.js)",
       "Bash(npx --yes esbuild --loader:.jsx=jsx --log-level=error --bundle src/apps/fathom_agent/FathomAgentApp.jsx --external:react --external:react-dom --external:../../components/AgentClarification.jsx --external:../../components/AgentPlan.jsx)",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(node --check src/services/jira.js)",
+      "Bash(node --check src/apps/task_agent/jiraAgent.js)",
+      "Bash(echo \"EXIT=$?\")",
+      "Read(//tmp/**)",
+      "Bash(pkill -f \"vite build\")",
+      "Bash(pkill -f \"vite_build.log\")",
+      "Bash(npx esbuild *)",
+      "WebFetch(domain:developer.atlassian.com)",
+      "Bash(python3 -c \"import json,sys; print\\(json.load\\(sys.stdin\\).get\\('scripts'\\)\\)\")"
     ]
   }
 }

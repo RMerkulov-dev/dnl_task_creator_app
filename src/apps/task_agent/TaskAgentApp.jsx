@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
 import { getJiraProjects, searchJiraUsers, getChildIssues, deleteIssue } from '../../services/jira.js';
-import { loadIssue, loadUserFields, findSprintField, loadSprintsForProject, cloneInSameProject, moveToProject } from './jiraAgent.js';
+import { loadIssue, loadUserFields, findSprintField, loadSprintsForProject, cloneInSameProject, bulkMoveForest, moveToProject } from './jiraAgent.js';
 
 const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 const CLOUD_ID = PROJECT_LIST.find(p => p.jira)?.jira.cloudId ?? '';
@@ -515,6 +515,7 @@ export default function TaskAgentApp({ user, onLogout }) {
   const [running,      setRunning]      = useState(false);
   const [steps,        setSteps]        = useState([]);
   const [moveResults,  setMoveResults]  = useState([]);
+  const [moveProgress, setMoveProgress] = useState(null);
   const [result,       setResult]       = useState(null);
   const [showProgress, setShowProgress] = useState(false);
   const [showConfirm,  setShowConfirm]  = useState(false);
@@ -721,7 +722,7 @@ export default function TaskAgentApp({ user, onLogout }) {
     function buildResultNode(node) {
       return {
         key: node.key,
-        status: 'idle',
+        status: 'running',
         newKey: null,
         newUrl: null,
         error: null,
@@ -729,9 +730,48 @@ export default function TaskAgentApp({ user, onLogout }) {
       };
     }
     setMoveResults(loaded.map(buildResultNode));
+    setMoveProgress({ pct: 0, status: 'ENQUEUED' });
     setRunning(true);
     setShowProgress(true);
 
+    // Apply a per-node transform across the whole result tree.
+    const mapTree = (tree, fn) =>
+      tree.map(n => ({ ...fn(n), children: mapTree(n.children ?? [], fn) }));
+
+    try {
+      // One native bulk move for the whole forest — Jira preserves comments,
+      // attachments, worklogs, history and status. Issue IDs are stable, so new
+      // keys are resolved by ID inside bulkMoveForest.
+      const results = await bulkMoveForest(CLOUD_ID, loaded, targetProject, (pct, status) => {
+        setMoveProgress({ pct, status });
+      });
+      setMoveResults(prev => mapTree(prev, n => {
+        const r = results.get(n.key);
+        return r?.newKey
+          ? { ...n, status: 'done', newKey: r.newKey, newUrl: r.newUrl }
+          : { ...n, status: 'error', error: 'Moved, but new key could not be resolved' };
+      }));
+    } catch (err) {
+      // The Bulk Move API is unavailable (no permission / not on this plan / bad
+      // mapping) and nothing was moved yet → fall back to legacy clone+delete.
+      // Any other error means the move may be partially applied, so we surface it
+      // rather than risk duplicating issues.
+      if (err.bulkUnavailable) {
+        setMoveProgress(null);
+        await legacyMoveFallback(loaded);
+      } else {
+        setMoveResults(prev => mapTree(prev, n => ({ ...n, status: 'error', error: err.message })));
+      }
+    } finally {
+      setMoveProgress(null);
+      setRunning(false);
+    }
+  }
+
+  // Legacy recursive clone+delete move (parent first, then re-parent children).
+  // Lossy vs. native move (comments/attachments/history not carried) — used only
+  // as a fallback when the Bulk Move API can't be used.
+  async function legacyMoveFallback(loaded) {
     function patchNode(tree, key, patch) {
       return tree.map(n => {
         if (n.key === key) return { ...n, ...patch };
@@ -739,18 +779,15 @@ export default function TaskAgentApp({ user, onLogout }) {
         return n;
       });
     }
-    function markSubtreeFailed(tree, key, errMsg) {
+    function markSubtreeFailed(tree, key) {
       return tree.map(n => {
         if (n.key === key) {
           const fail = (children) => children.map(c => ({
-            ...c,
-            status: 'error',
-            error: 'Parent move failed',
-            children: fail(c.children ?? []),
+            ...c, status: 'error', error: 'Parent move failed', children: fail(c.children ?? []),
           }));
           return { ...n, children: fail(n.children ?? []) };
         }
-        if (n.children?.length) return { ...n, children: markSubtreeFailed(n.children, key, errMsg) };
+        if (n.children?.length) return { ...n, children: markSubtreeFailed(n.children, key) };
         return n;
       });
     }
@@ -761,9 +798,7 @@ export default function TaskAgentApp({ user, onLogout }) {
       try {
         const issueToMove = node.source ?? await loadIssue(CLOUD_ID, node.key);
         const res = await moveToProject(
-          CLOUD_ID, issueToMove, targetProject,
-          { fieldOverrides: {}, parentKey },
-          () => {},
+          CLOUD_ID, issueToMove, targetProject, { fieldOverrides: {}, parentKey }, () => {},
         );
         newKey = res.newKey;
         setMoveResults(prev => patchNode(prev, node.key, {
@@ -782,7 +817,6 @@ export default function TaskAgentApp({ user, onLogout }) {
     for (const root of loaded) {
       await moveSubtree(root, null);
     }
-    setRunning(false);
   }
 
   async function executeDelete() {
@@ -1230,6 +1264,12 @@ export default function TaskAgentApp({ user, onLogout }) {
 
             {mode === 'move' && (
               <>
+                {running && moveProgress && (
+                  <p style={{ color: 'var(--text-2)', fontSize: 13, margin: '4px 0 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="spinner" />
+                    Native move in progress… {moveProgress.pct}% ({moveProgress.status})
+                  </p>
+                )}
                 <ul className="step-list" style={{ marginTop: 12 }}>
                   {moveResults.map(r => (
                     <MoveResultNode key={r.key} node={r} depth={0} />
