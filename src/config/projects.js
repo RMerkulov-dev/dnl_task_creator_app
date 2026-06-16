@@ -73,6 +73,25 @@ export const PROJECTS = {
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
   },
 
+  // ── NSMG Case Migration ────────────────────────────────────────────────────
+  NSMGCM: {
+    id: 'NSMGCM',
+    label: 'NSMGCM — NSMG Case Migration',
+    azure: {
+      proxyKey:     'nsmgcm',
+      project:      import.meta.env.VITE_AZURE_NSMGCM_PROJECT       || 'NSMG',
+      workItemType: 'Task',
+      jiraIdField:  import.meta.env.VITE_NSMGCM_AZURE_JIRA_FIELD    || 'Custom.JiraLink',
+    },
+    jira: {
+      cloudId:              import.meta.env.VITE_JIRA_CLOUD_ID             || 'ede50bd6-614f-4723-b64b-76ef4be362d5',
+      projectKey:           import.meta.env.VITE_JIRA_NSMGCM_PROJECT_KEY   || 'NSMGCM',
+      issueTypeId:          import.meta.env.VITE_JIRA_NSMGCM_ISSUE_TYPE_ID || '10035',
+      clientRequestIdField: import.meta.env.VITE_JIRA_NSMGCM_CUSTOM_FIELD  || 'customfield_10034',
+    },
+    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+  },
+
   // ── HT — Hydrotec ──────────────────────────────────────────────────────────
   HT: {
     id: 'HT',

@@ -19,6 +19,7 @@ function buildAzureTarget(raw) {
 const AZURE_ORGS = {
   ht:   { target: buildAzureTarget(process.env.AZURE_DEVOPS_ORG_URL || process.env.AZURE_DEVOPS_ORG), pat: process.env.AZURE_DEVOPS_PAT },
   nsmg:        { target: buildAzureTarget(process.env.AZURE_NSMG_ORG_URL),        pat: process.env.AZURE_NSMG_PAT },
+  nsmgcm:      { target: buildAzureTarget(process.env.AZURE_NSMG_ORG_URL),        pat: process.env.AZURE_NSMG_PAT },
   nsmg_marker: { target: buildAzureTarget(process.env.AZURE_NSMG_MARKER_ORG_URL), pat: process.env.AZURE_NSMG_MARKER_PAT },
   abs:         { target: buildAzureTarget(process.env.AZURE_ABS_ORG_URL),         pat: process.env.AZURE_ABS_PAT },
 };
