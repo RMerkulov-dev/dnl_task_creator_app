@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import AgentClarification from '../../components/AgentClarification.jsx';
 import AgentPlan from '../../components/AgentPlan.jsx';
+import TasksFollowUp from './TasksFollowUp.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -204,7 +205,8 @@ function readStoredFathomToken() {
   catch { return ''; }
 }
 
-export default function FathomAgentApp({ user, onLogout }) {
+export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
+  const [tab,          setTab]          = useState('ask'); // 'ask' | 'tasks'
   const [messages,     setMessages]     = useState([]);
   const [input,        setInput]        = useState('');
   const [loading,      setLoading]      = useState(false);
@@ -521,9 +523,26 @@ export default function FathomAgentApp({ user, onLogout }) {
         <button className="btn btn-ghost" onClick={onLogout} style={{ marginLeft: 12 }}>Sign out</button>
       </header>
 
-      <main className="ba-main">
-        <div className="ba-chat">
-          {!isConnected ? (
+      <main className={`ba-main${isConnected && tab === 'tasks' ? ' ba-main-wide' : ''}`}>
+        {isConnected && (
+          <div className="ba-tabs">
+            <button
+              className={`ba-tab${tab === 'ask' ? ' active' : ''}`}
+              onClick={() => setTab('ask')}
+            >
+              Ask Fathom
+            </button>
+            <button
+              className={`ba-tab${tab === 'tasks' ? ' active' : ''}`}
+              onClick={() => setTab('tasks')}
+            >
+              Tasks Follow-up
+            </button>
+          </div>
+        )}
+
+        {!isConnected ? (
+          <div className="ba-chat">
             <div className="ba-empty">
               <p className="ba-empty-title">Connect your Fathom account</p>
               <p className="ba-empty-sub">
@@ -542,8 +561,19 @@ export default function FathomAgentApp({ user, onLogout }) {
                 {connectError && <p className="ba-input-error" style={{ maxWidth: 480, textAlign: 'center' }}>⚠ {connectError}</p>}
               </div>
             </div>
-          ) : (
-            <>
+          </div>
+        ) : tab === 'tasks' ? (
+          <div className="tf-tab">
+            <TasksFollowUp
+              user={user}
+              allowedProjects={allowedProjects}
+              fathomToken={fathomToken}
+              onReconnect={msg => { persistToken(''); setConnectError(msg || ''); setTab('ask'); }}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="ba-chat">
               {messages.length === 0 && !loading && (
                 <div className="ba-empty">
                   <p className="ba-empty-title">Hi! I'm Fathom Agent.</p>
@@ -564,48 +594,48 @@ export default function FathomAgentApp({ user, onLogout }) {
                 />
               ))}
               {loading && <ThinkingBubble startedAt={loadingStart} onCancel={cancelRequest} />}
-            </>
-          )}
-          <div ref={bottomRef} />
-        </div>
+              <div ref={bottomRef} />
+            </div>
 
-        <div className="ba-input-bar">
-          {error && <p className="ba-input-error">⚠ {error}</p>}
-          <div className="ba-input-row">
-            <button
-              className={`ba-mic-btn${recording ? ' ba-mic-btn-stop' : ''}${transcribing ? ' ba-mic-btn-busy' : ''}`}
-              onClick={recording ? stopRecording : startRecording}
-              disabled={loading || transcribing || !fathomToken}
-              title={recording ? 'Stop recording' : 'Voice input'}
-            >
-              {transcribing
-                ? <span className="spinner" style={{ width: 16, height: 16 }} />
-                : recording ? <StopIcon /> : <MicIcon />}
-            </button>
+            <div className="ba-input-bar">
+              {error && <p className="ba-input-error">⚠ {error}</p>}
+              <div className="ba-input-row">
+                <button
+                  className={`ba-mic-btn${recording ? ' ba-mic-btn-stop' : ''}${transcribing ? ' ba-mic-btn-busy' : ''}`}
+                  onClick={recording ? stopRecording : startRecording}
+                  disabled={loading || transcribing || !fathomToken}
+                  title={recording ? 'Stop recording' : 'Voice input'}
+                >
+                  {transcribing
+                    ? <span className="spinner" style={{ width: 16, height: 16 }} />
+                    : recording ? <StopIcon /> : <MicIcon />}
+                </button>
 
-            <textarea
-              ref={textareaRef}
-              className="ba-textarea"
-              placeholder={fathomToken ? 'Ask anything about your Fathom meetings…' : 'Connect Fathom to start chatting…'}
-              value={input}
-              rows={1}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
-              }}
-              disabled={loading || micBusy || !fathomToken}
-            />
+                <textarea
+                  ref={textareaRef}
+                  className="ba-textarea"
+                  placeholder={fathomToken ? 'Ask anything about your Fathom meetings…' : 'Connect Fathom to start chatting…'}
+                  value={input}
+                  rows={1}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); }
+                  }}
+                  disabled={loading || micBusy || !fathomToken}
+                />
 
-            <button
-              className="ba-send-btn"
-              onClick={() => send(input)}
-              disabled={!canSend}
-              title="Send"
-            >
-              <SendIcon />
-            </button>
-          </div>
-        </div>
+                <button
+                  className="ba-send-btn"
+                  onClick={() => send(input)}
+                  disabled={!canSend}
+                  title="Send"
+                >
+                  <SendIcon />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );

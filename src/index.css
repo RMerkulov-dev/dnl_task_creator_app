@@ -2934,3 +2934,439 @@ html, body, #root {
   width: 48px;
   height: 48px;
 }
+
+/* ─── Fathom tabs ─────────────────────────────────────────────────────────────── */
+.ba-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 0 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ba-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 10px 14px;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.ba-tab:hover { color: var(--text-1); }
+
+.ba-tab.active {
+  color: var(--text-1);
+  border-bottom-color: var(--accent-1);
+}
+
+/* ─── Tasks Follow-up ─────────────────────────────────────────────────────────── */
+/* The tasks tab wants more horizontal room than the 800px chat column. */
+.ba-main-wide { max-width: 1320px; }
+
+.tf-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.tf-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 0;
+}
+
+/* Controls bar — everything on a single line */
+.tf-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  padding: 12px 16px;
+  flex-shrink: 0;
+}
+
+.tf-scope {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.tf-scope button {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tf-scope button + button { border-left: 1px solid var(--border); }
+.tf-scope button:hover { color: var(--text-1); }
+.tf-scope button.active { background: var(--accent-1); color: var(--accent-ink); }
+
+.tf-presets {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tf-chip {
+  appearance: none;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-2);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.tf-chip:hover { color: var(--text-1); border-color: var(--border-hi); }
+
+.tf-field {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.tf-field input {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-1);
+  font-size: 13px;
+  padding: 7px 9px;
+  color-scheme: dark;
+}
+
+.tf-field input:focus { outline: none; border-color: var(--border-focus); }
+
+.tf-load-btn { margin-left: auto; flex-shrink: 0; }
+
+.tf-toperr { flex-shrink: 0; margin: 0; }
+
+/* Two-column working area */
+.tf-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 360px) 1fr;
+  gap: 12px;
+}
+
+.tf-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+
+.tf-col-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tf-col-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.tf-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px 9px;
+}
+
+.tf-skill-head { gap: 8px; }
+
+.tf-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.tf-empty {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.tf-empty strong { color: var(--text-1); font-weight: 600; }
+
+.tf-call-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tf-call {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.tf-call:hover { border-color: var(--border-hi); }
+
+.tf-call.active {
+  border-color: var(--accent-1);
+  background: var(--bg-card-hover);
+}
+
+.tf-call-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.tf-call-meta {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.tf-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-1);
+  font-size: 14px;
+  padding: 8px 10px;
+  color-scheme: dark;
+}
+
+.tf-select:focus { outline: none; border-color: var(--border-focus); }
+
+.tf-result {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-1);
+}
+
+@media (max-width: 980px) {
+  /* Not enough room for one line — let the controls wrap gracefully. */
+  .tf-controls { flex-wrap: wrap; }
+  .tf-presets { flex-wrap: wrap; }
+}
+
+@media (max-width: 720px) {
+  .tf-grid { grid-template-columns: 1fr; overflow-y: auto; }
+  .tf-col-calls { max-height: 50vh; }
+  .tf-load-btn { margin-left: 0; }
+}
+
+/* ─── Tasks Follow-up: parsed task blocks ─────────────────────────────────────── */
+.tf-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tf-analysis {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 0 0 4px;
+  font-style: italic;
+}
+
+.tf-task {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tf-task-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tf-task-n {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-2);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tf-pri {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.tf-pri-urgent  { background: rgba(239,68,68,0.15);  color: #ef4444; border: 1px solid rgba(239,68,68,0.35); }
+.tf-pri-high    { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.35); }
+.tf-pri-medium  { background: var(--bg-card);        color: var(--text-2); border: 1px solid var(--border); }
+.tf-pri-backlog { background: var(--bg-card);        color: var(--text-3); border: 1px solid var(--border); }
+
+.tf-task-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.tf-task-desc {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.tf-task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.tf-task-meta strong { color: var(--text-1); font-weight: 600; }
+.tf-task-dim { color: var(--text-3); }
+
+.tf-task-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.tf-create-btn { padding: 7px 16px; font-size: 13px; }
+
+.tf-task-created {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.tf-summaries {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.tf-summary-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+  margin: 0 0 4px;
+}
+
+.tf-summary-body {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+/* ─── Task Create Modal ───────────────────────────────────────────────────────── */
+.tcm-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  width: 100%;
+  max-width: 620px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  animation: rise 0.35s cubic-bezier(0.16,1,0.3,1);
+}
+
+.tcm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.tcm-close {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--r-md);
+}
+.tcm-close:hover { color: var(--text-1); background: var(--bg-card-hover); }
+
+.tcm-body {
+  padding: 20px 24px 24px;
+  overflow-y: auto;
+}
+
+.tcm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}

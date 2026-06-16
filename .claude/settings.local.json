@@ -82,7 +82,13 @@
       "Bash(pkill -f \"vite_build.log\")",
       "Bash(npx esbuild *)",
       "WebFetch(domain:developer.atlassian.com)",
-      "Bash(python3 -c \"import json,sys; print\\(json.load\\(sys.stdin\\).get\\('scripts'\\)\\)\")"
+      "Bash(python3 -c \"import json,sys; print\\(json.load\\(sys.stdin\\).get\\('scripts'\\)\\)\")",
+      "Read(//Users/romario/.claude/**)",
+      "Read(//Users/romario/.claude/skills/**)",
+      "Bash(node --check api/followupSkills.js)",
+      "Bash(ps -o lstart=,etime= -p 19982)",
+      "mcp__claude_ai_Fathom__list_meetings",
+      "Bash(node --input-type=module -e ' *)"
     ]
   }
 }

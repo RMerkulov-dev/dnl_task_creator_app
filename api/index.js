@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv  from 'dotenv';
 import crypto  from 'node:crypto';
+import { FOLLOWUP_SKILLS, listFollowupSkills } from './followupSkills.js';
 
 dotenv.config();
 
@@ -1193,6 +1194,354 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
       toolResults,
       ...(err.reconnect ? { reconnect: true } : {}),
     });
+  }
+});
+
+// ─── Tasks Follow-up (calendar → pick call → run skill on transcript) ─────────
+//
+// These endpoints power the second tab. Unlike the chat agent they are
+// deterministic from the UI's point of view: the user picks a date range and a
+// call, then a skill. Under the hood we still let the executor model drive the
+// Fathom MCP tools (the tool catalogue is discovered at runtime, so the model —
+// which sees the real tool schemas — is the most reliable way to list meetings
+// and pull a transcript without us hard-coding tool/argument names).
+
+// Generic executor loop over the Fathom MCP tools. Mutates `messages` and
+// `toolResults`. Returns { reply, askCall } — askCall is set if the model tried
+// to ask the user a clarifying question (callers may ignore it).
+async function runFathomExecutor({ apiKey, fathomToken, sessionId, tools, messages, toolResults, maxSteps = 6, maxTokens = 4000 }) {
+  for (let i = 0; i < maxSteps; i++) {
+    const data = await callOpenRouter(apiKey, {
+      model:       OPENROUTER_EXECUTOR,
+      messages,
+      tools,
+      tool_choice: 'auto',
+      temperature: 0.2,
+      max_tokens:  maxTokens,
+    });
+    const choice = data.choices[0];
+    messages.push(choice.message);
+
+    if (choice.finish_reason !== 'tool_calls') {
+      return { reply: extractReply(choice.message), askCall: null };
+    }
+
+    const askCall = findAskUserCall(choice.message.tool_calls);
+    if (askCall) return { reply: null, askCall };
+
+    for (const tc of choice.message.tool_calls) {
+      const name = tc.function.name;
+      let args;
+      try { args = JSON.parse(tc.function.arguments || '{}'); }
+      catch { args = {}; }
+      try {
+        const raw = await mcpCallTool(fathomToken, sessionId, name, args);
+        const { text, summary } = summariseMcpResult(name, raw);
+        toolResults.push({ name, args, result: summary });
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: text });
+      } catch (err) {
+        if (err.reconnect) throw err;
+        toolResults.push({ name, error: err.message });
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) });
+      }
+    }
+  }
+  return { reply: 'Step limit reached while talking to Fathom.', askCall: null };
+}
+
+// Pull the first JSON value (object or array) out of a possibly chatty reply.
+function extractJson(raw) {
+  if (!raw) return null;
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  try { return JSON.parse(cleaned); } catch { /* fall through */ }
+  // Find the outermost {...} or [...] in the text.
+  const start = cleaned.search(/[[{]/);
+  if (start < 0) return null;
+  const open = cleaned[start];
+  const close = open === '{' ? '}' : ']';
+  const end = cleaned.lastIndexOf(close);
+  if (end <= start) return null;
+  try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { return null; }
+}
+
+// List the skills available on the Tasks Follow-up tab (no instruction text).
+app.get('/api/fathom/skills', (req, res) => {
+  res.json({ skills: listFollowupSkills() });
+});
+
+// Find a discovered Fathom MCP tool by purpose, resilient to exact naming.
+function findFathomRawTool(kind) {
+  const tools = FATHOM_TOOLS_RAW || [];
+  const byName = n => tools.find(t => t.name === n);
+  if (kind === 'list') {
+    return byName('list_meetings')
+      || tools.find(t => /list/i.test(t.name) && /(meeting|recording|call)/i.test(t.name) && !/search/i.test(t.name))
+      || tools.find(t => /(meeting|recording)s?$/i.test(t.name) && !/transcript|summary|search|person/i.test(t.name));
+  }
+  if (kind === 'transcript') {
+    return byName('get_meeting_transcript') || tools.find(t => /transcript/i.test(t.name));
+  }
+  return null;
+}
+
+// Pull a meetings array out of an MCP tool result (structured or JSON-in-text).
+function meetingsFromMcp(raw) {
+  const tryArr = v => {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') {
+      for (const k of ['meetings', 'results', 'data', 'items', 'recordings']) {
+        if (Array.isArray(v[k])) return v[k];
+      }
+      const a = Object.values(v).find(x => Array.isArray(x));
+      if (a) return a;
+    }
+    return null;
+  };
+  if (raw?.structuredContent) {
+    const a = tryArr(raw.structuredContent);
+    if (a) return a;
+  }
+  const { text } = summariseMcpResult('list', raw);
+  return tryArr(extractJson(text));
+}
+
+// Parse Fathom MCP's human-readable meeting listing. Each meeting is a line like:
+//   - <title> | <YYYY-MM-DD> | id: <recording_id> | url: <url> | recorded by <name> | <attendees,…>
+// Note: the `id:` value is the recording_id (used for transcripts) and differs
+// from the numeric id inside the share url — we capture the `id:` one.
+function parseMeetingsText(text) {
+  const out = [];
+  for (const rawLine of String(text || '').split('\n')) {
+    const line = rawLine.trim();
+    if (!line.startsWith('- ')) continue;
+    const parts = line.slice(2).split('|').map(s => s.trim());
+    if (!parts.length || !parts[0]) continue;
+    const m = { title: parts[0], date: '', id: '', url: '', host: '', attendees: [] };
+    for (let i = 1; i < parts.length; i++) {
+      const p = parts[i];
+      let mm;
+      if      ((mm = p.match(/^id:\s*(.+)$/i)))          m.id   = mm[1].trim();
+      else if ((mm = p.match(/^url:\s*(.+)$/i)))         m.url  = mm[1].trim();
+      else if ((mm = p.match(/^recorded by\s+(.+)$/i)))  m.host = mm[1].trim();
+      else if (/^\d{4}-\d{2}-\d{2}/.test(p))             m.date = p;
+      else if (p)                                        m.attendees = p.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    if (m.id || m.url) out.push(m);
+  }
+  return out;
+}
+
+// Normalise one Fathom meeting object into the shape the UI expects.
+function normalizeMeeting(m) {
+  const inv = m.calendar_invitees || m.attendees || m.invitees || m.participants || [];
+  const attendees = Array.isArray(inv)
+    ? inv.map(x => typeof x === 'string' ? x : (x?.name || x?.email || '')).filter(Boolean)
+    : [];
+  const rb = m.recorded_by;
+  const host = typeof rb === 'string' ? rb : (rb?.name || rb?.email || m.host || m.owner || '');
+  return {
+    id:        String(m.recording_id ?? m.id ?? ''),
+    title:     String(m.title ?? m.name ?? 'Untitled meeting'),
+    date:      m.created_at ?? m.recording_start_time ?? m.started_at ?? m.start_time ?? m.scheduled_start_time ?? m.date ?? '',
+    url:       String(m.url ?? m.share_url ?? ''),
+    host:      String(host || ''),
+    attendees,
+  };
+}
+
+// List the signed-in user's (or the team's) calls in a date range. Returns
+// { meetings: [{ id, title, date, url, host, attendees }] }. `id` is the Fathom
+// recording_id used later to fetch the transcript.
+//
+// Fast path: call the listing tool directly over MCP — no LLM. The model-driven
+// loop is kept only as a fallback when the result can't be parsed deterministically.
+app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { fathomToken, userEmail, startDate, endDate, scope } = req.body ?? {};
+  if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
+  if (!startDate || !endDate) return res.status(400).json({ error: 'startDate and endDate are required' });
+
+  const isTeam        = scope === 'team';
+  const createdAfter  = `${startDate}T00:00:00Z`;
+  const createdBefore = `${endDate}T23:59:59Z`;
+
+  const toolResults = [];
+  try {
+    const { sessionId } = await mcpInitSession(fathomToken);
+    const tools = await ensureFathomTools(fathomToken, sessionId);
+
+    // ── Fast path: direct MCP listing call, no LLM. ──
+    const listTool = findFathomRawTool('list');
+    if (listTool) {
+      const props = listTool.inputSchema?.properties || {};
+      const args = {};
+      if ('created_after'  in props) args.created_after  = createdAfter;
+      if ('created_before' in props) args.created_before = createdBefore;
+      if ('max_pages'      in props) args.max_pages      = 3;
+      if (!isTeam && userEmail && 'recorded_by' in props) args.recorded_by = [userEmail];
+
+      try {
+        const raw = await mcpCallTool(fathomToken, sessionId, listTool.name, args);
+        const { text, summary } = summariseMcpResult(listTool.name, raw);
+        toolResults.push({ name: listTool.name, args, result: summary });
+
+        // Fathom returns a human-readable text listing (not JSON). Try structured
+        // first (future-proof), then the text parser. Either is authoritative —
+        // once the tool call succeeds we never fall through to the slow LLM path.
+        const arr = meetingsFromMcp(raw) || parseMeetingsText(text);
+        const lo = Date.parse(createdAfter), hi = Date.parse(createdBefore);
+        const clean = arr
+          .map(normalizeMeeting)
+          .filter(m => m.id || m.url)
+          // Defensive date filter in case the server ignored the range.
+          .filter(m => {
+            const t = m.date ? Date.parse(m.date) : NaN;
+            return isNaN(t) ? true : (t >= lo && t <= hi);
+          })
+          .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+        return res.json({ meetings: clean, toolResults });
+      } catch (err) {
+        if (err.reconnect) throw err;
+        toolResults.push({ name: listTool.name, error: err.message });
+        // fall through to the LLM fallback only if the tool call itself failed
+      }
+    }
+
+    // ── Fallback: let the model drive the tools (slower, resilient). ──
+    const scopeCtx = isTeam
+      ? `Return calls from the user's ENTIRE TEAM / workspace, not just their own. Do NOT restrict by owner / "recorded_by".`
+      : `Return ONLY the signed-in user's OWN calls.${userEmail ? ` Their email is "${userEmail}"; use a "recorded_by" filter if available.` : ''}`;
+
+    const systemPrompt =
+      `You are a data-retrieval step. List ${isTeam ? 'the team\'s' : 'the signed-in user\'s'} Fathom calls between ${createdAfter} and ${createdBefore} and return them as JSON. ` +
+      scopeCtx + ' Do NOT fetch transcripts. Respond with ONLY a JSON object, no prose:\n' +
+      '{ "meetings": [ { "id": "<recording_id>", "title": "…", "date": "<ISO 8601>", "url": "…", "host": "<recorder name>", "attendees": ["name", …] } ] }\n' +
+      'If none, return { "meetings": [] }. Never invent meetings.';
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: `List the calls from ${startDate} to ${endDate}. JSON object only.` },
+    ];
+    const { reply } = await runFathomExecutor({ apiKey, fathomToken, sessionId, tools, messages, toolResults, maxSteps: 6 });
+    const parsed = extractJson(reply) || {};
+    const arr = Array.isArray(parsed.meetings) ? parsed.meetings : Array.isArray(parsed) ? parsed : [];
+    const clean = arr.map(normalizeMeeting).filter(m => m.id || m.url);
+    res.json({ meetings: clean, toolResults });
+  } catch (err) {
+    console.error('[Fathom my-calls error]', err.message);
+    const status = err.reconnect ? 401 : 500;
+    res.status(status).json({ error: humaniseFetchError(err), toolResults, ...(err.reconnect ? { reconnect: true } : {}) });
+  }
+});
+
+// Run a skill against one call's transcript. Body: { fathomToken, recordingId,
+// callTitle, callUrl, skillId, userEmail }. Returns { reply, toolResults }.
+//
+// Fast path: fetch the transcript directly over MCP, then a SINGLE LLM call
+// applies the skill. The agentic loop is kept only as a fallback.
+app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { fathomToken, recordingId, callTitle, callUrl, skillId, userEmail } = req.body ?? {};
+  if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
+  if (!recordingId) return res.status(400).json({ error: 'recordingId is required' });
+
+  const skill = FOLLOWUP_SKILLS[skillId];
+  if (!skill) return res.status(400).json({ error: `Unknown skill "${skillId}"` });
+
+  const callLabel = `Call: "${callTitle || 'Untitled meeting'}"${callUrl ? ` (${callUrl})` : ''}`;
+
+  const toolResults = [];
+  try {
+    const { sessionId } = await mcpInitSession(fathomToken);
+    const tools = await ensureFathomTools(fathomToken, sessionId);
+
+    // ── Fast path: pull the transcript directly. ──
+    let transcript = '';
+    const tTool = findFathomRawTool('transcript');
+    if (tTool) {
+      const props = tTool.inputSchema?.properties || {};
+      const args = {};
+      if ('recording_id' in props) {
+        const n = Number(recordingId);
+        args.recording_id = (Number.isFinite(n) && props.recording_id?.type === 'integer') ? n
+          : Number.isFinite(n) ? n : String(recordingId);
+      }
+      if ('url' in props && callUrl) args.url = callUrl;
+      try {
+        const raw = await mcpCallTool(fathomToken, sessionId, tTool.name, args);
+        const { text, summary } = summariseMcpResult(tTool.name, raw);
+        toolResults.push({ name: tTool.name, args, result: summary });
+        if (text && text !== '(no content)' && text !== '(empty)') transcript = text;
+      } catch (err) {
+        if (err.reconnect) throw err;
+        toolResults.push({ name: tTool.name, error: err.message });
+      }
+    }
+
+    if (transcript) {
+      const systemPrompt =
+        'You are processing a single Fathom call for the Tasks Follow-up tool. ' +
+        'The full transcript is provided by the user below (it contains timestamped [MM:SS](url) deep links you may cite for the Fathom Link field). ' +
+        'Read the ENTIRE transcript and perform the task in the SKILL INSTRUCTIONS using ONLY what the transcript contains. Never invent content. Output the skill\'s result only — no meta commentary. ' +
+        (userEmail ? `The signed-in user's email is "${userEmail}". ` : '') +
+        '\n\n=== SKILL INSTRUCTIONS ===\n' + skill.instructions + '\n=== END SKILL INSTRUCTIONS ===';
+
+      // Run the skill over a given transcript body. Kept as a closure so we can
+      // retry with a smaller slice only if the model rejects an over-long input.
+      const runSkill = async (body, note = '') => {
+        const data = await callOpenRouter(apiKey, {
+          model:       OPENROUTER_EXECUTOR,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user',   content: `${callLabel}\n\n=== TRANSCRIPT${note} ===\n${body}` },
+          ],
+          temperature: 0.2,
+          max_tokens:  4000,
+          // Structured extraction, not deep reasoning — keep internal reasoning
+          // minimal so it answers fast instead of "thinking" for tens of seconds.
+          reasoning:   { effort: 'low' },
+        });
+        return extractReply(data.choices?.[0]?.message);
+      };
+
+      let reply;
+      try {
+        // Always send the FULL transcript, however large.
+        reply = await runSkill(transcript);
+      } catch (err) {
+        // Only if the model literally can't fit it: retry on a safe-size slice
+        // rather than failing the request outright.
+        if (/context|maximum.*token|too many tokens|token limit|length/i.test(err.message || '')) {
+          const SAFE = 280_000;
+          reply = await runSkill(`${transcript.slice(0, SAFE)}\n…[transcript truncated to fit the model]…`, ' (truncated to fit)');
+        } else {
+          throw err;
+        }
+      }
+      return res.json({ reply: reply || 'The model returned an empty response.', toolResults });
+    }
+
+    // ── Fallback: agentic loop drives the tools itself. ──
+    const systemPrompt =
+      'You are processing a single Fathom call for the Tasks Follow-up tool. ' +
+      'STEP 1: Use the available tools to retrieve the FULL transcript of the specified call (use the meeting identifier from the user). ' +
+      'STEP 2: Perform the task in the SKILL INSTRUCTIONS using only the transcript. Never invent content. Output the skill\'s result only. ' +
+      (userEmail ? `The signed-in user's email is "${userEmail}". ` : '') +
+      '\n\n=== SKILL INSTRUCTIONS ===\n' + skill.instructions + '\n=== END SKILL INSTRUCTIONS ===';
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user',   content: `${callLabel}. Meeting identifier: ${recordingId}.\n\nRetrieve this call's transcript and then run the skill on it.` },
+    ];
+    const { reply } = await runFathomExecutor({ apiKey, fathomToken, sessionId, tools, messages, toolResults, maxSteps: 6, maxTokens: 4000 });
+    res.json({ reply: reply || 'The model returned an empty response.', toolResults });
+  } catch (err) {
+    console.error('[Fathom skill-run error]', err.message);
+    const status = err.reconnect ? 401 : 500;
+    res.status(status).json({ error: humaniseFetchError(err), toolResults, ...(err.reconnect ? { reconnect: true } : {}) });
   }
 });
 
