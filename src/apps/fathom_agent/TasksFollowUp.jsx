@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
+import ToastContainer from '../../components/Toast.jsx';
 
 // ─── Skill output parser ──────────────────────────────────────────────────────
 // Turns the strict "Tasks Follow-Up" markdown into structured task objects so we
@@ -106,6 +107,7 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
 
   const [taskModal, setTaskModal] = useState(null);  // { task } being created
   const [created,   setCreated]   = useState({});    // { [taskKey]: { jiraKey, jiraUrl, epicUrl } }
+  const [toasts,    setToasts]    = useState([]);    // created-item link toasts
 
   // Load the skill catalogue once.
   useEffect(() => {
@@ -314,9 +316,14 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
           initialTitle={taskModal.task.title}
           initialDescription={buildTaskDescription(taskModal.task, selectedCall)}
           onClose={() => setTaskModal(null)}
-          onCreated={res => setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }))}
+          onCreated={res => {
+            setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }));
+            setToasts(prev => [...prev, { id: Date.now(), ...res }]);
+          }}
         />
       )}
+
+      <ToastContainer toasts={toasts} onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))} />
     </div>
   );
 }
