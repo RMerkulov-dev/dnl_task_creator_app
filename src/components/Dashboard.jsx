@@ -10,7 +10,7 @@ import RichTextEditor from './RichTextEditor.jsx';
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
 // ─── Default title prefixes ────────────────────────────────────────────────
-const ALL_PREFIXES = new Set(['HT.', 'NSMGM.', 'NSMG.', 'NSMGCM.', 'ABS.', 'ABSPO.', 'ABS. [WS]. Customer Service.', 'ABS. QMP.']);
+const ALL_PREFIXES = new Set(['HT.', 'NSMGM.', 'NSMG.', 'NSMGCM.', 'ABS.', 'ABSPO.', 'ABS. [WS]. Customer Service.', 'ABS. QMP.', 'ABS. MAM.']);
 
 function getDefaultTitlePrefix(projId, boardName, jiraProj) {
   if (projId === 'HT')          return 'HT.';
@@ -19,8 +19,9 @@ function getDefaultTitlePrefix(projId, boardName, jiraProj) {
   if (projId === 'NSMGCM')      return 'NSMGCM.';
   if (projId === 'ABS') {
     if (!boardName)                             return '';
-    if (boardName.includes('Customer Service')) return 'ABS. [WS]. Customer Service.';
-    if (boardName.includes('Bureau'))           return 'ABS. QMP.';
+    if (boardName.includes('Customer Service'))   return 'ABS. [WS]. Customer Service.';
+    if (boardName.includes('Bureau'))             return 'ABS. QMP.';
+    if (boardName.includes('Marketing Migration')) return 'ABS. MAM.';
     return jiraProj === 'ABSPO' ? 'ABSPO.' : 'ABS.';
   }
   return '';
