@@ -1,5 +1,5 @@
 import { createWorkItem, updateWorkItem, getWorkItem, uploadAttachment } from './azureDevops.js';
-import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl, uploadJiraAttachments, setJiraAzureId } from './jira.js';
+import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl, uploadJiraAttachments, embedAttachmentImages, setJiraAzureId } from './jira.js';
 
 // ─── Image processing ────────────────────────────────────────────────────────
 // Extracts base64 images from HTML, uploads them as Azure DevOps attachments,
@@ -29,6 +29,9 @@ async function processImages(html, proxyKey, project) {
 
       // Replace base64 with hosted Azure DevOps URL
       img.setAttribute('src', result.url);
+      // Tag the img so the Jira ADF converter can later map it to the matching
+      // Jira attachment (uploaded under the same fileName) and embed it inline.
+      img.setAttribute('data-jira-filename', fileName);
       relations.push({ rel: 'AttachedFile', url: result.url, attributes: { comment: '' } });
       files.push({ name: fileName, blob });
     } catch (err) {
@@ -122,10 +125,13 @@ export async function createTask(project, title, description, extras = {}, onSte
   const jiraKey = jiraItem.key;
   const jiraUrl = getJiraUrl(jiraKey);
 
-  // Upload images as Jira attachments (non-blocking)
+  // Upload images as Jira attachments, then re-write the description so they
+  // render inline (non-blocking — a failure here shouldn't fail the whole sync).
   if (imageFiles.length) {
-    try { await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles); }
-    catch (err) { console.warn('Jira attachment upload failed:', err.message); }
+    try {
+      const uploaded = await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles);
+      await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, uploaded, { epicId: itemId, epicUrl: itemUrl });
+    } catch (err) { console.warn('Jira image embed failed:', err.message); }
   }
 
   onStep(1, 'done', null, { jiraKey, jiraUrl });
@@ -211,9 +217,10 @@ export async function createAzureFromJira(project, jiraKey, title, description, 
   try {
     await setJiraAzureId(jira.cloudId, jiraKey, jira.clientRequestIdField, itemId);
     if (imageFiles?.length) {
-      await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles).catch(e =>
-        console.warn('Jira attachment upload failed:', e.message)
-      );
+      try {
+        const uploaded = await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles);
+        await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, uploaded, null);
+      } catch (e) { console.warn('Jira image embed failed:', e.message); }
     }
   } catch (err) {
     onStep(1, 'error', err.message);
@@ -274,8 +281,10 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
     }
 
     if (imageFiles.length) {
-      try { await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles); }
-      catch (err) { console.warn('Jira attachment upload failed:', err.message); }
+      try {
+        const uploaded = await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles);
+        await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, uploaded, null);
+      } catch (err) { console.warn('Jira image embed failed:', err.message); }
     }
 
     const jiraUrl = getJiraUrl(jiraKey);
@@ -312,8 +321,10 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
   const newJiraUrl = getJiraUrl(newJiraKey);
 
   if (imageFiles.length) {
-    try { await uploadJiraAttachments(jira.cloudId, newJiraKey, imageFiles); }
-    catch (err) { console.warn('Jira attachment upload failed:', err.message); }
+    try {
+      const uploaded = await uploadJiraAttachments(jira.cloudId, newJiraKey, imageFiles);
+      await embedAttachmentImages(jira.cloudId, newJiraKey, processedDesc, uploaded, { epicId: numericId, epicUrl: itemUrl });
+    } catch (err) { console.warn('Jira image embed failed:', err.message); }
   }
 
   onStep(1, 'done', null, { jiraKey: newJiraKey, jiraUrl: newJiraUrl });

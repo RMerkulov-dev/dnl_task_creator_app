@@ -88,7 +88,14 @@
       "Bash(node --check api/followupSkills.js)",
       "Bash(ps -o lstart=,etime= -p 19982)",
       "mcp__claude_ai_Fathom__list_meetings",
-      "Bash(node --input-type=module -e ' *)"
+      "Bash(node --input-type=module -e ' *)",
+      "Bash(node -e \"import\\('dotenv'\\).then\\(d=>{d.config\\(\\);console.log\\('EMAIL', !!process.env.JIRA_EMAIL, process.env.JIRA_EMAIL\\); console.log\\('TOKEN', !!process.env.JIRA_API_TOKEN, \\(process.env.JIRA_API_TOKEN||''\\).length\\);}\\)\")",
+      "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest.mjs\" .env)",
+      "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest2.mjs\" .env)",
+      "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest3.mjs\" .env)",
+      "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest4.mjs\" .env)",
+      "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest5.mjs\" .env)",
+      "Bash(node -c api/index.js)"
     ]
   }
 }

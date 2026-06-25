@@ -9,11 +9,22 @@ function jiraBase(cloudId) {
 // Handles: headings, paragraphs, bold, italic, underline, links, images,
 // ordered/unordered lists, code, blockquotes, text color.
 
-function htmlToAdf(html) {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html || '', 'text/html');
-  const content = convertNodes(doc.body.childNodes);
-  return { type: 'doc', version: 1, content: content.length ? content : [{ type: 'paragraph', content: [] }] };
+// When a media map ({ fileName: attachmentId }) is supplied, <img> tags tagged
+// with `data-jira-filename` are converted to inline ADF media nodes instead of
+// being dropped. Module-scoped so we don't have to thread it through every
+// converter helper; set for the duration of a single htmlToAdf() call.
+let _mediaMap = null;
+
+function htmlToAdf(html, mediaMap = null) {
+  _mediaMap = mediaMap;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html || '', 'text/html');
+    const content = convertNodes(doc.body.childNodes);
+    return { type: 'doc', version: 1, content: content.length ? content : [{ type: 'paragraph', content: [] }] };
+  } finally {
+    _mediaMap = null;
+  }
 }
 
 function convertNodes(nodes) {
@@ -50,8 +61,22 @@ function convertElement(el) {
     return { type: 'codeBlock', content: [{ type: 'text', text: (code || el).textContent }] };
   }
   if (tag === 'img') {
-    // Images are uploaded as Jira attachments separately.
-    // Don't embed in ADF — Azure DevOps URLs require auth and break in Jira.
+    // Images are uploaded as Jira attachments first; we can't embed the raw
+    // src (base64 is rejected, Azure DevOps URLs require auth). _mediaMap maps
+    // the file name to the attachment's Media Services UUID — referencing that
+    // in a `type:file` media node renders the image inline, same as in Azure.
+    // (collection MUST be present; an empty string is accepted.)
+    const fileName = el.getAttribute('data-jira-filename');
+    const mediaId = fileName && _mediaMap ? _mediaMap[fileName] : null;
+    if (mediaId) {
+      return {
+        type: 'mediaSingle',
+        attrs: { layout: 'center' },
+        content: [
+          { type: 'media', attrs: { type: 'file', id: String(mediaId), collection: '' } },
+        ],
+      };
+    }
     return null;
   }
   if (tag === 'br') return null;
@@ -136,8 +161,8 @@ function rgbToHex(color) {
   return '#' + m.slice(0, 3).map(n => parseInt(n).toString(16).padStart(2, '0')).join('');
 }
 
-function toAdfWithLink(html, epicId, epicUrl) {
-  const adf = htmlToAdf(html);
+function toAdfWithLink(html, epicId, epicUrl, mediaMap = null) {
+  const adf = htmlToAdf(html, mediaMap);
   // Append Azure DevOps link block
   adf.content.push(
     { type: 'paragraph', content: [{ type: 'text', text: `Azure DevOps Epic ID: ${epicId}`, marks: [{ type: 'strong' }] }] },
@@ -228,10 +253,12 @@ export async function findIssueByEpicId(cloudId, projectKey, clientRequestIdFiel
  * @param {string} cloudId
  * @param {string} issueKey - e.g. 'ABS-123'
  * @param {Array<{name: string, blob: Blob}>} files
+ * @returns {Promise<Array<{id: string, filename: string}>>} created attachments
  */
 export async function uploadJiraAttachments(cloudId, issueKey, files) {
-  if (!files?.length) return;
+  if (!files?.length) return [];
   const url = `${jiraBase(cloudId)}/issue/${issueKey}/attachments`;
+  const created = [];
   for (const file of files) {
     const form = new FormData();
     form.append('file', file.blob, file.name);
@@ -240,8 +267,55 @@ export async function uploadJiraAttachments(cloudId, issueKey, files) {
       headers: { 'X-Atlassian-Token': 'no-check' },
       body: form,
     });
-    await parseJira(res, 'uploadAttachment');
+    const data = await parseJira(res, 'uploadAttachment');
+    // The attachments endpoint returns an array of the created attachment objects.
+    if (Array.isArray(data)) created.push(...data);
   }
+  return created;
+}
+
+// An ADF `media` node can't reference the REST attachment id — it needs the
+// attachment's Atlassian Media Services file UUID. The server resolves it from
+// the attachment content redirect. Returns null if it can't be resolved.
+export async function resolveAttachmentMediaId(cloudId, attachmentId) {
+  try {
+    const res = await fetch(`/api/jira/attachment-media-id/${cloudId}/${attachmentId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.mediaId || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Re-write an issue's description so the just-uploaded attachments render inline
+ * as media nodes. Call after createIssue + uploadJiraAttachments.
+ * @param {Array<{id: string, filename: string}>} uploaded - from uploadJiraAttachments
+ * @param {{epicId: (string|number), epicUrl: string}|null} link - append Azure
+ *        link block (create flow) or null (edit flow) to mirror the original ADF.
+ */
+export async function embedAttachmentImages(cloudId, issueKey, html, uploaded, link = null) {
+  if (!uploaded?.length) return;
+
+  // Resolve each attachment's media UUID; build a { fileName: mediaUuid } map.
+  const entries = await Promise.all(uploaded.map(async (a) => {
+    const mediaId = await resolveAttachmentMediaId(cloudId, a.id);
+    return mediaId ? [a.filename, mediaId] : null;
+  }));
+  const mediaMap = Object.fromEntries(entries.filter(Boolean));
+  if (!Object.keys(mediaMap).length) return;   // nothing resolved — leave description as-is
+
+  const adf = link
+    ? toAdfWithLink(html, link.epicId, link.epicUrl, mediaMap)
+    : htmlToAdf(html, mediaMap);
+  const url = `${jiraBase(cloudId)}/issue/${issueKey}`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields: { description: adf } }),
+  });
+  return parseJira(res, 'embedAttachmentImages');
 }
 
 export async function getJiraIssueByKey(cloudId, issueKey, clientRequestIdField) {

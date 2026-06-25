@@ -193,6 +193,11 @@ async function proxyTo(req, res, upstreamUrl, authHeader) {
   if (req.headers['content-type']) {
     headers['Content-Type'] = req.headers['content-type'];
   }
+  // Jira's attachment endpoint rejects uploads (403 XSRF) unless this header is
+  // present. The client sets it; forward it through the proxy unchanged.
+  if (req.headers['x-atlassian-token']) {
+    headers['X-Atlassian-Token'] = req.headers['x-atlassian-token'];
+  }
 
   try {
     // В Node.js 18+ fetch встроен по умолчанию, Vercel его поддерживает
@@ -257,6 +262,29 @@ app.get('/api/jira/attachment-binary/:cloudId/:attachmentId', async (req, res) =
       .send(Buffer.from(buffer));
   } catch (err) {
     console.error('[Attachment binary proxy error]:', err.message);
+    res.status(503).json({ error: err.message });
+  }
+});
+
+// Resolve an issue attachment's Atlassian Media Services file UUID (needed to
+// embed it inline in a description as an ADF `media` node — the REST attachment
+// id is NOT accepted there). The attachment content endpoint 30x-redirects to
+// api.media.atlassian.com/file/<uuid>/binary; we read the UUID off that
+// Location header server-side (the browser can't read cross-origin redirects).
+// Defined BEFORE the generic /api/jira catch-all.
+app.get('/api/jira/attachment-media-id/:cloudId/:attachmentId', async (req, res) => {
+  const { cloudId, attachmentId } = req.params;
+  const url = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/attachment/content/${attachmentId}`;
+  try {
+    const upstream = await fetch(url, { headers: { Authorization: jiraAuth }, redirect: 'manual' });
+    const loc = upstream.headers.get('location') || '';
+    const mediaId = loc.match(/\/file\/([0-9a-f-]+)\//)?.[1] || null;
+    if (!mediaId) {
+      return res.status(502).json({ error: `Could not resolve media id (upstream ${upstream.status})` });
+    }
+    res.json({ mediaId });
+  } catch (err) {
+    console.error('[Attachment media-id proxy error]:', err.message);
     res.status(503).json({ error: err.message });
   }
 });
