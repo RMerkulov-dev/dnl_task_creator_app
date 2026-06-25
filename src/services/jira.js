@@ -20,10 +20,53 @@ function htmlToAdf(html, mediaMap = null) {
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html || '', 'text/html');
-    const content = convertNodes(doc.body.childNodes);
+    const content = sanitizeAdfNodes(convertNodes(doc.body.childNodes));
     return { type: 'doc', version: 1, content: content.length ? content : [{ type: 'paragraph', content: [] }] };
   } finally {
     _mediaMap = null;
+  }
+}
+
+// Jira's ADF validator rejects whole documents (HTTP 400 INVALID_INPUT) when
+// they contain "empty" container nodes — a bulletList/orderedList with no
+// listItems, a blockquote with no block children, or a listItem with no content.
+// Rich descriptions occasionally produce these from the HTML→ADF pass, so we
+// scrub them here before sending. Returns a cleaned array of nodes.
+function sanitizeAdfNodes(nodes) {
+  const out = [];
+  for (const node of nodes || []) {
+    const clean = sanitizeAdfNode(node);
+    if (clean) out.push(clean);
+  }
+  return out;
+}
+
+function sanitizeAdfNode(node) {
+  if (!node || typeof node !== 'object') return null;
+
+  // Recurse into children first so emptiness is evaluated bottom-up.
+  if (Array.isArray(node.content)) {
+    node.content = sanitizeAdfNodes(node.content);
+  }
+
+  switch (node.type) {
+    case 'bulletList':
+    case 'orderedList':
+      // Lists may only contain listItems and must contain at least one.
+      node.content = (node.content || []).filter(c => c.type === 'listItem');
+      return node.content.length ? node : null;
+
+    case 'listItem':
+      // A listItem must hold at least one block node.
+      if (!node.content?.length) node.content = [{ type: 'paragraph', content: [] }];
+      return node;
+
+    case 'blockquote':
+      // A blockquote must hold at least one block node.
+      return node.content?.length ? node : null;
+
+    default:
+      return node;
   }
 }
 
@@ -197,7 +240,14 @@ async function parseJira(res, label) {
     if (data.errors && Object.keys(data.errors).length) errParts.push(Object.values(data.errors).join('; '));
     if (data.message) errParts.push(data.message);
     if (data.error) errParts.push(data.error);
-    const msg = errParts.join(' | ') || `Jira error ${res.status}: ${text.substring(0, 300)}`;
+    let msg = errParts.join(' | ') || `Jira error ${res.status}: ${text.substring(0, 300)}`;
+    // INVALID_INPUT is Jira's generic payload rejection with no field-level
+    // detail — explain what it usually means so the modal is actionable.
+    if (/INVALID_INPUT/i.test(msg) && !(data.errors && Object.keys(data.errors).length)) {
+      msg += ` — Jira couldn't store this content (HTTP ${res.status}). It usually means the description has formatting Jira rejects (e.g. an empty list or quote).`;
+    }
+    // Always log the raw response so the exact reason is inspectable in the console.
+    console.error(`[${label}] Jira ${res.status} response:`, text);
     throw new Error(msg);
   }
   return data;

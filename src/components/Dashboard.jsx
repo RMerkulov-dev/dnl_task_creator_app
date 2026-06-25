@@ -90,6 +90,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   const [mode,        setMode]        = useState('create');
   const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
+  const [attachments, setAttachments] = useState([]);
   const [formError,   setFormError]   = useState('');
 
   // ── Edit mode state ───────────────────────────────────────────────────────
@@ -279,6 +280,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   function resetForm() {
     setTitle('');
     setDescription('');
+    setAttachments([]);
     setEpicId('');
     setJiraKey(null);
     setFetchErr('');
@@ -393,6 +395,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       storyUrl:       selectedStory?.url || undefined,
       areaPath:       selectedBoard || undefined,
       jiraProjectKey: selectedJiraProj || undefined,
+      attachments:    attachments.length ? attachments : undefined,
     };
 
     // createFromJira: Jira issue exists, Azure doesn't — create Azure + link back
@@ -563,6 +566,8 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
                   <RichTextEditor
                     value={description}
                     onChange={setDescription}
+                    attachments={attachments}
+                    onAttachmentsChange={setAttachments}
                     placeholder="Describe the task in detail…"
                   />
                 </div>

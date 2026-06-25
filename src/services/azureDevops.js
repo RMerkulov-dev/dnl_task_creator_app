@@ -37,9 +37,12 @@ export async function createWorkItem(proxyKey, project, type, fields, relations 
   return parse(res, 'createWorkItem');
 }
 
-export async function updateWorkItem(proxyKey, project, id, fields) {
+export async function updateWorkItem(proxyKey, project, id, fields, relations = []) {
   const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workitems/${id}?api-version=7.0`;
-  const ops = Object.entries(fields).map(([path, value]) => ({ op: 'add', path: `/fields/${path}`, value }));
+  const ops = [
+    ...Object.entries(fields).map(([path, value]) => ({ op: 'add', path: `/fields/${path}`, value })),
+    ...relations.map(rel => ({ op: 'add', path: '/relations/-', value: rel })),
+  ];
   const res = await fetch(url, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json-patch+json' },

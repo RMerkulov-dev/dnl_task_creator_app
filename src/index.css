@@ -737,6 +737,51 @@ body {
   box-shadow: none;
 }
 
+/* ── Attachment chips ── */
+.rte-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--tint-soft);
+}
+
+.rte-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 6px);
+  background: var(--bg, rgba(255, 255, 255, 0.03));
+  font-size: 12px;
+}
+
+.rte-attach-chip > svg { flex: 0 0 auto; opacity: 0.7; }
+
+.rte-attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rte-attach-size { opacity: 0.55; flex: 0 0 auto; }
+
+.rte-attach-remove {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.55;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+}
+.rte-attach-remove:hover { opacity: 1; }
+
 /* ── Toolbar ── */
 .rte-toolbar {
   display: flex;

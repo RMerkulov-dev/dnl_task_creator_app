@@ -18,7 +18,15 @@ const COLORS = [
   { label: 'Pink',   value: '#ec4899' },
 ];
 
-export default function RichTextEditor({ value, onChange, placeholder }) {
+let _attachUid = 0;
+
+function formatSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export default function RichTextEditor({ value, onChange, placeholder, attachments = [], onAttachmentsChange }) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -76,12 +84,48 @@ export default function RichTextEditor({ value, onChange, placeholder }) {
     e.target.value = '';
   }, [editor]);
 
+  // Attach arbitrary files (any type) — uploaded as Azure + Jira attachments on
+  // sync. Kept separate from the inline-image flow above.
+  const handleAttachInput = useCallback((e) => {
+    const files = e.target.files;
+    if (!files?.length || !onAttachmentsChange) { e.target.value = ''; return; }
+    const added = Array.from(files).map(file => ({
+      id:   `att-${Date.now()}-${++_attachUid}`,
+      name: file.name,
+      size: file.size,
+      file,
+    }));
+    onAttachmentsChange([...attachments, ...added]);
+    e.target.value = '';
+  }, [attachments, onAttachmentsChange]);
+
+  const removeAttachment = useCallback((id) => {
+    onAttachmentsChange?.(attachments.filter(a => a.id !== id));
+  }, [attachments, onAttachmentsChange]);
+
   if (!editor) return null;
 
   return (
     <div className="rte-wrap">
-      <Toolbar editor={editor} onAddImage={addImage} onFileInput={handleFileInput} />
+      <Toolbar
+        editor={editor}
+        onAddImage={addImage}
+        onFileInput={handleFileInput}
+        onAttachFile={onAttachmentsChange ? handleAttachInput : null}
+      />
       <EditorContent editor={editor} className="rte-content" />
+      {attachments.length > 0 && (
+        <div className="rte-attachments">
+          {attachments.map(a => (
+            <span className="rte-attach-chip" key={a.id} title={a.name}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              <span className="rte-attach-name">{a.name}</span>
+              <span className="rte-attach-size">{formatSize(a.size)}</span>
+              <button type="button" className="rte-attach-remove" onClick={() => removeAttachment(a.id)} title="Remove" aria-label="Remove attachment">✕</button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -201,8 +245,9 @@ function LinkPopup({ editor, onClose }) {
 
 // ─── Toolbar ─────────────────────────────────────────────────────────────────
 
-function Toolbar({ editor, onAddImage, onFileInput }) {
+function Toolbar({ editor, onAddImage, onFileInput, onAttachFile }) {
   const fileRef = useRef(null);
+  const attachRef = useRef(null);
   const [showLinkPopup, setShowLinkPopup] = useState(false);
 
   const handleLinkClick = useCallback(() => {
@@ -312,6 +357,16 @@ function Toolbar({ editor, onAddImage, onFileInput }) {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       </button>
       <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onFileInput} />
+
+      {/* Attach file (any type) — saved as Azure + Jira attachment */}
+      {onAttachFile && (
+        <>
+          <button type="button" className="rte-btn" onClick={() => attachRef.current?.click()} title="Attach file">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <input ref={attachRef} type="file" multiple hidden onChange={onAttachFile} />
+        </>
+      )}
     </div>
   );
 }

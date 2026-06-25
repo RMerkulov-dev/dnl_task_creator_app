@@ -120,6 +120,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
   const baseTitle = stripKnownPrefix(initialTitle || '');
   const [customTitle, setCustomTitle] = useState(null);
   const [description, setDescription] = useState(() => textToHtml(initialDescription || ''));
+  const [attachments, setAttachments] = useState([]);
   const [formError,   setFormError]   = useState('');
 
   const [iterations,        setIterations]        = useState([]);
@@ -229,6 +230,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
       storyUrl:       selectedStory?.url || undefined,
       areaPath:       selectedBoard || undefined,
       jiraProjectKey: selectedJiraProj || undefined,
+      attachments:    attachments.length ? attachments : undefined,
     };
     setSteps(Array(getCreateStepCount(proj)).fill({ status: 'idle' }));
     setResult(null);
@@ -334,7 +336,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
 
           <div className="field">
             <label className="field-label">Description</label>
-            <RichTextEditor value={description} onChange={setDescription} placeholder="Describe the task in detail…" />
+            <RichTextEditor value={description} onChange={setDescription} attachments={attachments} onAttachmentsChange={setAttachments} placeholder="Describe the task in detail…" />
           </div>
 
           {formError && <p className="error-msg">⚠ {formError}</p>}

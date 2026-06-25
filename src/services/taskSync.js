@@ -43,6 +43,45 @@ async function processImages(html, proxyKey, project) {
   return { html: doc.body.innerHTML, files, relations };
 }
 
+// ─── User-attached files (the editor's "Attach file" button) ──────────────────
+// Uploads each file to Azure (returns an AttachedFile relation) and returns the
+// blobs so they can also be pushed to Jira as attachments. Unlike images these
+// are not embedded inline — they live in both systems' attachment panels.
+async function uploadExtraAttachments(attachments, azure) {
+  const relations = [];
+  const jiraFiles = [];
+  for (const att of attachments || []) {
+    const blob = att.file ?? att.blob;
+    if (!blob) continue;
+    const name = att.name || blob.name || `attachment-${Date.now()}`;
+    try {
+      const result = await uploadAttachment(azure.proxyKey, azure.project, name, blob);
+      relations.push({ rel: 'AttachedFile', url: result.url, attributes: { comment: '' } });
+      jiraFiles.push({ name, blob });
+    } catch (err) {
+      console.warn(`Attachment upload failed for ${name}:`, err.message);
+    }
+  }
+  return { relations, jiraFiles };
+}
+
+// Pushes image blobs + user-attached files to a Jira issue, then re-writes the
+// description so only the images render inline (files stay as attachments).
+// `link` appends the Azure link block (create flow) or is null (edit flow).
+// Non-blocking: never throws — a Jira attachment hiccup shouldn't fail the sync.
+async function pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, link) {
+  const allFiles = [...(imageFiles || []), ...(extraJiraFiles || [])];
+  if (!allFiles.length) return;
+  try {
+    const uploaded   = await uploadJiraAttachments(jira.cloudId, jiraKey, allFiles);
+    const imageNames = new Set((imageFiles || []).map(f => f.name));
+    const imageUploads = uploaded.filter(u => imageNames.has(u.filename));
+    await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, imageUploads, link);
+  } catch (err) {
+    console.warn('Jira attachment/embed failed:', err.message);
+  }
+}
+
 // ─── Step counting ────────────────────────────────────────────────────────────
 // Centralised so Dashboard and SyncModal always agree on step count.
 
@@ -80,6 +119,9 @@ export async function createTask(project, title, description, extras = {}, onSte
   // Upload embedded images as Azure DevOps attachments and replace data URIs
   const { html: processedDesc, files: imageFiles, relations: imageRelations } =
     await processImages(description, azure.proxyKey, azure.project);
+  // Upload user-attached files (any type) as Azure + Jira attachments.
+  const { relations: attachRelations, jiraFiles: extraJiraFiles } =
+    await uploadExtraAttachments(extras.attachments, azure);
 
   const fields = {
     'System.Title':       title,
@@ -93,6 +135,7 @@ export async function createTask(project, title, description, extras = {}, onSte
       ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
       : []),
     ...(imageRelations || []),
+    ...attachRelations,
   ];
 
   let item;
@@ -125,14 +168,7 @@ export async function createTask(project, title, description, extras = {}, onSte
   const jiraKey = jiraItem.key;
   const jiraUrl = getJiraUrl(jiraKey);
 
-  // Upload images as Jira attachments, then re-write the description so they
-  // render inline (non-blocking — a failure here shouldn't fail the whole sync).
-  if (imageFiles.length) {
-    try {
-      const uploaded = await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles);
-      await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, uploaded, { epicId: itemId, epicUrl: itemUrl });
-    } catch (err) { console.warn('Jira image embed failed:', err.message); }
-  }
+  await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, { epicId: itemId, epicUrl: itemUrl });
 
   onStep(1, 'done', null, { jiraKey, jiraUrl });
 
@@ -182,6 +218,8 @@ export async function createAzureFromJira(project, jiraKey, title, description, 
 
   const { html: processedDesc, files: imageFiles, relations: imageRelations } =
     await processImages(description, azure.proxyKey, azure.project);
+  const { relations: attachRelations, jiraFiles: extraJiraFiles } =
+    await uploadExtraAttachments(extras.attachments, azure);
 
   const fields = {
     'System.Title':       title,
@@ -196,6 +234,7 @@ export async function createAzureFromJira(project, jiraKey, title, description, 
       ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
       : []),
     ...(imageRelations || []),
+    ...attachRelations,
   ];
 
   let item;
@@ -216,12 +255,7 @@ export async function createAzureFromJira(project, jiraKey, title, description, 
   onStep(1, 'pending');
   try {
     await setJiraAzureId(jira.cloudId, jiraKey, jira.clientRequestIdField, itemId);
-    if (imageFiles?.length) {
-      try {
-        const uploaded = await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles);
-        await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, uploaded, null);
-      } catch (e) { console.warn('Jira image embed failed:', e.message); }
-    }
+    await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, null);
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;
@@ -245,12 +279,15 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
   // Upload embedded images as attachments
   const { html: processedDesc, files: imageFiles } =
     await processImages(description, azure.proxyKey, azure.project);
+  const { relations: attachRelations, jiraFiles: extraJiraFiles } =
+    await uploadExtraAttachments(extras.attachments, azure);
 
   try {
+    // Newly attached files are linked in the same PATCH as the field updates.
     await updateWorkItem(azure.proxyKey, azure.project, itemId, {
       'System.Title':       title,
       'System.Description': processedDesc,
-    });
+    }, attachRelations);
   } catch (err) {
     onStep(0, 'error', err.message);
     throw err;
@@ -280,12 +317,7 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
       throw err;
     }
 
-    if (imageFiles.length) {
-      try {
-        const uploaded = await uploadJiraAttachments(jira.cloudId, jiraKey, imageFiles);
-        await embedAttachmentImages(jira.cloudId, jiraKey, processedDesc, uploaded, null);
-      } catch (err) { console.warn('Jira image embed failed:', err.message); }
-    }
+    await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, null);
 
     const jiraUrl = getJiraUrl(jiraKey);
     onStep(1, 'done', null, { jiraKey, jiraUrl });
@@ -320,12 +352,7 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
   const newJiraKey = jiraItem.key;
   const newJiraUrl = getJiraUrl(newJiraKey);
 
-  if (imageFiles.length) {
-    try {
-      const uploaded = await uploadJiraAttachments(jira.cloudId, newJiraKey, imageFiles);
-      await embedAttachmentImages(jira.cloudId, newJiraKey, processedDesc, uploaded, { epicId: numericId, epicUrl: itemUrl });
-    } catch (err) { console.warn('Jira image embed failed:', err.message); }
-  }
+  await pushJiraAttachments(jira, newJiraKey, processedDesc, imageFiles, extraJiraFiles, { epicId: numericId, epicUrl: itemUrl });
 
   onStep(1, 'done', null, { jiraKey: newJiraKey, jiraUrl: newJiraUrl });
 
