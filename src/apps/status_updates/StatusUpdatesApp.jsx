@@ -5,6 +5,8 @@ import { getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl } from '../../ser
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
+const AZURE_CLOSED_STATES = new Set(['done', 'resolved', 'closed', 'cancelled', 'removed']);
+
 // Jira status categories → chip colour bucket.
 const STATUS_TONE = {
   new:           'todo',
@@ -204,8 +206,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         proj.azure.jiraIdField,
         hasBoards ? selectedBoard : null,
       );
-      // Hide Azure work items that are already Done.
-      const visible = azItems.filter(i => (i.state || '').trim().toLowerCase() !== 'done');
+      // Hide Azure work items in terminal states.
+      const visible = azItems.filter(i => !AZURE_CLOSED_STATES.has((i.state || '').trim().toLowerCase()));
 
       const keys = visible.map(i => i.jiraKey).filter(Boolean);
       const jiraMap = await getIssuesStatusByKeys(proj.jira.cloudId, keys);
