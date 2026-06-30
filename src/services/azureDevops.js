@@ -168,21 +168,24 @@ export function extractJiraKey(value) {
 }
 
 /**
- * List the Azure DevOps work items under a board (area path) — or the whole
- * project when `areaPath` is null — together with their stored Jira key.
+ * List the Azure DevOps work items under a board (area path) and/or a sprint
+ * (iteration path) — or the whole project when both are null — together with
+ * their stored Jira key.
  *
  * Returns: [{ id, title, type, state, assignedTo, parentId, jiraKey, jiraRaw, url }]
  */
-export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath = null) {
+export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath = null, iterationPath = null) {
   const wiqlUrl = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.0`;
-  const areaClause = areaPath
-    ? ` AND [System.AreaPath] UNDER '${areaPath.replace(/'/g, "''")}'`
-    : '';
+  const esc = v => v.replace(/'/g, "''");
+  const clauses = [];
+  if (areaPath)      clauses.push(`[System.AreaPath] UNDER '${esc(areaPath)}'`);
+  if (iterationPath) clauses.push(`[System.IterationPath] UNDER '${esc(iterationPath)}'`);
+  const where = clauses.length ? ` AND ${clauses.join(' AND ')}` : '';
   const wiqlRes = await fetch(wiqlUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project${areaClause} ORDER BY [System.Id]`,
+      query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project${where} ORDER BY [System.Id]`,
     }),
   });
   const wiql = await parse(wiqlRes, 'getBoardWorkItems-wiql');

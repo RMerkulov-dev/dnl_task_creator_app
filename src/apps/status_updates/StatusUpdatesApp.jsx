@@ -1,7 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
-import { getAreaPaths, getBoardWorkItems } from '../../services/azureDevops.js';
-import { getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl, getIssueKeysByAzureIds } from '../../services/jira.js';
+import { getAreaPaths, getIterations, getBoardWorkItems } from '../../services/azureDevops.js';
+import {
+  getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl,
+  getIssueKeysByAzureIds, getTransitions, transitionIssue,
+} from '../../services/jira.js';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -46,6 +49,25 @@ function buildTree(items) {
   return { roots, childrenOf };
 }
 
+// Immutably patch a node's status inside a Jira descendant tree. Returns the same
+// array reference when nothing changed so callers can bail out of re-renders.
+function updateTreeStatus(nodes, key, status, statusCategory) {
+  let changed = false;
+  const out = nodes.map(n => {
+    if (n.key === key) { changed = true; return { ...n, status, statusCategory }; }
+    if (n.children?.length) {
+      const c = updateTreeStatus(n.children, key, status, statusCategory);
+      if (c !== n.children) { changed = true; return { ...n, children: c }; }
+    }
+    return n;
+  });
+  return changed ? out : nodes;
+}
+
+// Provides the bits an inline StatusChip needs without prop-drilling through the
+// recursive tree: the Jira cloud id and the "status changed" callback.
+const StatusEditCtx = createContext(null);
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 function RefreshIcon() {
   return (
@@ -63,12 +85,120 @@ function LinkIcon() {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8"/>
+      <path d="M21 21l-4.3-4.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 // Map a Jira issue type to one of the existing type-colour chips.
 function typeClass(type) {
   const t = (type || '').toLowerCase();
   if (t.includes('epic')) return 'su-type-epic';
   if (t.includes('task') || t.includes('sub-task') || t.includes('subtask')) return 'su-type-task';
   return 'su-type-issue';
+}
+
+// ─── Inline-editable Jira status chip ─────────────────────────────────────────
+// Click → lazy-load the issue's valid workflow transitions → apply one. Updates
+// state optimistically (the workflow guarantees only valid targets are offered).
+function StatusChip({ issueKey, status, statusCategory }) {
+  const ctx = useContext(StatusEditCtx);
+  const btnRef = useRef(null);
+  const [open,        setOpen]        = useState(false);
+  const [pos,         setPos]         = useState(null);
+  const [loading,     setLoading]     = useState(false);
+  const [saving,      setSaving]      = useState(false);
+  const [transitions, setTransitions] = useState(null);
+  const [err,         setErr]         = useState('');
+
+  const editable = !!ctx?.cloudId && !!issueKey;
+
+  // Reposition the menu to the chip and close it on scroll/resize so a fixed-
+  // position popover never detaches from its row.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  async function toggle(e) {
+    e.stopPropagation();
+    if (!editable) return;
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+    setOpen(true);
+    setErr('');
+    if (transitions == null) {
+      setLoading(true);
+      try {
+        setTransitions(await getTransitions(ctx.cloudId, issueKey));
+      } catch (e2) {
+        setErr(e2.message || 'Failed to load transitions');
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
+
+  async function apply(t) {
+    setSaving(true);
+    setErr('');
+    try {
+      await transitionIssue(ctx.cloudId, issueKey, t.id);
+      ctx.onStatusChange(issueKey, t.to?.name ?? t.name, t.to?.statusCategory?.key ?? statusCategory);
+      setOpen(false);
+      setTransitions(null);   // available transitions change after a move — refetch next open
+    } catch (e2) {
+      setErr(e2.message || 'Transition failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="su-status-wrap">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`su-status su-status-${toneFor(statusCategory)}${editable ? ' su-status-editable' : ''}`}
+        onClick={toggle}
+        disabled={saving}
+        title={editable ? 'Change status' : undefined}
+      >
+        {saving ? <span className="spinner" style={{ width: 10, height: 10 }} /> : (status || '—')}
+        {editable && <span className="su-status-caret">▾</span>}
+      </button>
+
+      {open && (
+        <>
+          <div className="su-status-backdrop" onClick={() => setOpen(false)} />
+          <div className="su-status-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+            {loading && <div className="su-status-menu-item muted"><span className="spinner" style={{ width: 12, height: 12 }} /> Loading…</div>}
+            {err && <div className="su-status-menu-item su-status-menu-err">⚠ {err}</div>}
+            {!loading && !err && transitions?.length === 0 && (
+              <div className="su-status-menu-item muted">No transitions available</div>
+            )}
+            {!loading && !err && transitions?.map(t => (
+              <button key={t.id} type="button" className="su-status-menu-item" disabled={saving} onClick={() => apply(t)}>
+                <span className="su-status-menu-name">{t.name}</span>
+                {t.to?.name && t.to.name !== t.name && <span className="su-status-menu-to">→ {t.to.name}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
 }
 
 // One line in the Jira column: type chip · key · summary · status · assignee.
@@ -81,7 +211,7 @@ function JiraLine({ issue, isRequest }) {
         {isRequest && <LinkIcon />} {issue.key}
       </a>
       <span className="su-child-title" title={issue.summary}>{issue.summary}</span>
-      <span className={`su-status su-status-${toneFor(issue.statusCategory)}`}>{issue.status || '—'}</span>
+      <StatusChip issueKey={issue.key} status={issue.status} statusCategory={issue.statusCategory} />
       <span className="su-assignee">{issue.assignee || 'Unassigned'}</span>
     </div>
   );
@@ -160,6 +290,10 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const [selectedBoard, setSelectedBoard] = useState('');
   const [boardsLoading, setBoardsLoading] = useState(false);
 
+  const [iterations,     setIterations]     = useState([]);
+  const [selectedSprint, setSelectedSprint] = useState('');
+  const [sprintsLoading, setSprintsLoading] = useState(false);
+
   const [items,        setItems]        = useState([]);
   const [jira,         setJira]         = useState(new Map());
   const [jiraChildren, setJiraChildren] = useState(new Map());
@@ -167,31 +301,52 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const [error,        setError]        = useState('');
   const [loaded,       setLoaded]       = useState(false);
 
-  const hasBoards = !!proj?.features?.board;
+  // Search + filter
+  const [query,        setQuery]        = useState('');
+  const [activeFilter, setActiveFilter] = useState('all');   // all | linked | missing | unlinked
 
-  // ── Load boards (area paths) when the project changes ──────────────────────
+  const hasBoards  = !!proj?.features?.board;
+  const hasSprints = !!proj?.features?.iteration;
+
+  // ── Load boards (area paths) and/or sprints (iterations) on project change ──
   useEffect(() => {
     setBoards([]);
     setSelectedBoard('');
+    setIterations([]);
+    setSelectedSprint('');
     setItems([]);
     setJira(new Map());
     setJiraChildren(new Map());
     setLoaded(false);
     setError('');
-    if (!proj || !hasBoards) return;
+    setQuery('');
+    setActiveFilter('all');
+    if (!proj) return;
 
     let cancelled = false;
-    setBoardsLoading(true);
-    getAreaPaths(proj.azure.proxyKey, proj.azure.project)
-      .then(all => {
-        if (cancelled) return;
-        const allow = proj.boardAllowList;
-        setBoards(allow?.length ? all.filter(b => allow.includes(b.name)) : all);
-      })
-      .catch(e => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setBoardsLoading(false));
+
+    if (hasBoards) {
+      setBoardsLoading(true);
+      getAreaPaths(proj.azure.proxyKey, proj.azure.project)
+        .then(all => {
+          if (cancelled) return;
+          const allow = proj.boardAllowList;
+          setBoards(allow?.length ? all.filter(b => allow.includes(b.name)) : all);
+        })
+        .catch(e => !cancelled && setError(e.message))
+        .finally(() => !cancelled && setBoardsLoading(false));
+    }
+
+    if (hasSprints) {
+      setSprintsLoading(true);
+      getIterations(proj.azure.proxyKey, proj.azure.project)
+        .then(all => { if (!cancelled) setIterations(all); })
+        .catch(e => !cancelled && setError(e.message))
+        .finally(() => !cancelled && setSprintsLoading(false));
+    }
+
     return () => { cancelled = true; };
-  }, [proj, hasBoards]);
+  }, [proj, hasBoards, hasSprints]);
 
   // ── Load the board's work items + their Jira statuses ──────────────────────
   const load = useCallback(async () => {
@@ -205,6 +360,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         proj.azure.project,
         proj.azure.jiraIdField,
         hasBoards ? selectedBoard : null,
+        hasSprints ? (selectedSprint || null) : null,
       );
       // Hide Azure work items in terminal states (project-specific config or defaults).
       const excludedStates = proj.statusUpdates?.excludeStates
@@ -244,11 +400,34 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     } finally {
       setLoading(false);
     }
-  }, [proj, hasBoards, selectedBoard]);
+  }, [proj, hasBoards, selectedBoard, hasSprints, selectedSprint]);
 
-  const { roots, childrenOf } = useMemo(() => buildTree(items), [items]);
+  // ── Optimistic status patch after an inline transition ─────────────────────
+  const handleStatusChanged = useCallback((key, status, statusCategory) => {
+    setJira(prev => {
+      if (!prev.has(key)) return prev;
+      const next = new Map(prev);
+      next.set(key, { ...next.get(key), status, statusCategory });
+      return next;
+    });
+    setJiraChildren(prev => {
+      let changed = false;
+      const next = new Map();
+      for (const [k, tree] of prev) {
+        const upd = updateTreeStatus(tree, key, status, statusCategory);
+        if (upd !== tree) changed = true;
+        next.set(k, upd);
+      }
+      return changed ? next : prev;
+    });
+  }, []);
 
-  // ── Summary counts ─────────────────────────────────────────────────────────
+  const editCtx = useMemo(
+    () => ({ cloudId: proj?.jira?.cloudId, onStatusChange: handleStatusChanged }),
+    [proj, handleStatusChanged],
+  );
+
+  // ── Summary counts (always over the full set, not the filtered view) ───────
   const stats = useMemo(() => {
     let linked = 0, missing = 0, unlinked = 0;
     for (const it of items) {
@@ -258,6 +437,26 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     }
     return { total: items.length, linked, missing, unlinked };
   }, [items, jira]);
+
+  // ── Apply search + filter, then rebuild the tree from the surviving items ───
+  const filteredItems = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return items.filter(it => {
+      if (activeFilter === 'linked'   && !(it.jiraKey && jira.has(it.jiraKey)))  return false;
+      if (activeFilter === 'missing'  && !(it.jiraKey && !jira.has(it.jiraKey))) return false;
+      if (activeFilter === 'unlinked' && it.jiraKey)                             return false;
+      if (!q) return true;
+      const j = it.jiraKey ? jira.get(it.jiraKey) : null;
+      const hay = [`#${it.id}`, it.title, it.state, it.jiraKey, j?.summary, j?.status]
+        .filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [items, jira, query, activeFilter]);
+
+  const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
+
+  const isFiltering = !!query.trim() || activeFilter !== 'all';
+  const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
 
   return (
     <div className="app-shell">
@@ -299,7 +498,26 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
             </>
           )}
 
-          {!hasBoards && (
+          {hasSprints && (
+            <>
+              <label className="field-label" style={{ marginTop: 16 }}>Sprint</label>
+              <select
+                className="select"
+                value={selectedSprint}
+                onChange={e => setSelectedSprint(e.target.value)}
+                disabled={sprintsLoading || !iterations.length}
+              >
+                <option value="">{sprintsLoading ? 'Loading sprints…' : '— All sprints —'}</option>
+                {iterations.map(it => (
+                  <option key={it.id} value={it.path}>
+                    {it.name}{it.attributes?.timeFrame === 'current' ? ' • current' : ''}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
+          {!hasBoards && !hasSprints && (
             <p className="su-hint">This project has no boards — the whole project will be compared.</p>
           )}
 
@@ -316,10 +534,34 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
           {loaded && (
             <div className="su-stats">
-              <div className="su-stat"><span className="su-stat-num">{stats.total}</span> work items</div>
-              <div className="su-stat su-stat-ok"><span className="su-stat-num">{stats.linked}</span> in Jira</div>
-              {stats.missing > 0 && <div className="su-stat su-stat-warn"><span className="su-stat-num">{stats.missing}</span> key not found</div>}
-              {stats.unlinked > 0 && <div className="su-stat su-stat-muted"><span className="su-stat-num">{stats.unlinked}</span> no link</div>}
+              <button
+                className={`su-stat su-stat-btn${activeFilter === 'all' ? ' active' : ''}`}
+                onClick={() => setActiveFilter('all')}
+              >
+                <span className="su-stat-num">{stats.total}</span> work items
+              </button>
+              <button
+                className={`su-stat su-stat-ok su-stat-btn${activeFilter === 'linked' ? ' active' : ''}`}
+                onClick={() => toggleFilter('linked')}
+              >
+                <span className="su-stat-num">{stats.linked}</span> in Jira
+              </button>
+              {stats.missing > 0 && (
+                <button
+                  className={`su-stat su-stat-warn su-stat-btn${activeFilter === 'missing' ? ' active' : ''}`}
+                  onClick={() => toggleFilter('missing')}
+                >
+                  <span className="su-stat-num">{stats.missing}</span> key not found
+                </button>
+              )}
+              {stats.unlinked > 0 && (
+                <button
+                  className={`su-stat su-stat-muted su-stat-btn${activeFilter === 'unlinked' ? ' active' : ''}`}
+                  onClick={() => toggleFilter('unlinked')}
+                >
+                  <span className="su-stat-num">{stats.unlinked}</span> no link
+                </button>
+              )}
             </div>
           )}
         </aside>
@@ -342,20 +584,46 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
             <div className="su-empty"><span className="spinner spinner-lg" /></div>
           )}
 
+          {loaded && !loading && items.length > 0 && (
+            <div className="su-toolbar">
+              <div className="su-search-wrap">
+                <span className="su-search-icon"><SearchIcon /></span>
+                <input
+                  className="input su-search"
+                  placeholder="Search id, key, title, status…"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                />
+                {query && (
+                  <button className="su-search-clear" onClick={() => setQuery('')} title="Clear">✕</button>
+                )}
+              </div>
+              {isFiltering && (
+                <span className="su-result-count">{filteredItems.length} / {items.length}</span>
+              )}
+            </div>
+          )}
+
           {loaded && !loading && items.length === 0 && (
             <div className="su-empty"><p className="su-empty-sub">No work items found for this board.</p></div>
           )}
 
-          {loaded && !loading && items.length > 0 && (
-            <div className="su-table">
-              <div className="su-table-head">
-                <span className="su-cell">Azure DevOps</span>
-                <span className="su-cell">Jira</span>
+          {loaded && !loading && items.length > 0 && filteredItems.length === 0 && (
+            <div className="su-empty"><p className="su-empty-sub">Nothing matches your search or filter.</p></div>
+          )}
+
+          {loaded && !loading && filteredItems.length > 0 && (
+            <StatusEditCtx.Provider value={editCtx}>
+              <div className="su-table">
+                <div className="su-table-head">
+                  <span className="su-cell">Azure DevOps</span>
+                  <span className="su-cell">Jira</span>
+                </div>
+                <div className="su-table-body">
+                  <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
+                </div>
               </div>
-              <div className="su-table-body">
-                <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
-              </div>
-            </div>
+            </StatusEditCtx.Provider>
           )}
         </section>
       </main>

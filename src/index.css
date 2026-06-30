@@ -3798,6 +3798,118 @@ html, body, #root {
 .su-status-done     { background: rgba(52, 211, 153, 0.16); color: #34d399; }
 .su-status-none     { background: transparent; color: var(--text-3); font-style: italic; }
 
+/* ── Inline-editable status chip ──────────────────────────────────────────── */
+.su-status-wrap { position: relative; display: inline-flex; justify-self: start; }
+
+button.su-status {
+  border: none;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: default;
+  line-height: 1.45;
+}
+
+.su-status-editable { cursor: pointer; transition: filter 0.12s ease; }
+.su-status-editable:hover { filter: brightness(1.18); }
+.su-status-editable:disabled { opacity: 0.7; cursor: default; }
+.su-status-caret { font-size: 8px; opacity: 0.55; margin-left: 1px; }
+
+.su-status-backdrop { position: fixed; inset: 0; z-index: 60; }
+
+.su-status-menu {
+  position: fixed;
+  z-index: 61;
+  min-width: 190px;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hi);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  padding: 5px;
+}
+
+.su-status-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-size: 12.5px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.su-status-menu-item:hover:not(:disabled):not(.muted) { background: var(--bg-card-hover); }
+.su-status-menu-item:disabled { opacity: 0.55; cursor: default; }
+.su-status-menu-item.muted { color: var(--text-3); cursor: default; }
+.su-status-menu-err { color: #f87171; white-space: normal; }
+.su-status-menu-name { font-weight: 600; }
+.su-status-menu-to { margin-left: auto; color: var(--text-3); font-size: 11px; }
+
+/* ── Results toolbar: search + filter pills ───────────────────────────────── */
+.su-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.su-search-wrap { position: relative; display: flex; align-items: center; flex: 1; max-width: 360px; }
+.su-search-icon {
+  position: absolute;
+  left: 11px;
+  color: var(--text-3);
+  display: inline-flex;
+  pointer-events: none;
+}
+.su-search { width: 100%; padding-left: 34px; padding-right: 30px; }
+.su-search-clear {
+  position: absolute;
+  right: 9px;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px;
+  line-height: 1;
+}
+.su-search-clear:hover { color: var(--text-1); }
+
+.su-result-count {
+  font-size: 12px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* Clickable summary counts double as filter pills */
+.su-stat-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 5px 8px;
+  margin: -1px -8px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.su-stat-btn:hover { background: var(--bg-card-hover); }
+.su-stat-btn.active {
+  border-color: var(--accent-1);
+  background: color-mix(in srgb, var(--accent-1) 12%, transparent);
+}
+
 .su-assignee {
   font-size: 12px;
   color: var(--text-2);
