@@ -299,6 +299,46 @@ export async function findIssueByEpicId(cloudId, projectKey, clientRequestIdFiel
 }
 
 /**
+ * Resolve Jira issue keys by the Azure work-item id stored on the Jira side
+ * (clientRequestIdField, e.g. customfield_10034). This is the authoritative link
+ * direction — createIssue() always stamps the Azure id on the Jira request,
+ * whereas the Azure-side jiraIdField (Custom.JiraID / Custom.JiraLink) is often
+ * left blank. Scoped to the given Jira project(s) so Azure ids from different
+ * orgs (which reuse low numbers) can't collide across projects.
+ *
+ * @param {string|string[]} projectKeys - Jira project key(s) to scope the search
+ * @returns {Promise<Map<string, string>>} Map<String(azureId), jiraKey>
+ */
+export async function getIssueKeysByAzureIds(cloudId, projectKeys, clientRequestIdField, azureIds) {
+  const fieldId = clientRequestIdField.replace('customfield_', '');
+  const ids = [...new Set((azureIds || []).map(Number).filter(Number.isFinite))];
+  const out = new Map();
+  if (!ids.length) return out;
+
+  const keys = (Array.isArray(projectKeys) ? projectKeys : [projectKeys]).filter(Boolean);
+  const projectClause = keys.length
+    ? `project in (${keys.map(k => `"${k}"`).join(',')}) AND `
+    : '';
+
+  // Chunk the id list to keep each JQL query well under Jira's length limit.
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const jql = `${projectClause}cf[${fieldId}] in (${chunk.join(',')})`;
+    const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jql, maxResults: 100, fields: [clientRequestIdField] }),
+    });
+    const data = await parseJira(res, 'getIssueKeysByAzureIds');
+    for (const issue of data.issues ?? []) {
+      const azureId = issue.fields?.[clientRequestIdField];
+      if (azureId != null) out.set(String(azureId), issue.key);
+    }
+  }
+  return out;
+}
+
+/**
  * Upload file attachments to an existing Jira issue.
  * @param {string} cloudId
  * @param {string} issueKey - e.g. 'ABS-123'

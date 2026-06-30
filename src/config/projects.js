@@ -52,6 +52,7 @@ export const PROJECTS = {
     },
     // Shows Sprint (Iteration) + Parent Story selectors; iterations filtered to active + placement
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+    statusUpdates: { excludeStates: ['closed', 'resolved', 'done', 'cancelled', 'removed'] },
   },
 
   // ── NSMG Marker ────────────────────────────────────────────────────────────
@@ -71,6 +72,7 @@ export const PROJECTS = {
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMG_MARKER_CUSTOM_FIELD    || 'customfield_10034',
     },
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+    statusUpdates: { excludeStates: ['resolved', 'closed', 'done', 'cancelled', 'removed'] },
   },
 
   // ── NSMG Case Migration ────────────────────────────────────────────────────
@@ -90,6 +92,7 @@ export const PROJECTS = {
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMGCM_CUSTOM_FIELD  || 'customfield_10034',
     },
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+    statusUpdates: { excludeStates: ['closed', 'resolved', 'done', 'cancelled', 'removed'] },
   },
 
   // ── HT — Hydrotec ──────────────────────────────────────────────────────────

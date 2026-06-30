@@ -98,7 +98,9 @@
       "Bash(node -c api/index.js)",
       "Bash(node -e \"console.log\\(Object.keys\\(require\\('./package.json'\\).dependencies\\)\\)\")",
       "Bash(git stash *)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(ls -la .env*)",
+      "Bash(grep -rh \"JIRA_FIELD\\\\|JiraID\\\\|JiraLink\\\\|jiraIdField\" .env*)"
     ]
   }
 }

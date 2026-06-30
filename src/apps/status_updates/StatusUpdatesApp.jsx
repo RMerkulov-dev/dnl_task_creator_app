@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
 import { getAreaPaths, getBoardWorkItems } from '../../services/azureDevops.js';
-import { getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl } from '../../services/jira.js';
+import { getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl, getIssueKeysByAzureIds } from '../../services/jira.js';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
-const AZURE_CLOSED_STATES = new Set(['done', 'resolved', 'closed', 'cancelled', 'removed']);
+const DEFAULT_EXCLUDED_STATES = new Set(['done', 'resolved', 'closed', 'cancelled', 'removed']);
 
 // Jira status categories → chip colour bucket.
 const STATUS_TONE = {
@@ -206,10 +206,27 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         proj.azure.jiraIdField,
         hasBoards ? selectedBoard : null,
       );
-      // Hide Azure work items in terminal states.
-      const visible = azItems.filter(i => !AZURE_CLOSED_STATES.has((i.state || '').trim().toLowerCase()));
+      // Hide Azure work items in terminal states (project-specific config or defaults).
+      const excludedStates = proj.statusUpdates?.excludeStates
+        ? new Set(proj.statusUpdates.excludeStates)
+        : DEFAULT_EXCLUDED_STATES;
+      const visible = azItems.filter(i => !excludedStates.has((i.state || '').trim().toLowerCase()));
 
-      const keys = visible.map(i => i.jiraKey).filter(Boolean);
+      // Resolve the Jira link the way task creation does — by the Azure id stamped
+      // on the Jira side (clientRequestIdField), which is reliable. Fall back to the
+      // Azure-side field for any item the reverse lookup doesn't cover.
+      const keyByAzureId = await getIssueKeysByAzureIds(
+        proj.jira.cloudId,
+        proj.jiraProjectOptions?.length ? proj.jiraProjectOptions : proj.jira.projectKey,
+        proj.jira.clientRequestIdField,
+        visible.map(i => i.id),
+      );
+      const linked = visible.map(i => ({
+        ...i,
+        jiraKey: keyByAzureId.get(String(i.id)) ?? i.jiraKey,
+      }));
+
+      const keys = linked.map(i => i.jiraKey).filter(Boolean);
       const jiraMap = await getIssuesStatusByKeys(proj.jira.cloudId, keys);
 
       // For each resolved request, pull all of its Jira children (status + assignee).
@@ -218,7 +235,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         k, await getChildIssuesTree(proj.jira.cloudId, k),
       ]);
 
-      setItems(visible);
+      setItems(linked);
       setJira(jiraMap);
       setJiraChildren(new Map(childEntries));
       setLoaded(true);
