@@ -1573,6 +1573,47 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
   }
 });
 
+// ─── Extract tasks from dictated text (Voice tab) ─────────────────────────────
+// Body: { text, userEmail }. Runs the same "Tasks Follow-up" skill used by the
+// Fathom tab, but over arbitrary dictated text instead of a call transcript, and
+// returns the identical structured markdown so the Voice tab can parse it into
+// Create-Task blocks. A single LLM call — no MCP, no Fathom token required.
+app.post('/api/extract-tasks', express.json({ limit: '50kb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { text, userEmail } = req.body ?? {};
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'text is required' });
+
+  const skill = FOLLOWUP_SKILLS['tasks-follow-up'];
+
+  const systemPrompt =
+    'You are processing dictated notes for the Voice Tasks tool. ' +
+    'The user dictated the text below — it is NOT a meeting transcript, so it has no timestamps and no Fathom deep links. ' +
+    'Read it carefully and perform the task in the SKILL INSTRUCTIONS using ONLY what the text contains. Never invent content. ' +
+    'For the "Fathom Link" field always output exactly "Not provided". Output the skill\'s result only — no meta commentary. ' +
+    (userEmail ? `The signed-in user's email is "${userEmail}". ` : '') +
+    '\n\n=== SKILL INSTRUCTIONS ===\n' + skill.instructions + '\n=== END SKILL INSTRUCTIONS ===';
+
+  try {
+    const data = await callOpenRouter(apiKey, {
+      model:       OPENROUTER_EXECUTOR,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: `=== DICTATED NOTES ===\n${String(text).trim()}` },
+      ],
+      temperature: 0.2,
+      max_tokens:  4000,
+      reasoning:   { effort: 'low' },
+    });
+    const reply = extractReply(data.choices?.[0]?.message);
+    res.json({ reply: reply || 'The model returned an empty response.' });
+  } catch (err) {
+    console.error('[extract-tasks error]', err.message);
+    res.status(500).json({ error: humaniseFetchError(err) });
+  }
+});
+
 // ─── Email Agent ─────────────────────────────────────────────────────────────
 
 app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) => {

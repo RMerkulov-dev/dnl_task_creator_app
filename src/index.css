@@ -1460,6 +1460,50 @@ body {
   font-size: 11px;
 }
 
+/* ── Card actions row (Copy + Extract tasks) ── */
+.voice-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Extract-tasks button ── */
+.voice-tasks-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+
+.voice-tasks-btn:hover { filter: brightness(1.08); }
+.voice-tasks-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ── Extracted tasks panel ── */
+.voice-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: rise 0.3s cubic-bezier(0.16,1,0.3,1);
+}
+
+.voice-tasks-analysis {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+  margin: 0;
+}
+
 /* ── History ── */
 .voice-history {
   display: flex;

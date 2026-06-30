@@ -1,4 +1,12 @@
 import { useState, useRef, useEffect } from 'react';
+import TaskCreateModal from '../../components/TaskCreateModal.jsx';
+import ToastContainer from '../../components/Toast.jsx';
+import {
+  parseSkillOutput,
+  buildTaskDescription,
+  priorityClass,
+  taskKey,
+} from '../fathom_agent/TasksFollowUp.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -43,6 +51,15 @@ function CheckIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function TasksIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M9 11l3 3L22 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
@@ -146,7 +163,7 @@ function getBestMimeType() {
   return candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
 }
 
-export default function VoiceApp() {
+export default function VoiceApp({ user, allowedProjects }) {
   const [recording,    setRecording]    = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [transcript,   setTranscript]   = useState('');
@@ -155,6 +172,14 @@ export default function VoiceApp() {
   const [lang,         setLang]         = useState('');
   const [context,      setContext]      = useState('');
   const [history,      setHistory]      = useState([]);
+
+  // Task extraction (dictated text → structured tasks → Create Task)
+  const [extracting,  setExtracting]  = useState(false);
+  const [taskError,   setTaskError]   = useState('');
+  const [parsedTasks, setParsedTasks] = useState(null);   // parseSkillOutput() result or null
+  const [taskModal,   setTaskModal]   = useState(null);   // { task } being created
+  const [created,     setCreated]     = useState({});     // { [taskKey]: { jiraKey, jiraUrl, epicUrl } }
+  const [toasts,      setToasts]      = useState([]);
 
   const mrRef       = useRef(null);
   const chunksRef   = useRef([]);
@@ -241,6 +266,10 @@ export default function VoiceApp() {
         const entry = { id: Date.now(), text, time: formatTime() };
         setTranscript(text);
         setHistory(h => [entry, ...h.slice(0, 19)]);
+        // Fresh transcript → drop any tasks extracted from the previous one.
+        setParsedTasks(null);
+        setTaskError('');
+        setCreated({});
       } else {
         setError('Не удалось распознать речь. Попробуйте ещё раз.');
       }
@@ -248,6 +277,39 @@ export default function VoiceApp() {
       setError(e.message);
     } finally {
       setTranscribing(false);
+    }
+  }
+
+  // ── Extract tasks from a dictated transcript ──────────────────────────────
+  async function extractTasks(text) {
+    const body = (text || '').trim();
+    if (!body || extracting) return;
+    setExtracting(true);
+    setTaskError('');
+    setParsedTasks(null);
+    setCreated({});
+    try {
+      const res = await fetch('/api/extract-tasks', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ text: body, userEmail: user }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      const parsed = parseSkillOutput(data.reply || '');
+      if (!parsed.hasStructure) {
+        setTaskError(
+          /no actionable tasks/i.test(data.reply || '')
+            ? 'В этом тексте не нашлось задач для создания.'
+            : 'Не удалось выделить задачи из текста.',
+        );
+        return;
+      }
+      setParsedTasks(parsed);
+    } catch (e) {
+      setTaskError(e.message || 'Ошибка извлечения задач.');
+    } finally {
+      setExtracting(false);
     }
   }
 
@@ -332,14 +394,75 @@ export default function VoiceApp() {
             <div className="voice-card">
               <div className="voice-card-header">
                 <span className="voice-card-label">Результат</span>
-                <button
-                  className={`voice-copy-btn${copied === latestId ? ' copied' : ''}`}
-                  onClick={() => copyText(latestId, transcript)}
-                >
-                  {copied === latestId ? <><CheckIcon /> Скопировано</> : <><CopyIcon /> Копировать</>}
-                </button>
+                <div className="voice-card-actions">
+                  <button
+                    className="voice-tasks-btn"
+                    onClick={() => extractTasks(transcript)}
+                    disabled={extracting}
+                    title="Выделить задачи из текста и создать таски"
+                  >
+                    {extracting
+                      ? <><span className="spinner" style={{ width: 13, height: 13 }} /> Анализ…</>
+                      : <><TasksIcon /> Извлечь таски</>}
+                  </button>
+                  <button
+                    className={`voice-copy-btn${copied === latestId ? ' copied' : ''}`}
+                    onClick={() => copyText(latestId, transcript)}
+                  >
+                    {copied === latestId ? <><CheckIcon /> Скопировано</> : <><CopyIcon /> Копировать</>}
+                  </button>
+                </div>
               </div>
               <p className="voice-card-text">{transcript}</p>
+            </div>
+          )}
+
+          {/* Extracted tasks */}
+          {taskError && !extracting && (
+            <p className="error-msg" style={{ marginTop: 12, justifyContent: 'center' }}>⚠ {taskError}</p>
+          )}
+
+          {parsedTasks && !extracting && (
+            <div className="voice-tasks">
+              {parsedTasks.analysis && <p className="voice-tasks-analysis">{parsedTasks.analysis}</p>}
+              <div className="tf-results">
+                {parsedTasks.tasks.map((task, i) => {
+                  const key  = taskKey(task);
+                  const done = created[key];
+                  return (
+                    <div className="tf-task" key={key + i}>
+                      <div className="tf-task-top">
+                        <span className="tf-task-n">Task #{task.n}</span>
+                        {task.priority && <span className={priorityClass(task.priority)}>{task.priority}</span>}
+                      </div>
+                      {task.title && <p className="tf-task-title">{task.title}</p>}
+                      {task.description && <p className="tf-task-desc">{task.description}</p>}
+                      {task.who && (
+                        <div className="tf-task-meta">
+                          <span><strong>Who:</strong> {task.who}</span>
+                        </div>
+                      )}
+                      <div className="tf-task-actions">
+                        {done ? (
+                          <span className="tf-task-created">
+                            Created ✓
+                            {done.jiraKey && done.jiraUrl && (
+                              <> · <a className="ba-issue-link" href={done.jiraUrl} target="_blank" rel="noreferrer">{done.jiraKey} ↗</a></>
+                            )}
+                            {done.epicUrl && (
+                              <> · <a className="ba-issue-link" href={done.epicUrl} target="_blank" rel="noreferrer">Azure ↗</a></>
+                            )}
+                          </span>
+                        ) : (
+                          <button className="btn btn-primary tf-create-btn" onClick={() => setTaskModal({ task })}>
+                            Create Task ↗
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -368,6 +491,22 @@ export default function VoiceApp() {
 
         </div>
       </main>
+
+      {taskModal && (
+        <TaskCreateModal
+          user={user}
+          allowedProjects={allowedProjects}
+          initialTitle={taskModal.task.title}
+          initialDescription={buildTaskDescription(taskModal.task, null)}
+          onClose={() => setTaskModal(null)}
+          onCreated={res => {
+            setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }));
+            setToasts(prev => [...prev, { id: Date.now(), ...res }]);
+          }}
+        />
+      )}
+
+      <ToastContainer toasts={toasts} onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))} />
     </div>
   );
 }

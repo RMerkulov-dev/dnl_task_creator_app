@@ -6,7 +6,7 @@ import ToastContainer from '../../components/Toast.jsx';
 // Turns the strict "Tasks Follow-Up" markdown into structured task objects so we
 // can render one block per task with its own "Create Task" button. Tolerant of
 // minor formatting drift; if nothing parses we fall back to showing raw text.
-function parseSkillOutput(md) {
+export function parseSkillOutput(md) {
   const empty = { analysis: '', tasks: [], urgent: '', backlog: '', hasStructure: false };
   if (!md) return empty;
 
@@ -38,7 +38,7 @@ function parseSkillOutput(md) {
   return { analysis, tasks, urgent, backlog, hasStructure: tasks.length > 0 };
 }
 
-function priorityClass(p) {
+export function priorityClass(p) {
   const s = (p || '').toLowerCase();
   if (s.includes('urgent')) return 'tf-pri tf-pri-urgent';
   if (s.includes('high'))   return 'tf-pri tf-pri-high';
@@ -342,7 +342,7 @@ function RunningHint() {
 }
 
 // Stable key for a parsed task (used to mark it "created").
-function taskKey(task) {
+export function taskKey(task) {
   return `${task.n}::${task.title}`;
 }
 
@@ -359,7 +359,7 @@ function resolveFathomLink(task, call) {
 
 // Compose the task description that pre-fills the create form: the task body
 // plus a Who / Priority / Fathom-link footer.
-function buildTaskDescription(task, call) {
+export function buildTaskDescription(task, call) {
   const parts = [];
   if (task.description) parts.push(task.description.trim());
   const meta = [];

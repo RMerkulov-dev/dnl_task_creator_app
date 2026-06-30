@@ -96,7 +96,8 @@
       "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest4.mjs\" .env)",
       "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6a757197-50d9-491d-92d6-3d768fe02a5a/scratchpad/jiratest5.mjs\" .env)",
       "Bash(node -c api/index.js)",
-      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./package.json'\\).dependencies\\)\\)\")"
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('./package.json'\\).dependencies\\)\\)\")",
+      "Bash(git stash *)"
     ]
   }
 }
