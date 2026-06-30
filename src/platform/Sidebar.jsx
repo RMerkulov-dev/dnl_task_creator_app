@@ -79,6 +79,21 @@ function EmailAgentIcon() {
   );
 }
 
+function StatusUpdatesIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Two panes */}
+      <rect x="2.5" y="4" width="8" height="16" rx="2" stroke="currentColor" strokeWidth="1.4"/>
+      <rect x="13.5" y="4" width="8" height="16" rx="2" stroke="currentColor" strokeWidth="1.4"/>
+      {/* Compare arrows between panes */}
+      <path d="M10.5 9.5h3M12.5 8l1.5 1.5L12.5 11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+      {/* Status rows */}
+      <path d="M4.5 8h4M4.5 11.5h4M4.5 15h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+      <path d="M15.5 8h4M15.5 11.5h4M15.5 15h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'task-creator':  TaskCreatorIcon,
   'voice':         VoiceIcon,
@@ -86,6 +101,7 @@ const ICON_MAP = {
   'jira-ba-agent': JiraBaIcon,
   'fathom-agent':  FathomIcon,
   'email-agent':   EmailAgentIcon,
+  'status-updates': StatusUpdatesIcon,
 };
 
 function PlatformLogo() {

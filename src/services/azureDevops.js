@@ -155,6 +155,70 @@ export async function findWorkItemByJiraKey(proxyKey, project, jiraIdField, jira
   return null;
 }
 
+// ─── Status Updates — work items in a board with their Jira link ─────────────
+
+/**
+ * Extract a Jira issue key (e.g. "ABS-123") from a stored field value, which may
+ * be the bare key, a full Jira URL, or free text. Returns null if none found.
+ */
+export function extractJiraKey(value) {
+  if (value == null) return null;
+  const m = String(value).match(/[A-Z][A-Z0-9]+-\d+/);
+  return m ? m[0] : null;
+}
+
+/**
+ * List the Azure DevOps work items under a board (area path) — or the whole
+ * project when `areaPath` is null — together with their stored Jira key.
+ *
+ * Returns: [{ id, title, type, state, assignedTo, parentId, jiraKey, jiraRaw, url }]
+ */
+export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath = null) {
+  const wiqlUrl = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.0`;
+  const areaClause = areaPath
+    ? ` AND [System.AreaPath] UNDER '${areaPath.replace(/'/g, "''")}'`
+    : '';
+  const wiqlRes = await fetch(wiqlUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project${areaClause} ORDER BY [System.Id]`,
+    }),
+  });
+  const wiql = await parse(wiqlRes, 'getBoardWorkItems-wiql');
+  const ids = (wiql.workItems || []).map(w => w.id);
+  if (!ids.length) return [];
+
+  const fields = [
+    'System.Id', 'System.Title', 'System.WorkItemType', 'System.State',
+    'System.AssignedTo', 'System.Parent', jiraIdField,
+  ].join(',');
+
+  // The batch endpoint accepts at most 200 ids per call.
+  const items = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const batchUrl = `${BASE}/${proxyKey}/_apis/wit/workitems?ids=${chunk.join(',')}&fields=${encodeURIComponent(fields)}&api-version=7.0`;
+    const batch = await parse(await fetch(batchUrl), 'getBoardWorkItems-batch');
+    for (const item of batch.value || []) {
+      const f = item.fields || {};
+      const raw = f[jiraIdField] ?? null;
+      items.push({
+        id:         item.id,
+        title:      f['System.Title'] || `#${item.id}`,
+        type:       f['System.WorkItemType'] || '',
+        state:      f['System.State'] || '',
+        assignedTo: f['System.AssignedTo']?.displayName || null,
+        parentId:   f['System.Parent'] ?? null,
+        jiraRaw:    raw,
+        jiraKey:    extractJiraKey(raw),
+        url:        item._links?.html?.href || item.url,
+      });
+    }
+  }
+  return items;
+}
+
 // ─── Area Paths (Boards) — used by ABS ───────────────────────────────────────
 
 /**

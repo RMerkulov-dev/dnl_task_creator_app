@@ -3459,3 +3459,281 @@ html, body, #root {
   gap: 10px;
   margin-top: 8px;
 }
+
+/* ─── Status Updates app ──────────────────────────────────────────────────── */
+.su-main {
+  display: flex;
+  height: calc(100vh - 60px);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.su-sidebar {
+  width: 300px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 24px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.su-side-title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  margin: 0 0 18px;
+}
+
+.su-hint {
+  font-size: 12px;
+  color: var(--text-3);
+  line-height: 1.6;
+  margin: 12px 0 0;
+}
+
+.su-load-btn {
+  margin-top: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.su-stats {
+  margin-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+
+.su-stat {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.su-stat-num {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--text-1);
+  margin-right: 6px;
+}
+
+.su-stat-ok    .su-stat-num,
+.su-stat-ok    { color: #34d399; }
+.su-stat-warn  .su-stat-num,
+.su-stat-warn  { color: #fbbf24; }
+.su-stat-muted .su-stat-num,
+.su-stat-muted { color: var(--text-3); }
+
+.su-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 28px;
+}
+
+.su-error {
+  color: #f87171;
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+
+.su-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 40px;
+}
+
+.su-empty-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+
+.su-empty-sub {
+  font-size: 14px;
+  color: var(--text-3);
+  line-height: 1.7;
+  max-width: 440px;
+}
+
+/* Comparison table */
+.su-table {
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  overflow: hidden;
+}
+
+.su-table-head {
+  display: flex;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.su-table-head .su-cell {
+  flex: 1;
+  padding: 10px 16px;
+}
+
+.su-table-head .su-cell:first-child {
+  border-right: 1px solid var(--border);
+}
+
+.su-row {
+  display: flex;
+  border-top: 1px solid var(--border);
+}
+
+.su-tree-node:first-child > .su-row { border-top: none; }
+.su-row:hover { background: var(--bg-card-hover); }
+
+.su-cell {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 16px;
+  min-width: 0;
+}
+
+.su-azure { border-right: 1px solid var(--border); align-items: center; }
+
+/* Jira column: request line + flat, column-aligned descendants */
+.su-jira { flex-direction: column; align-items: stretch; gap: 5px; }
+
+.su-jira-block { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+.su-jira-subtree { display: flex; flex-direction: column; gap: 5px; }
+
+/* Fixed-column grid so type · key · status · assignee line up across every row */
+.su-jira-line {
+  display: grid;
+  grid-template-columns: 84px 104px minmax(0, 1fr) 104px 150px;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.su-jira-request .su-jira-key { font-weight: 700; }
+
+.su-child-title {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Grid cells: hug content on the left columns, keep chips their natural size */
+.su-jira-line > .su-type,
+.su-jira-line > .su-jira-key,
+.su-jira-line > .su-status { justify-self: start; }
+
+.su-jira-line > .su-type {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+
+.su-jira-line > .su-assignee { min-width: 0; }
+
+.su-type {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(124, 58, 237, 0.15);
+  color: #c4b5fd;
+  flex-shrink: 0;
+}
+
+.su-type-epic { background: rgba(245, 158, 11, 0.16); color: #fcd34d; }
+.su-type-task { background: rgba(56, 189, 248, 0.14); color: #7dd3fc; }
+.su-type-issue { background: rgba(124, 58, 237, 0.15); color: #c4b5fd; }
+
+.su-az-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.su-title {
+  font-size: 13px;
+  color: var(--text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1;
+}
+
+.su-az-state {
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.su-jira-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-1);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+.su-jira-key:hover { text-decoration: underline; }
+.su-jira-missing { color: #fbbf24; }
+
+.su-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.su-status-todo     { background: rgba(138, 138, 143, 0.18); color: var(--text-2); }
+.su-status-progress { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; }
+.su-status-done     { background: rgba(52, 211, 153, 0.16); color: #34d399; }
+.su-status-none     { background: transparent; color: var(--text-3); font-style: italic; }
+
+.su-assignee {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 720px) {
+  .su-main { flex-direction: column; height: auto; }
+  .su-sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--border); }
+}

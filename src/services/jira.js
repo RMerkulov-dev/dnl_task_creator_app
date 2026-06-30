@@ -393,6 +393,43 @@ export function getJiraUrl(issueKey) {
   return `https://dynamicalabs.atlassian.net/browse/${issueKey}`;
 }
 
+/**
+ * Batch-fetch the current state of many Jira issues by key.
+ * Returns a Map<key, { key, summary, status, statusCategory, assignee, type, priority }>.
+ * Keys that don't exist (or aren't visible) are simply absent from the map.
+ */
+export async function getIssuesStatusByKeys(cloudId, keys) {
+  const unique = [...new Set((keys || []).filter(Boolean))];
+  const out = new Map();
+  if (!unique.length) return out;
+
+  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority'];
+  // JQL `key in (...)` — chunk to keep the query string well under Jira's limit.
+  for (let i = 0; i < unique.length; i += 50) {
+    const chunk = unique.slice(i, i + 50);
+    const jql = `key in (${chunk.join(',')})`;
+    const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jql, maxResults: 100, fields }),
+    });
+    const data = await parseJira(res, 'getIssuesStatusByKeys');
+    for (const issue of data.issues ?? []) {
+      const f = issue.fields ?? {};
+      out.set(issue.key, {
+        key:            issue.key,
+        summary:        f.summary ?? '',
+        status:         f.status?.name ?? '',
+        statusCategory: f.status?.statusCategory?.key ?? '',  // 'new' | 'indeterminate' | 'done'
+        assignee:       f.assignee?.displayName ?? null,
+        type:           f.issuetype?.name ?? '',
+        priority:       f.priority?.name ?? '',
+      });
+    }
+  }
+  return out;
+}
+
 // ─── ADF → HTML converter ─────────────────────────────────────────────────────
 // Converts Atlassian Document Format back to HTML for display in TipTap.
 
@@ -653,4 +690,63 @@ export async function getChildIssues(cloudId, issueKey) {
   await runSearch(`parent = "${issueKey}" ORDER BY created ASC`);
   await runSearch(`"Epic Link" = "${issueKey}" ORDER BY created ASC`);
   return results;
+}
+
+/**
+ * Children of a Jira request (subtasks + Epic children), normalised with their
+ * current status — same shape as getIssuesStatusByKeys() values.
+ * Returns [] on any failure so a single bad parent never breaks the batch.
+ */
+export async function getChildIssuesStatus(cloudId, parentKey) {
+  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority'];
+  const seen = new Map();
+
+  async function runSearch(jql) {
+    try {
+      const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jql, maxResults: 100, fields }),
+      });
+      const data = await parseJira(res, 'getChildIssuesStatus');
+      for (const issue of data.issues ?? []) {
+        if (seen.has(issue.key)) continue;
+        const f = issue.fields ?? {};
+        seen.set(issue.key, {
+          key:            issue.key,
+          summary:        f.summary ?? '',
+          status:         f.status?.name ?? '',
+          statusCategory: f.status?.statusCategory?.key ?? '',
+          assignee:       f.assignee?.displayName ?? null,
+          type:           f.issuetype?.name ?? '',
+          priority:       f.priority?.name ?? '',
+        });
+      }
+    } catch { /* ignore failing JQL variant */ }
+  }
+
+  await runSearch(`parent = "${parentKey}" ORDER BY created ASC`);
+  await runSearch(`"Epic Link" = "${parentKey}" ORDER BY created ASC`);
+  return Array.from(seen.values());
+}
+
+/**
+ * Full descendant tree of a Jira request: each node is an issue (same shape as
+ * getChildIssuesStatus) plus a `children` array of the same. Recurses so epics
+ * show their tasks, tasks show their subtasks, etc.
+ * `_visited` guards against link cycles; `maxDepth` caps recursion.
+ */
+export async function getChildIssuesTree(cloudId, parentKey, maxDepth = 5, _visited = null) {
+  const visited = _visited ?? new Set([parentKey]);
+  const direct = await getChildIssuesStatus(cloudId, parentKey);
+  const out = [];
+  for (const child of direct) {
+    if (visited.has(child.key)) continue;
+    visited.add(child.key);
+    const grandchildren = maxDepth > 1
+      ? await getChildIssuesTree(cloudId, child.key, maxDepth - 1, visited)
+      : [];
+    out.push({ ...child, children: grandchildren });
+  }
+  return out;
 }
