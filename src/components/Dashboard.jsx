@@ -259,14 +259,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     setTitle(prev => (prev === '' || ALL_PREFIXES.has(prev.trim()) ? prefix : prev));
   }, [proj.id, selectedBoard, selectedJiraProj, mode, boards]);
 
-  // ── Auto-close modal and show toast on sync success ────────────────────────
-  useEffect(() => {
-    if (!result) return;
-    setToasts(prev => [...prev, { id: Date.now(), ...result }]);
-    setShowModal(false);
-    setSteps([]);
-    setResult(null);
-  }, [result]);
+  // result is passed directly to SyncModal — modal stays open until user closes it.
 
   function dismissToast(id) {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -278,7 +271,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   }, []);
 
   function resetForm() {
-    setTitle('');
+    const boardName = boards.find(b => b.path === selectedBoard)?.name ?? '';
+    const prefix = getDefaultTitlePrefix(proj.id, boardName, selectedJiraProj);
+    setTitle(prefix || '');
     setDescription('');
     setAttachments([]);
     setEpicId('');
@@ -754,6 +749,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
           mode={createFromJira ? 'createFromJira' : mode}
           project={proj}
           steps={steps}
+          result={result}
           onClose={handleCloseModal}
         />
       )}

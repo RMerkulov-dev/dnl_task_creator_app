@@ -35,36 +35,99 @@ function StepIcon({ status }) {
   return <span className="step-icon idle">·</span>;
 }
 
+function ExternalLinkIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" style={{ flexShrink: 0 }}>
+      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+      <path d="M15 3h6v6M10 14L21 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+      <path d="M18 6L6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+// ─── Success panel shown when result is available ─────────────────────────────
+function SuccessPanel({ result, onClose }) {
+  const { epicId, epicUrl, jiraKey, jiraUrl } = result ?? {};
+  return (
+    <div className="sync-success">
+      <div className="sync-success-icon">✓</div>
+      <p className="sync-success-title">Done!</p>
+
+      <div className="sync-success-links">
+        {epicUrl && (
+          <a className="sync-link" href={epicUrl} target="_blank" rel="noreferrer">
+            <ExternalLinkIcon />
+            Azure #{epicId}
+          </a>
+        )}
+        {jiraKey && jiraUrl && (
+          <a className="sync-link" href={jiraUrl} target="_blank" rel="noreferrer">
+            <ExternalLinkIcon />
+            Jira {jiraKey}
+          </a>
+        )}
+      </div>
+
+      <button className="btn btn-primary" style={{ marginTop: 20, width: '100%' }} onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function SyncModal({ mode, project, steps, onClose }) {
+export default function SyncModal({ mode, project, steps, result, onClose }) {
   const defs   = buildStepDefs(mode, project, steps.length);
   const hasErr = steps.some(s => s?.status === 'error');
+  const isDone = !!result && !hasErr;
 
   return (
     <div className="overlay">
       <div className="modal">
-        <p className="modal-title">
-          {hasErr ? '⚠ Sync Error' : 'Syncing task…'}
-        </p>
 
-        <ul className="step-list">
-          {defs.map((def, i) => {
-            const s = steps[i] ?? {};
-            return (
-              <li className="step-item" key={def.label}>
-                <StepIcon status={s.status} />
-                <div className="step-body">
-                  <p className="step-name">{def.label}</p>
-                  {s.error && <p className="step-error">{s.error}</p>}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-
-        {hasErr && (
-          <button className="btn btn-primary" onClick={onClose}>Close</button>
+        {/* X close button — only when done or errored, not while syncing */}
+        {(isDone || hasErr) && (
+          <button className="modal-close-btn" onClick={onClose} title="Close">
+            <CloseIcon />
+          </button>
         )}
+
+        {isDone ? (
+          <SuccessPanel result={result} onClose={onClose} />
+        ) : (
+          <>
+            <p className="modal-title">
+              {hasErr ? '⚠ Sync Error' : 'Syncing task…'}
+            </p>
+
+            <ul className="step-list">
+              {defs.map((def, i) => {
+                const s = steps[i] ?? {};
+                return (
+                  <li className="step-item" key={def.label}>
+                    <StepIcon status={s.status} />
+                    <div className="step-body">
+                      <p className="step-name">{def.label}</p>
+                      {s.error && <p className="step-error">{s.error}</p>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {hasErr && (
+              <button className="btn btn-primary" onClick={onClose}>Close</button>
+            )}
+          </>
+        )}
+
       </div>
     </div>
   );
