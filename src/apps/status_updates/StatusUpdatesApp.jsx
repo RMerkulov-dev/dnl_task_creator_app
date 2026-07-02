@@ -234,13 +234,13 @@ function CopyMenu({ title, count, options }) {
         title={title}
       >
         <CopyColIcon />
-        {copied ? 'Скопировано' : 'Копировать'}
+        {copied ? 'Copied' : 'Copy'}
       </button>
       {open && (
         <>
           <div className="su-status-backdrop" onClick={() => setOpen(false)} />
           <div className="su-copycol-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
-            <div className="su-copycol-head">{count} строк — что скопировать:</div>
+            <div className="su-copycol-head">{count} rows — copy what:</div>
             {options.map(opt => (
               <button key={opt.key} type="button" className="su-copycol-item" onClick={() => pick(opt)}>
                 {opt.label}
@@ -850,7 +850,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         {/* ── Collapsed rail: just an expand handle ── */}
         {sidebarCollapsed && (
           <aside className="su-sidebar su-sidebar-collapsed">
-            <button className="su-collapse-btn" onClick={toggleSidebar} title="Показать панель" aria-label="Показать панель">
+            <button className="su-collapse-btn" onClick={toggleSidebar} title="Show panel" aria-label="Show panel">
               <ChevronIcon dir="right" />
             </button>
             <span className="su-collapsed-label">Source</span>
@@ -861,7 +861,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         <aside className="su-sidebar" style={sidebarCollapsed ? { display: 'none' } : undefined}>
           <div className="su-side-head">
             <h2 className="su-side-title">Source</h2>
-            <button className="su-collapse-btn" onClick={toggleSidebar} title="Свернуть панель" aria-label="Свернуть панель">
+            <button className="su-collapse-btn" onClick={toggleSidebar} title="Collapse panel" aria-label="Collapse panel">
               <ChevronIcon dir="left" />
             </button>
           </div>
@@ -1004,7 +1004,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                 <input
                   ref={aiInputRef}
                   className="input su-ai-input"
-                  placeholder="Спросить ИИ по данным: напр. «все реквесты где все эпики и таски готовы»"
+                  placeholder="Ask AI about the data: e.g. “all requests where every epic and task is done”"
                   value={aiQuery}
                   onChange={e => setAiQuery(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter' && aiQuery.trim() && !aiLoading) { e.preventDefault(); askAi(); } }}
@@ -1015,7 +1015,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                   onClick={() => (aiQuery.trim() ? askAi() : aiInputRef.current?.focus())}
                   disabled={aiLoading}
                 >
-                  {aiLoading ? <span className="spinner" style={{ width: 13, height: 13 }} /> : 'Спросить ИИ'}
+                  {aiLoading ? <span className="spinner" style={{ width: 13, height: 13 }} /> : 'Ask AI'}
                 </button>
               </div>
 
@@ -1024,16 +1024,16 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
               {aiAnswer && !aiLoading && (
                 <div className="su-ai-answer">
                   <div className="su-ai-answer-head">
-                    <span className="su-ai-answer-title">Ответ ИИ</span>
+                    <span className="su-ai-answer-title">AI answer</span>
                     <div className="su-ai-answer-tools">
                       <button
                         className="su-ai-tool"
                         onClick={() => { navigator.clipboard?.writeText(aiAnswer); setAiCopied(true); setTimeout(() => setAiCopied(false), 1500); }}
-                        title="Скопировать ответ"
+                        title="Copy answer"
                       >
-                        {aiCopied ? '✓ Скопировано' : 'Копировать'}
+                        {aiCopied ? '✓ Copied' : 'Copy'}
                       </button>
-                      <button className="su-ai-tool" onClick={() => { setAiAnswer(''); setAiMatchIds(null); }} title="Закрыть ответ">
+                      <button className="su-ai-tool" onClick={() => { setAiAnswer(''); setAiMatchIds(null); }} title="Dismiss answer">
                         ✕
                       </button>
                     </div>
@@ -1044,10 +1044,10 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                   {aiMatchIds && (
                     <div className="su-ai-match">
                       <span className="su-ai-match-count">
-                        Таблица отфильтрована: {aiMatchIds.size} совпаден{aiMatchIds.size === 1 ? 'ие' : (aiMatchIds.size < 5 ? 'ия' : 'ий')}
+                        Table filtered: {aiMatchIds.size} match{aiMatchIds.size === 1 ? '' : 'es'}
                       </span>
-                      <button className="su-ai-tool" onClick={clearAiMatch} title="Показать все элементы">
-                        Показать все
+                      <button className="su-ai-tool" onClick={clearAiMatch} title="Show all items">
+                        Show all
                       </button>
                     </div>
                   )}
@@ -1072,25 +1072,25 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                     <span className="su-cell su-head-cell">
                       <span>Azure DevOps</span>
                       <CopyMenu
-                        title="Скопировать данные Azure по видимым строкам"
+                        title="Copy Azure data for the visible rows"
                         count={filteredItems.length}
                         options={[
-                          { key: 'id',    label: 'ID (номера)',      getText: () => collectAzureColumn(filteredItems, 'id') },
-                          { key: 'title', label: 'Названия',          getText: () => collectAzureColumn(filteredItems, 'title') },
-                          { key: 'both',  label: 'ID — Название',     getText: () => collectAzureColumn(filteredItems, 'both') },
+                          { key: 'id',    label: 'IDs (numbers)',   getText: () => collectAzureColumn(filteredItems, 'id') },
+                          { key: 'title', label: 'Titles',          getText: () => collectAzureColumn(filteredItems, 'title') },
+                          { key: 'both',  label: 'ID — Title',      getText: () => collectAzureColumn(filteredItems, 'both') },
                         ]}
                       />
                     </span>
                     <span className="su-cell su-head-cell">
                       <span>Jira</span>
                       <CopyMenu
-                        title="Скопировать данные Jira по видимым строкам"
+                        title="Copy Jira data for the visible rows"
                         count={filteredItems.length}
                         options={[
-                          { key: 'key',     label: 'Ключи реквестов (ABS-…)',   getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'key') },
-                          { key: 'summary', label: 'Названия',                   getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'summary') },
-                          { key: 'both',    label: 'Ключ — Название',            getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'both') },
-                          { key: 'allkeys', label: 'Все ключи (с эпиками/тасками)', getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'allkeys') },
+                          { key: 'key',     label: 'Request keys (ABS-…)',       getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'key') },
+                          { key: 'summary', label: 'Summaries',                  getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'summary') },
+                          { key: 'both',    label: 'Key — Summary',              getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'both') },
+                          { key: 'allkeys', label: 'All keys (with epics/tasks)', getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'allkeys') },
                         ]}
                       />
                     </span>
