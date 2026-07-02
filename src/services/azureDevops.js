@@ -58,6 +58,31 @@ export async function getWorkItem(proxyKey, project, id) {
   return parse(res, 'getWorkItem');
 }
 
+/**
+ * Valid states for a work-item type in a project (order + colour + category).
+ * Category is one of Proposed | InProgress | Resolved | Completed | Removed —
+ * used to colour the state chip consistently with Jira's status categories.
+ * Returns [{ name, category, color }].
+ */
+export async function getWorkItemStates(proxyKey, project, type) {
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workitemtypes/${encodeURIComponent(type)}/states?api-version=7.0`;
+  const res = await fetch(url);
+  const data = await parse(res, 'getWorkItemStates');
+  return (data.value || []).map(s => ({
+    name:     s.name,
+    category: s.stateCategory || s.category || '',
+    color:    s.color || '',
+  }));
+}
+
+/**
+ * Change a work item's System.State. Azure validates the transition server-side
+ * and returns an error for disallowed moves, which the caller surfaces.
+ */
+export async function updateWorkItemState(proxyKey, project, id, state) {
+  return updateWorkItem(proxyKey, project, id, { 'System.State': state });
+}
+
 // ─── Iterations (Sprints) — used by NSMG ─────────────────────────────────────
 
 /**

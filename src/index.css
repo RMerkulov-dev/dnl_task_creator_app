@@ -3865,6 +3865,8 @@ button.su-status {
 .su-status-menu-item:hover:not(:disabled):not(.muted) { background: var(--bg-card-hover); }
 .su-status-menu-item:disabled { opacity: 0.55; cursor: default; }
 .su-status-menu-item.muted { color: var(--text-3); cursor: default; }
+.su-status-menu-item.active { background: var(--bg-card-hover); }
+.su-status-menu-item.active .su-status-menu-name::after { content: ' ✓'; color: var(--accent, #06b6d4); }
 .su-status-menu-err { color: #f87171; white-space: normal; }
 .su-status-menu-name { font-weight: 600; }
 .su-status-menu-to { margin-left: auto; color: var(--text-3); font-size: 11px; }
@@ -3904,6 +3906,56 @@ button.su-status {
   color: var(--text-3);
   font-family: var(--font-mono);
   white-space: nowrap;
+}
+
+/* ── AI validation panel ── */
+.su-ai { margin-bottom: 18px; }
+.su-ai-bar { display: flex; align-items: center; gap: 10px; }
+.su-ai-icon { font-size: 15px; flex-shrink: 0; }
+.su-ai-input { flex: 1; }
+.su-ai-btn { flex-shrink: 0; white-space: nowrap; }
+
+.su-ai-answer {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card, rgba(255,255,255,0.02));
+}
+.su-ai-answer-body { font-size: 14px; line-height: 1.6; color: var(--text-1); }
+.su-ai-answer-body p { margin: 0 0 8px; }
+.su-ai-answer-body p:last-child { margin-bottom: 0; }
+.su-ai-list { margin: 4px 0 8px; padding-left: 20px; }
+.su-ai-list li { margin: 2px 0; }
+.su-ai-answer-body code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: rgba(127,127,127,0.15);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.su-ai-match {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.su-ai-match-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent, #06b6d4);
+}
+
+/* Colour dot in the Azure state menu */
+.su-state-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
 }
 
 /* Clickable summary counts double as filter pills */

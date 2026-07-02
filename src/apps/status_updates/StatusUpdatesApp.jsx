@@ -1,6 +1,9 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useContext, createContext } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
-import { getAreaPaths, getIterations, getBoardWorkItems } from '../../services/azureDevops.js';
+import {
+  getAreaPaths, getIterations, getBoardWorkItems,
+  getWorkItemStates, updateWorkItemState,
+} from '../../services/azureDevops.js';
 import {
   getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl,
   getIssueKeysByAzureIds, getTransitions, transitionIssue,
@@ -18,6 +21,15 @@ const STATUS_TONE = {
 };
 
 const toneFor = (cat) => STATUS_TONE[cat] || 'todo';
+
+// Azure DevOps state categories → the same chip colour buckets as Jira.
+const AZURE_STATE_TONE = {
+  Proposed:   'todo',
+  InProgress: 'progress',
+  Resolved:   'progress',
+  Completed:  'done',
+  Removed:    'done',
+};
 
 // Run an async mapper over a list with bounded concurrency.
 async function mapPool(list, limit, fn) {
@@ -64,9 +76,41 @@ function updateTreeStatus(nodes, key, status, statusCategory) {
   return changed ? out : nodes;
 }
 
+// Flatten a Jira descendant tree into a compact list for the AI snapshot.
+function flattenJiraTree(nodes, out = []) {
+  for (const n of nodes || []) {
+    out.push({ key: n.key, type: n.type, status: n.status, category: n.statusCategory, assignee: n.assignee || null });
+    if (n.children?.length) flattenJiraTree(n.children, out);
+  }
+  return out;
+}
+
+// Build the compact JSON the AI reasons over: one entry per Azure work item with
+// its linked Jira request and that request's flattened descendants.
+function buildStatsSnapshot(items, jira, jiraChildren) {
+  return items.map(it => {
+    const j = it.jiraKey ? jira.get(it.jiraKey) : null;
+    return {
+      azureId:      it.id,
+      azureType:    it.type,
+      azureTitle:   it.title,
+      azureState:   it.state,
+      jiraKey:      it.jiraKey || null,
+      jiraFound:    !!j,
+      jiraStatus:   j?.status ?? null,
+      jiraCategory: j?.statusCategory ?? null,
+      children:     j ? flattenJiraTree(jiraChildren.get(j.key) || []) : [],
+    };
+  });
+}
+
 // Provides the bits an inline StatusChip needs without prop-drilling through the
 // recursive tree: the Jira cloud id and the "status changed" callback.
 const StatusEditCtx = createContext(null);
+
+// Same idea for the Azure side: proxy/project, a cache of valid states per work-
+// item type, a lazy loader, and the optimistic "state changed" callback.
+const AzureEditCtx = createContext(null);
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 function RefreshIcon() {
@@ -91,6 +135,35 @@ function SearchIcon() {
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8"/>
       <path d="M21 21l-4.3-4.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
     </svg>
+  );
+}
+
+// Minimal, safe markdown for the AI answer: escape HTML, then **bold** and
+// `code`. Bullet lines (- / •) render as a list. No raw HTML from the model.
+function aiInline(text) {
+  return String(text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+}
+
+function AiAnswer({ text }) {
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const blocks = [];
+  let bullets = null;
+  for (const line of lines) {
+    const m = line.match(/^[-*•]\s+(.*)$/);
+    if (m) { (bullets ||= []).push(m[1]); continue; }
+    if (bullets) { blocks.push({ type: 'ul', items: bullets }); bullets = null; }
+    blocks.push({ type: 'p', text: line });
+  }
+  if (bullets) blocks.push({ type: 'ul', items: bullets });
+  return (
+    <div className="su-ai-answer-body">
+      {blocks.map((b, i) => b.type === 'ul'
+        ? <ul key={i} className="su-ai-list">{b.items.map((it, j) => <li key={j} dangerouslySetInnerHTML={{ __html: aiInline(it) }} />)}</ul>
+        : <p key={i} dangerouslySetInnerHTML={{ __html: aiInline(b.text) }} />)}
+    </div>
   );
 }
 
@@ -229,6 +302,113 @@ function JiraTree({ nodes }) {
   ));
 }
 
+// ─── Inline-editable Azure DevOps state chip ──────────────────────────────────
+// Mirrors the Jira StatusChip: click → lazy-load the valid states for this work-
+// item type → PATCH System.State → optimistic UI update. Azure validates the
+// move server-side, so an illegal transition surfaces as an error in the menu.
+function AzureStateChip({ item }) {
+  const ctx = useContext(AzureEditCtx);
+  const btnRef = useRef(null);
+  const [open,    setOpen]    = useState(false);
+  const [pos,     setPos]     = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const [states,  setStates]  = useState(null);
+  const [err,     setErr]     = useState('');
+
+  const editable = !!ctx?.editable;
+  const cached   = ctx?.statesByType?.[item.type];
+  const cat      = (cached || []).find(s => s.name === item.state)?.category;
+  const tone     = AZURE_STATE_TONE[cat] || 'todo';
+
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  async function toggle(e) {
+    e.stopPropagation();
+    if (!editable) return;
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+    setOpen(true);
+    setErr('');
+    if (states == null) {
+      setLoading(true);
+      try {
+        setStates(await ctx.loadStates(item.type));
+      } catch (e2) {
+        setErr(e2.message || 'Failed to load states');
+      } finally {
+        setLoading(false);
+      }
+    }
+  }
+
+  async function apply(stateName) {
+    if (stateName === item.state) { setOpen(false); return; }
+    setSaving(true);
+    setErr('');
+    try {
+      await updateWorkItemState(ctx.proxyKey, ctx.project, item.id, stateName);
+      ctx.onStateChange(item.id, stateName);
+      setOpen(false);
+    } catch (e2) {
+      setErr(e2.message || 'Update failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="su-status-wrap">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`su-status su-status-${tone}${editable ? ' su-status-editable' : ''}`}
+        onClick={toggle}
+        disabled={saving}
+        title={editable ? 'Change Azure state' : undefined}
+      >
+        {saving ? <span className="spinner" style={{ width: 10, height: 10 }} /> : (item.state || '—')}
+        {editable && <span className="su-status-caret">▾</span>}
+      </button>
+
+      {open && (
+        <>
+          <div className="su-status-backdrop" onClick={() => setOpen(false)} />
+          <div className="su-status-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+            {loading && <div className="su-status-menu-item muted"><span className="spinner" style={{ width: 12, height: 12 }} /> Loading…</div>}
+            {err && <div className="su-status-menu-item su-status-menu-err">⚠ {err}</div>}
+            {!loading && !err && states?.length === 0 && (
+              <div className="su-status-menu-item muted">No states available</div>
+            )}
+            {!loading && !err && states?.map(s => (
+              <button
+                key={s.name}
+                type="button"
+                className={`su-status-menu-item${s.name === item.state ? ' active' : ''}`}
+                disabled={saving}
+                onClick={() => apply(s.name)}
+              >
+                {s.color && <span className="su-state-dot" style={{ background: `#${s.color}` }} />}
+                <span className="su-status-menu-name">{s.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 // ─── A single row: Azure work item ⟷ its Jira request (+ children) ─────────────
 function WorkItemRow({ item, jira, jiraChildren, depth }) {
   const j = item.jiraKey ? jira.get(item.jiraKey) : null;
@@ -241,7 +421,7 @@ function WorkItemRow({ item, jira, jiraChildren, depth }) {
         <span className={`su-type su-type-${item.type.toLowerCase().replace(/\s+/g, '-')}`}>{item.type}</span>
         <span className="su-az-id">#{item.id}</span>
         <span className="su-title" title={item.title}>{item.title}</span>
-        <span className="su-az-state">{item.state}</span>
+        <AzureStateChip item={item} />
       </div>
 
       {/* Right — linked Jira request and all its children */}
@@ -305,6 +485,16 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const [query,        setQuery]        = useState('');
   const [activeFilter, setActiveFilter] = useState('all');   // all | linked | missing | unlinked
 
+  // Azure state editing: cache valid states per work-item type (per project)
+  const [azStatesByType, setAzStatesByType] = useState({});
+
+  // AI validation over the loaded snapshot
+  const [aiQuery,     setAiQuery]     = useState('');
+  const [aiLoading,   setAiLoading]   = useState(false);
+  const [aiAnswer,    setAiAnswer]    = useState('');
+  const [aiError,     setAiError]     = useState('');
+  const [aiMatchIds,  setAiMatchIds]  = useState(null);      // Set<number> | null
+
   const hasBoards  = !!proj?.features?.board;
   const hasSprints = !!proj?.features?.iteration;
 
@@ -321,6 +511,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     setError('');
     setQuery('');
     setActiveFilter('all');
+    setAzStatesByType({});           // states differ per project process
+    setAiAnswer(''); setAiError(''); setAiMatchIds(null); setAiQuery('');
     if (!proj) return;
 
     let cancelled = false;
@@ -354,6 +546,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     if (hasBoards && !selectedBoard) { setError('Select a board first.'); return; }
     setLoading(true);
     setError('');
+    // A fresh dataset invalidates any prior AI answer/matches.
+    setAiAnswer(''); setAiError(''); setAiMatchIds(null);
     try {
       const azItems = await getBoardWorkItems(
         proj.azure.proxyKey,
@@ -427,6 +621,57 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     [proj, handleStatusChanged],
   );
 
+  // ── Azure state editing: lazy-load + cache valid states per work-item type ──
+  const loadAzStates = useCallback(async (type) => {
+    if (azStatesByType[type]) return azStatesByType[type];
+    const states = await getWorkItemStates(proj.azure.proxyKey, proj.azure.project, type);
+    setAzStatesByType(prev => ({ ...prev, [type]: states }));
+    return states;
+  }, [proj, azStatesByType]);
+
+  const handleAzStateChanged = useCallback((id, state) => {
+    setItems(prev => prev.map(i => (i.id === id ? { ...i, state } : i)));
+  }, []);
+
+  const azEditCtx = useMemo(() => ({
+    editable:     !!proj?.azure,
+    proxyKey:     proj?.azure?.proxyKey,
+    project:      proj?.azure?.project,
+    statesByType: azStatesByType,
+    loadStates:   loadAzStates,
+    onStateChange: handleAzStateChanged,
+  }), [proj, azStatesByType, loadAzStates, handleAzStateChanged]);
+
+  // ── AI validation over the currently-loaded snapshot ───────────────────────
+  const askAi = useCallback(async () => {
+    const question = aiQuery.trim();
+    if (!question || aiLoading) return;
+    setAiLoading(true);
+    setAiError('');
+    setAiAnswer('');
+    try {
+      const snapshot = buildStatsSnapshot(items, jira, jiraChildren);
+      const res = await fetch('/api/stats-query', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ question, data: snapshot }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+      setAiAnswer(data.answer || '');
+      // Only switch the table into "AI match" mode when the model returned ids.
+      setAiMatchIds(Array.isArray(data.matchAzureIds) && data.matchAzureIds.length
+        ? new Set(data.matchAzureIds)
+        : null);
+    } catch (e) {
+      setAiError(e.message || 'AI request failed.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [aiQuery, aiLoading, items, jira, jiraChildren]);
+
+  const clearAiMatch = useCallback(() => setAiMatchIds(null), []);
+
   // ── Summary counts (always over the full set, not the filtered view) ───────
   const stats = useMemo(() => {
     let linked = 0, missing = 0, unlinked = 0;
@@ -442,20 +687,24 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter(it => {
-      if (activeFilter === 'linked'   && !(it.jiraKey && jira.has(it.jiraKey)))  return false;
-      if (activeFilter === 'missing'  && !(it.jiraKey && !jira.has(it.jiraKey))) return false;
-      if (activeFilter === 'unlinked' && it.jiraKey)                             return false;
+      // AI match, when active, takes precedence over the status filters.
+      if (aiMatchIds) { if (!aiMatchIds.has(it.id)) return false; }
+      else {
+        if (activeFilter === 'linked'   && !(it.jiraKey && jira.has(it.jiraKey)))  return false;
+        if (activeFilter === 'missing'  && !(it.jiraKey && !jira.has(it.jiraKey))) return false;
+        if (activeFilter === 'unlinked' && it.jiraKey)                             return false;
+      }
       if (!q) return true;
       const j = it.jiraKey ? jira.get(it.jiraKey) : null;
       const hay = [`#${it.id}`, it.title, it.state, it.jiraKey, j?.summary, j?.status]
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [items, jira, query, activeFilter]);
+  }, [items, jira, query, activeFilter, aiMatchIds]);
 
   const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
 
-  const isFiltering = !!query.trim() || activeFilter !== 'all';
+  const isFiltering = !!query.trim() || activeFilter !== 'all' || !!aiMatchIds;
   const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
 
   return (
@@ -604,6 +853,42 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
             </div>
           )}
 
+          {/* ── AI validation over the loaded data ── */}
+          {loaded && !loading && items.length > 0 && (
+            <div className="su-ai">
+              <div className="su-ai-bar">
+                <span className="su-ai-icon">✨</span>
+                <input
+                  className="input su-ai-input"
+                  placeholder="Спросить ИИ по данным: напр. «все реквесты где все эпики и таски готовы»"
+                  value={aiQuery}
+                  onChange={e => setAiQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && aiQuery.trim() && !aiLoading) { e.preventDefault(); askAi(); } }}
+                  disabled={aiLoading}
+                />
+                <button className="btn btn-primary su-ai-btn" onClick={askAi} disabled={aiLoading || !aiQuery.trim()}>
+                  {aiLoading ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Спросить ИИ'}
+                </button>
+              </div>
+
+              {aiError && <p className="su-error" style={{ marginTop: 8 }}>⚠ {aiError}</p>}
+
+              {aiAnswer && !aiLoading && (
+                <div className="su-ai-answer">
+                  <AiAnswer text={aiAnswer} />
+                  {aiMatchIds && (
+                    <div className="su-ai-match">
+                      <span className="su-ai-match-count">
+                        Таблица отфильтрована: {aiMatchIds.size} совпаден{aiMatchIds.size === 1 ? 'ие' : (aiMatchIds.size < 5 ? 'ия' : 'ий')}
+                      </span>
+                      <button className="su-search-clear" onClick={clearAiMatch} title="Сбросить ИИ-фильтр">✕ сбросить</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {loaded && !loading && items.length === 0 && (
             <div className="su-empty"><p className="su-empty-sub">No work items found for this board.</p></div>
           )}
@@ -614,15 +899,17 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
           {loaded && !loading && filteredItems.length > 0 && (
             <StatusEditCtx.Provider value={editCtx}>
-              <div className="su-table">
-                <div className="su-table-head">
-                  <span className="su-cell">Azure DevOps</span>
-                  <span className="su-cell">Jira</span>
+              <AzureEditCtx.Provider value={azEditCtx}>
+                <div className="su-table">
+                  <div className="su-table-head">
+                    <span className="su-cell">Azure DevOps</span>
+                    <span className="su-cell">Jira</span>
+                  </div>
+                  <div className="su-table-body">
+                    <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
+                  </div>
                 </div>
-                <div className="su-table-body">
-                  <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
-                </div>
-              </div>
+              </AzureEditCtx.Provider>
             </StatusEditCtx.Provider>
           )}
         </section>

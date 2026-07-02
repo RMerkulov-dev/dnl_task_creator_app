@@ -1793,6 +1793,66 @@ app.post('/api/translate', express.json({ limit: '50kb' }), async (req, res) => 
   }
 });
 
+// ─── Stats query (Status Updates tab) ─────────────────────────────────────────
+// Body: { question, data }. `data` is a client-built snapshot of the already-
+// fetched Azure work items and their linked Jira issues (+ descendant tree). The
+// model answers questions over that snapshot ("list all requests where every
+// epic and task is done") and returns the Azure ids that match, which the UI
+// uses to filter the table. No live fetching — it reasons over what the user
+// already pulled. Uses the stronger planner model for reliable aggregation.
+app.post('/api/stats-query', express.json({ limit: '2mb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { question, data } = req.body ?? {};
+  if (!question || !String(question).trim()) return res.status(400).json({ error: 'question is required' });
+  if (!Array.isArray(data)) return res.status(400).json({ error: 'data must be an array' });
+
+  const systemPrompt =
+    'You are a data analyst for a Dynamica Labs delivery dashboard. You are given a JSON snapshot (in the user message) of Azure DevOps work items and their linked Jira issues. ' +
+    'Each entry has: azureId (number), azureType, azureTitle, azureState, jiraKey, jiraFound (bool), jiraStatus, jiraCategory, and children[] (the Jira request\'s descendant epics/tasks/subtasks, each with key, type, status, category, assignee). ' +
+    'A "request" is one entry (an Azure work item and its linked Jira issue). Status CATEGORY values are: "new" = to-do, "indeterminate" = in progress, "done" = completed. Use category (not the free-text status name) when the user talks about done / in progress / not started. ' +
+    'Answer the user\'s question using ONLY this snapshot. Never invent items, keys, or counts. If the data does not contain something, say so. ' +
+    'Reply in the SAME language as the question. ' +
+    'OUTPUT: respond with VALID JSON ONLY, no markdown fences, no prose around it:\n' +
+    '{\n' +
+    '  "answer": "<concise answer in markdown; use a short bullet list when listing items, each as **AZURE_ID** — title (JIRA_KEY)>",\n' +
+    '  "matchAzureIds": [<azureId numbers of every entry that satisfies the question>]\n' +
+    '}\n' +
+    'matchAzureIds drives a table filter in the UI: include EXACTLY the azureIds the user asked to see (empty array if none match, or if the question is not about selecting items). Never include an azureId that is not in the snapshot.';
+
+  try {
+    const completion = await callOpenRouter(apiKey, {
+      model:           OPENROUTER_PLANNER,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: `QUESTION: ${String(question).trim()}\n\nSNAPSHOT (${data.length} work items):\n${JSON.stringify(data)}` },
+      ],
+      response_format: { type: 'json_object' },
+      temperature:     0.1,
+      max_tokens:      4000,
+    });
+
+    const raw = extractReply(completion.choices?.[0]?.message);
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    let parsed;
+    try { parsed = JSON.parse(cleaned); }
+    catch { return res.json({ answer: raw || 'No answer produced.', matchAzureIds: [] }); }
+
+    const validIds = new Set(data.map(d => Number(d.azureId)).filter(Number.isFinite));
+    const matchAzureIds = Array.isArray(parsed.matchAzureIds)
+      ? [...new Set(parsed.matchAzureIds.map(Number).filter(n => validIds.has(n)))]
+      : [];
+    res.json({
+      answer:        typeof parsed.answer === 'string' && parsed.answer.trim() ? parsed.answer.trim() : (raw || 'No answer produced.'),
+      matchAzureIds,
+    });
+  } catch (err) {
+    console.error('[stats-query error]', err.message);
+    res.status(500).json({ error: humaniseFetchError(err) });
+  }
+});
+
 // ─── Email Agent ─────────────────────────────────────────────────────────────
 
 app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) => {
