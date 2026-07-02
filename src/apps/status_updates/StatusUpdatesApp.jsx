@@ -138,6 +138,17 @@ function SearchIcon() {
   );
 }
 
+function ChevronIcon({ dir = 'left' }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      style={{ transform: dir === 'right' ? 'rotate(180deg)' : undefined }}>
+      <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+const SIDEBAR_KEY = 'su_sidebar_collapsed';
+
 // Minimal, safe markdown for the AI answer: escape HTML, then **bold** and
 // `code`. Bullet lines (- / •) render as a list. No raw HTML from the model.
 function aiInline(text) {
@@ -466,6 +477,9 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   ), [allowedProjects]);
 
   const [proj,          setProj]          = useState(projects[0]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem(SIDEBAR_KEY) === '1'; } catch { return false; }
+  });
   const [boards,        setBoards]        = useState([]);
   const [selectedBoard, setSelectedBoard] = useState('');
   const [boardsLoading, setBoardsLoading] = useState(false);
@@ -494,6 +508,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const [aiAnswer,    setAiAnswer]    = useState('');
   const [aiError,     setAiError]     = useState('');
   const [aiMatchIds,  setAiMatchIds]  = useState(null);      // Set<number> | null
+  const [aiCopied,    setAiCopied]    = useState(false);
+  const aiInputRef = useRef(null);
 
   const hasBoards  = !!proj?.features?.board;
   const hasSprints = !!proj?.features?.iteration;
@@ -707,6 +723,14 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const isFiltering = !!query.trim() || activeFilter !== 'all' || !!aiMatchIds;
   const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
 
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0'); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
+
   return (
     <div className="app-shell">
       <header className="header">
@@ -719,9 +743,24 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
       </header>
 
       <main className="su-main">
+        {/* ── Collapsed rail: just an expand handle ── */}
+        {sidebarCollapsed && (
+          <aside className="su-sidebar su-sidebar-collapsed">
+            <button className="su-collapse-btn" onClick={toggleSidebar} title="Показать панель" aria-label="Показать панель">
+              <ChevronIcon dir="right" />
+            </button>
+            <span className="su-collapsed-label">Source</span>
+          </aside>
+        )}
+
         {/* ── Left: board selection ── */}
-        <aside className="su-sidebar">
-          <h2 className="su-side-title">Source</h2>
+        <aside className="su-sidebar" style={sidebarCollapsed ? { display: 'none' } : undefined}>
+          <div className="su-side-head">
+            <h2 className="su-side-title">Source</h2>
+            <button className="su-collapse-btn" onClick={toggleSidebar} title="Свернуть панель" aria-label="Свернуть панель">
+              <ChevronIcon dir="left" />
+            </button>
+          </div>
 
           <label className="field-label">Project</label>
           <select
@@ -859,6 +898,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
               <div className="su-ai-bar">
                 <span className="su-ai-icon">✨</span>
                 <input
+                  ref={aiInputRef}
                   className="input su-ai-input"
                   placeholder="Спросить ИИ по данным: напр. «все реквесты где все эпики и таски готовы»"
                   value={aiQuery}
@@ -866,8 +906,12 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                   onKeyDown={e => { if (e.key === 'Enter' && aiQuery.trim() && !aiLoading) { e.preventDefault(); askAi(); } }}
                   disabled={aiLoading}
                 />
-                <button className="btn btn-primary su-ai-btn" onClick={askAi} disabled={aiLoading || !aiQuery.trim()}>
-                  {aiLoading ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Спросить ИИ'}
+                <button
+                  className="btn btn-primary su-ai-btn"
+                  onClick={() => (aiQuery.trim() ? askAi() : aiInputRef.current?.focus())}
+                  disabled={aiLoading}
+                >
+                  {aiLoading ? <span className="spinner" style={{ width: 13, height: 13 }} /> : 'Спросить ИИ'}
                 </button>
               </div>
 
@@ -875,13 +919,32 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
               {aiAnswer && !aiLoading && (
                 <div className="su-ai-answer">
+                  <div className="su-ai-answer-head">
+                    <span className="su-ai-answer-title">Ответ ИИ</span>
+                    <div className="su-ai-answer-tools">
+                      <button
+                        className="su-ai-tool"
+                        onClick={() => { navigator.clipboard?.writeText(aiAnswer); setAiCopied(true); setTimeout(() => setAiCopied(false), 1500); }}
+                        title="Скопировать ответ"
+                      >
+                        {aiCopied ? '✓ Скопировано' : 'Копировать'}
+                      </button>
+                      <button className="su-ai-tool" onClick={() => { setAiAnswer(''); setAiMatchIds(null); }} title="Закрыть ответ">
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
                   <AiAnswer text={aiAnswer} />
+
                   {aiMatchIds && (
                     <div className="su-ai-match">
                       <span className="su-ai-match-count">
                         Таблица отфильтрована: {aiMatchIds.size} совпаден{aiMatchIds.size === 1 ? 'ие' : (aiMatchIds.size < 5 ? 'ия' : 'ий')}
                       </span>
-                      <button className="su-search-clear" onClick={clearAiMatch} title="Сбросить ИИ-фильтр">✕ сбросить</button>
+                      <button className="su-ai-tool" onClick={clearAiMatch} title="Показать все элементы">
+                        Показать все
+                      </button>
                     </div>
                   )}
                 </div>
