@@ -1753,6 +1753,46 @@ app.post('/api/extract-tasks', express.json({ limit: '50kb' }), async (req, res)
   }
 });
 
+// ─── Translate dictated text to English (Voice tab) ───────────────────────────
+// Body: { text, target? }. Translates arbitrary text to English (default) and
+// returns { text }. A single LLM call — no MCP, no Fathom token. Verbatim
+// meaning is preserved; product/people/technical names are kept as-is.
+app.post('/api/translate', express.json({ limit: '50kb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { text } = req.body ?? {};
+  if (!text || !String(text).trim()) return res.status(400).json({ error: 'text is required' });
+
+  const systemPrompt =
+    'You are a professional translator. Translate the user\'s text into natural, fluent English. ' +
+    'HARD RULES: ' +
+    '(1) Output ONLY the translation — no preamble, no notes, no quotes around it, no "Translation:" prefix. ' +
+    '(2) Preserve the original meaning, tone, and structure (keep line breaks and bullet points as they are). ' +
+    '(3) Keep proper nouns, product names, project keys, people\'s names, URLs, and technical terms unchanged (e.g. Dynamica, NSMG, Jira, Azure DevOps, sprint names). ' +
+    '(4) If the text is already in English, return it unchanged. ' +
+    '(5) Do not add, remove, or summarise any content.';
+
+  try {
+    const data = await callOpenRouter(apiKey, {
+      model:       OPENROUTER_EXECUTOR,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: String(text).trim() },
+      ],
+      temperature: 0.2,
+      max_tokens:  4000,
+      reasoning:   { effort: 'low' },
+    });
+    const reply = extractReply(data.choices?.[0]?.message);
+    if (!reply) return res.status(502).json({ error: 'The model returned an empty translation.' });
+    res.json({ text: reply });
+  } catch (err) {
+    console.error('[translate error]', err.message);
+    res.status(500).json({ error: humaniseFetchError(err) });
+  }
+});
+
 // ─── Email Agent ─────────────────────────────────────────────────────────────
 
 app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) => {

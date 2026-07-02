@@ -1,12 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
 import ToastContainer from '../../components/Toast.jsx';
-import {
-  parseSkillOutput,
-  buildTaskDescription,
-  priorityClass,
-  taskKey,
-} from '../fathom_agent/TasksFollowUp.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -60,6 +54,16 @@ function TasksIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
       <path d="M9 11l3 3L22 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
       <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function TranslateIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <path d="M4 5h9M8 3v2c0 4.5-2 8-5 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M6 12c1.5 2.5 4 4.5 6.5 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M13 21l4-9 4 9M14.5 18h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   );
 }
@@ -173,12 +177,12 @@ export default function VoiceApp({ user, allowedProjects }) {
   const [context,      setContext]      = useState('');
   const [history,      setHistory]      = useState([]);
 
-  // Task extraction (dictated text → structured tasks → Create Task)
-  const [extracting,  setExtracting]  = useState(false);
-  const [taskError,   setTaskError]   = useState('');
-  const [parsedTasks, setParsedTasks] = useState(null);   // parseSkillOutput() result or null
-  const [taskModal,   setTaskModal]   = useState(null);   // { task } being created
-  const [created,     setCreated]     = useState({});     // { [taskKey]: { jiraKey, jiraUrl, epicUrl } }
+  // Dictated text → create a task directly (description = verbatim transcript)
+  const [actionError, setActionError] = useState('');     // translate / create errors
+  const [translating, setTranslating] = useState(false);
+  const [translated,  setTranslated]  = useState(false);  // current transcript is an EN translation
+  const [taskModal,   setTaskModal]   = useState(null);   // { title, description } being created
+  const [taskResult,  setTaskResult]  = useState(null);   // { jiraKey, jiraUrl, epicUrl } after create
   const [toasts,      setToasts]      = useState([]);
 
   const mrRef       = useRef(null);
@@ -266,10 +270,10 @@ export default function VoiceApp({ user, allowedProjects }) {
         const entry = { id: Date.now(), text, time: formatTime() };
         setTranscript(text);
         setHistory(h => [entry, ...h.slice(0, 19)]);
-        // Fresh transcript → drop any tasks extracted from the previous one.
-        setParsedTasks(null);
-        setTaskError('');
-        setCreated({});
+        // Fresh transcript → reset per-transcript action state.
+        setActionError('');
+        setTranslated(false);
+        setTaskResult(null);
       } else {
         setError('Не удалось распознать речь. Попробуйте ещё раз.');
       }
@@ -280,36 +284,41 @@ export default function VoiceApp({ user, allowedProjects }) {
     }
   }
 
-  // ── Extract tasks from a dictated transcript ──────────────────────────────
-  async function extractTasks(text) {
-    const body = (text || '').trim();
-    if (!body || extracting) return;
-    setExtracting(true);
-    setTaskError('');
-    setParsedTasks(null);
-    setCreated({});
+  // ── Open the Create-Task modal with the dictated text as description ──────
+  function createTaskFromTranscript() {
+    const body = (transcript || '').trim();
+    if (!body) return;
+    setActionError('');
+    setTaskModal({ title: '', description: body });
+  }
+
+  // ── Translate the current transcript to English via AI ────────────────────
+  async function translateText() {
+    const body = (transcript || '').trim();
+    if (!body || translating) return;
+    setTranslating(true);
+    setActionError('');
     try {
-      const res = await fetch('/api/extract-tasks', {
+      const res = await fetch('/api/translate', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ text: body, userEmail: user }),
+        body:    JSON.stringify({ text: body }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
-      const parsed = parseSkillOutput(data.reply || '');
-      if (!parsed.hasStructure) {
-        setTaskError(
-          /no actionable tasks/i.test(data.reply || '')
-            ? 'В этом тексте не нашлось задач для создания.'
-            : 'Не удалось выделить задачи из текста.',
-        );
-        return;
-      }
-      setParsedTasks(parsed);
+      const en = (data.text || '').trim();
+      if (!en) throw new Error('Пустой перевод.');
+      // Replace the shown transcript with the translation and record it in
+      // history as a separate entry so the original stays available.
+      const entry = { id: Date.now(), text: en, time: formatTime() };
+      setTranscript(en);
+      setHistory(h => [entry, ...h.slice(0, 19)]);
+      setTranslated(true);
+      setTaskResult(null);
     } catch (e) {
-      setTaskError(e.message || 'Ошибка извлечения задач.');
+      setActionError(e.message || 'Ошибка перевода.');
     } finally {
-      setExtracting(false);
+      setTranslating(false);
     }
   }
 
@@ -393,17 +402,26 @@ export default function VoiceApp({ user, allowedProjects }) {
           {transcript && !transcribing && (
             <div className="voice-card">
               <div className="voice-card-header">
-                <span className="voice-card-label">Результат</span>
+                <span className="voice-card-label">
+                  Результат{translated && <span className="voice-translated-badge"> · переведено на EN</span>}
+                </span>
                 <div className="voice-card-actions">
                   <button
                     className="voice-tasks-btn"
-                    onClick={() => extractTasks(transcript)}
-                    disabled={extracting}
-                    title="Выделить задачи из текста и создать таски"
+                    onClick={createTaskFromTranscript}
+                    title="Создать задачу с этим текстом в описании"
                   >
-                    {extracting
-                      ? <><span className="spinner" style={{ width: 13, height: 13 }} /> Анализ…</>
-                      : <><TasksIcon /> Извлечь таски</>}
+                    <TasksIcon /> Создать задачу
+                  </button>
+                  <button
+                    className="voice-copy-btn"
+                    onClick={translateText}
+                    disabled={translating || translated}
+                    title="Перевести наговоренный текст на английский с помощью ИИ"
+                  >
+                    {translating
+                      ? <><span className="spinner" style={{ width: 13, height: 13 }} /> Перевод…</>
+                      : <><TranslateIcon /> {translated ? 'Переведено' : 'Перевести на EN'}</>}
                   </button>
                   <button
                     className={`voice-copy-btn${copied === latestId ? ' copied' : ''}`}
@@ -414,56 +432,23 @@ export default function VoiceApp({ user, allowedProjects }) {
                 </div>
               </div>
               <p className="voice-card-text">{transcript}</p>
+
+              {taskResult && (
+                <p className="tf-task-created" style={{ marginTop: 12 }}>
+                  Задача создана ✓
+                  {taskResult.jiraKey && taskResult.jiraUrl && (
+                    <> · <a className="ba-issue-link" href={taskResult.jiraUrl} target="_blank" rel="noreferrer">{taskResult.jiraKey} ↗</a></>
+                  )}
+                  {taskResult.epicUrl && (
+                    <> · <a className="ba-issue-link" href={taskResult.epicUrl} target="_blank" rel="noreferrer">Azure ↗</a></>
+                  )}
+                </p>
+              )}
             </div>
           )}
 
-          {/* Extracted tasks */}
-          {taskError && !extracting && (
-            <p className="error-msg" style={{ marginTop: 12, justifyContent: 'center' }}>⚠ {taskError}</p>
-          )}
-
-          {parsedTasks && !extracting && (
-            <div className="voice-tasks">
-              {parsedTasks.analysis && <p className="voice-tasks-analysis">{parsedTasks.analysis}</p>}
-              <div className="tf-results">
-                {parsedTasks.tasks.map((task, i) => {
-                  const key  = taskKey(task);
-                  const done = created[key];
-                  return (
-                    <div className="tf-task" key={key + i}>
-                      <div className="tf-task-top">
-                        <span className="tf-task-n">Task #{task.n}</span>
-                        {task.priority && <span className={priorityClass(task.priority)}>{task.priority}</span>}
-                      </div>
-                      {task.title && <p className="tf-task-title">{task.title}</p>}
-                      {task.description && <p className="tf-task-desc">{task.description}</p>}
-                      {task.who && (
-                        <div className="tf-task-meta">
-                          <span><strong>Who:</strong> {task.who}</span>
-                        </div>
-                      )}
-                      <div className="tf-task-actions">
-                        {done ? (
-                          <span className="tf-task-created">
-                            Created ✓
-                            {done.jiraKey && done.jiraUrl && (
-                              <> · <a className="ba-issue-link" href={done.jiraUrl} target="_blank" rel="noreferrer">{done.jiraKey} ↗</a></>
-                            )}
-                            {done.epicUrl && (
-                              <> · <a className="ba-issue-link" href={done.epicUrl} target="_blank" rel="noreferrer">Azure ↗</a></>
-                            )}
-                          </span>
-                        ) : (
-                          <button className="btn btn-primary tf-create-btn" onClick={() => setTaskModal({ task })}>
-                            Create Task ↗
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+          {actionError && (
+            <p className="error-msg" style={{ marginTop: 12, justifyContent: 'center' }}>⚠ {actionError}</p>
           )}
 
           {/* History */}
@@ -496,11 +481,11 @@ export default function VoiceApp({ user, allowedProjects }) {
         <TaskCreateModal
           user={user}
           allowedProjects={allowedProjects}
-          initialTitle={taskModal.task.title}
-          initialDescription={buildTaskDescription(taskModal.task, null)}
+          initialTitle={taskModal.title}
+          initialDescription={taskModal.description}
           onClose={() => setTaskModal(null)}
           onCreated={res => {
-            setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }));
+            setTaskResult(res);
             setToasts(prev => [...prev, { id: Date.now(), ...res }]);
           }}
         />

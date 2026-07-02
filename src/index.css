@@ -1491,6 +1491,11 @@ body {
   color: var(--text-2);
 }
 
+.voice-translated-badge {
+  color: var(--accent, #06b6d4);
+  font-weight: 700;
+}
+
 .voice-card-text {
   font-size: 16px;
   line-height: 1.7;
@@ -1528,17 +1533,28 @@ body {
   background: rgba(16,185,129,0.08);
 }
 
+.voice-copy-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.voice-copy-btn:disabled:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+
 .voice-copy-btn-sm {
   padding: 4px 10px;
   font-size: 11px;
 }
 
-/* ── Card actions row (Copy + Extract tasks) ── */
+/* ── Card actions row (Create task + Translate + Copy) ── */
 .voice-card-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* ── Extract-tasks button ── */
