@@ -104,6 +104,36 @@ function buildStatsSnapshot(items, jira, jiraChildren) {
   });
 }
 
+// Build the plain-text list to copy from the Azure column, for the given rows.
+// kind: 'id' (numbers) | 'title' | 'both'.
+function collectAzureColumn(rows, kind) {
+  return rows.map(it => {
+    if (kind === 'id')    return String(it.id);
+    if (kind === 'title') return it.title || `#${it.id}`;
+    return `${it.id} — ${it.title || ''}`.trim();
+  }).join('\n');
+}
+
+// Build the plain-text list to copy from the Jira column, for the given rows.
+// kind: 'key' (ABS-123) | 'summary' | 'both' | 'allkeys' (request + descendants).
+function collectJiraColumn(rows, jira, jiraChildren, kind) {
+  const out = [];
+  for (const it of rows) {
+    if (!it.jiraKey) continue;
+    const j = jira.get(it.jiraKey);
+    if (!j) { if (kind === 'key' || kind === 'allkeys') out.push(it.jiraKey); continue; }
+    if      (kind === 'summary') out.push(j.summary || j.key);
+    else if (kind === 'both')    out.push(`${j.key} — ${j.summary || ''}`.trim());
+    else {
+      out.push(j.key);
+      if (kind === 'allkeys') {
+        for (const c of flattenJiraTree(jiraChildren.get(j.key) || [])) out.push(c.key);
+      }
+    }
+  }
+  return out.join('\n');
+}
+
 // Provides the bits an inline StatusChip needs without prop-drilling through the
 // recursive tree: the Jira cloud id and the "status changed" callback.
 const StatusEditCtx = createContext(null);
@@ -148,6 +178,80 @@ function ChevronIcon({ dir = 'left' }) {
 }
 
 const SIDEBAR_KEY = 'su_sidebar_collapsed';
+
+function CopyColIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+      <rect x="9" y="9" width="13" height="13" rx="2" stroke="currentColor" strokeWidth="1.8"/>
+      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+// Column-header "Copy" dropdown. `options` = [{ key, label, getText }]. Picking
+// one copies its text to the clipboard and shows a brief confirmation. Used to
+// grab all visible ids / keys / titles at once (e.g. to paste into an LLM).
+function CopyMenu({ title, count, options }) {
+  const [open,   setOpen]   = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [pos,    setPos]    = useState(null);
+  const btnRef = useRef(null);
+
+  // Fixed positioning (computed from the button) so the menu isn't clipped by
+  // the table's overflow:hidden. Close on any scroll/resize to stay anchored.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [open]);
+
+  function toggle() {
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+    setOpen(true);
+  }
+
+  async function pick(opt) {
+    try { await navigator.clipboard.writeText(opt.getText()); } catch { /* noop */ }
+    setOpen(false);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1300);
+  }
+
+  return (
+    <span className="su-copycol">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`su-copycol-btn${copied ? ' copied' : ''}`}
+        onClick={toggle}
+        title={title}
+      >
+        <CopyColIcon />
+        {copied ? 'Скопировано' : 'Копировать'}
+      </button>
+      {open && (
+        <>
+          <div className="su-status-backdrop" onClick={() => setOpen(false)} />
+          <div className="su-copycol-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+            <div className="su-copycol-head">{count} строк — что скопировать:</div>
+            {options.map(opt => (
+              <button key={opt.key} type="button" className="su-copycol-item" onClick={() => pick(opt)}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
 
 // Minimal, safe markdown for the AI answer: escape HTML, then **bold** and
 // `code`. Bullet lines (- / •) render as a list. No raw HTML from the model.
@@ -965,8 +1069,31 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
               <AzureEditCtx.Provider value={azEditCtx}>
                 <div className="su-table">
                   <div className="su-table-head">
-                    <span className="su-cell">Azure DevOps</span>
-                    <span className="su-cell">Jira</span>
+                    <span className="su-cell su-head-cell">
+                      <span>Azure DevOps</span>
+                      <CopyMenu
+                        title="Скопировать данные Azure по видимым строкам"
+                        count={filteredItems.length}
+                        options={[
+                          { key: 'id',    label: 'ID (номера)',      getText: () => collectAzureColumn(filteredItems, 'id') },
+                          { key: 'title', label: 'Названия',          getText: () => collectAzureColumn(filteredItems, 'title') },
+                          { key: 'both',  label: 'ID — Название',     getText: () => collectAzureColumn(filteredItems, 'both') },
+                        ]}
+                      />
+                    </span>
+                    <span className="su-cell su-head-cell">
+                      <span>Jira</span>
+                      <CopyMenu
+                        title="Скопировать данные Jira по видимым строкам"
+                        count={filteredItems.length}
+                        options={[
+                          { key: 'key',     label: 'Ключи реквестов (ABS-…)',   getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'key') },
+                          { key: 'summary', label: 'Названия',                   getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'summary') },
+                          { key: 'both',    label: 'Ключ — Название',            getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'both') },
+                          { key: 'allkeys', label: 'Все ключи (с эпиками/тасками)', getText: () => collectJiraColumn(filteredItems, jira, jiraChildren, 'allkeys') },
+                        ]}
+                      />
+                    </span>
                   </div>
                   <div className="su-table-body">
                     <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
