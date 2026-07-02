@@ -112,6 +112,10 @@ export async function createTask(project, title, description, extras = {}, onSte
   const jira = extras.jiraProjectKey && project.jira
     ? { ...project.jira, projectKey: extras.jiraProjectKey }
     : project.jira;
+  // Resume support: when a previous run already created the Azure item (and
+  // possibly the Jira issue) but a later step failed, the caller passes the
+  // ids back so a retry never creates duplicates.
+  const resume = extras.resume || {};
 
   // ── Step 0: Azure work item ──────────────────────────────────────────────
   onStep(0, 'pending');
@@ -123,31 +127,36 @@ export async function createTask(project, title, description, extras = {}, onSte
   const { relations: attachRelations, jiraFiles: extraJiraFiles } =
     await uploadExtraAttachments(extras.attachments, azure);
 
-  const fields = {
-    'System.Title':       title,
-    'System.Description': processedDesc,
-  };
-  if (extras.iterationPath) fields['System.IterationPath'] = extras.iterationPath;
-  if (extras.areaPath)      fields['System.AreaPath']      = extras.areaPath;
+  let itemId, itemUrl;
+  if (resume.epicId) {
+    itemId  = resume.epicId;
+    itemUrl = resume.epicUrl ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
+  } else {
+    const fields = {
+      'System.Title':       title,
+      'System.Description': processedDesc,
+    };
+    if (extras.iterationPath) fields['System.IterationPath'] = extras.iterationPath;
+    if (extras.areaPath)      fields['System.AreaPath']      = extras.areaPath;
 
-  const relations = [
-    ...(extras.storyUrl
-      ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
-      : []),
-    ...(imageRelations || []),
-    ...attachRelations,
-  ];
+    const relations = [
+      ...(extras.storyUrl
+        ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
+        : []),
+      ...(imageRelations || []),
+      ...attachRelations,
+    ];
 
-  let item;
-  try {
-    item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
-  } catch (err) {
-    onStep(0, 'error', err.message);
-    throw err;
+    let item;
+    try {
+      item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
+    } catch (err) {
+      onStep(0, 'error', err.message);
+      throw err;
+    }
+    itemId  = item.id;
+    itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
   }
-
-  const itemId  = item.id;
-  const itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
   onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
 
   // If no Jira configured for this project — we're done
@@ -155,20 +164,27 @@ export async function createTask(project, title, description, extras = {}, onSte
 
   // ── Step 1: Jira issue ───────────────────────────────────────────────────
   onStep(1, 'pending');
-  let jiraItem;
-  try {
-    jiraItem = await createIssue(
-      jira.cloudId, jira.projectKey, jira.issueTypeId,
-      title, processedDesc, itemId, itemUrl, jira.clientRequestIdField
-    );
-  } catch (err) {
-    onStep(1, 'error', err.message);
-    throw err;
+  let jiraKey;
+  if (resume.jiraKey) {
+    jiraKey = resume.jiraKey;
+  } else {
+    let jiraItem;
+    try {
+      jiraItem = await createIssue(
+        jira.cloudId, jira.projectKey, jira.issueTypeId,
+        title, processedDesc, itemId, itemUrl, jira.clientRequestIdField
+      );
+    } catch (err) {
+      onStep(1, 'error', err.message);
+      throw err;
+    }
+    jiraKey = jiraItem.key;
   }
-  const jiraKey = jiraItem.key;
   const jiraUrl = getJiraUrl(jiraKey);
 
-  await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, { epicId: itemId, epicUrl: itemUrl });
+  if (!resume.jiraKey) {
+    await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, { epicId: itemId, epicUrl: itemUrl });
+  }
 
   onStep(1, 'done', null, { jiraKey, jiraUrl });
 
@@ -212,6 +228,9 @@ export async function fetchTaskForEdit(project, itemId) {
 export async function createAzureFromJira(project, jiraKey, title, description, extras = {}, onStep) {
   const { azure, jira } = project;
   const jiraUrl = getJiraUrl(jiraKey);
+  // Resume support — see createTask(): skip the Azure create on retry when a
+  // previous attempt already made the work item.
+  const resume = extras.resume || {};
 
   // ── Step 0: Create Azure work item ──────────────────────────────────────
   onStep(0, 'pending');
@@ -221,32 +240,37 @@ export async function createAzureFromJira(project, jiraKey, title, description, 
   const { relations: attachRelations, jiraFiles: extraJiraFiles } =
     await uploadExtraAttachments(extras.attachments, azure);
 
-  const fields = {
-    'System.Title':       title,
-    'System.Description': processedDesc,
-    ...(azure.jiraIdField          ? { [azure.jiraIdField]: jiraKey }          : {}),
-    ...(extras.iterationPath       ? { 'System.IterationPath': extras.iterationPath } : {}),
-    ...(extras.areaPath            ? { 'System.AreaPath':      extras.areaPath }      : {}),
-  };
+  let itemId, itemUrl;
+  if (resume.epicId) {
+    itemId  = resume.epicId;
+    itemUrl = resume.epicUrl ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
+  } else {
+    const fields = {
+      'System.Title':       title,
+      'System.Description': processedDesc,
+      ...(azure.jiraIdField          ? { [azure.jiraIdField]: jiraKey }          : {}),
+      ...(extras.iterationPath       ? { 'System.IterationPath': extras.iterationPath } : {}),
+      ...(extras.areaPath            ? { 'System.AreaPath':      extras.areaPath }      : {}),
+    };
 
-  const relations = [
-    ...(extras.storyUrl
-      ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
-      : []),
-    ...(imageRelations || []),
-    ...attachRelations,
-  ];
+    const relations = [
+      ...(extras.storyUrl
+        ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
+        : []),
+      ...(imageRelations || []),
+      ...attachRelations,
+    ];
 
-  let item;
-  try {
-    item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
-  } catch (err) {
-    onStep(0, 'error', err.message);
-    throw err;
+    let item;
+    try {
+      item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
+    } catch (err) {
+      onStep(0, 'error', err.message);
+      throw err;
+    }
+    itemId  = item.id;
+    itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
   }
-
-  const itemId  = item.id;
-  const itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
   onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
 
   if (!jira) return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };

@@ -22,9 +22,7 @@ export default function LoginScreen({ onLogin, theme, themeMode, setThemeMode })
     setLoading(true);
     setError('');
 
-    await new Promise(r => setTimeout(r, 400));
-
-    const result = onLogin(email, password);
+    const result = await onLogin(email, password);
     if (result === 'email') {
       setError('This email is not authorized to access the app.');
       triggerShake();
@@ -34,6 +32,10 @@ export default function LoginScreen({ onLogin, theme, themeMode, setThemeMode })
       setPassword('');
       triggerShake();
       passRef.current?.focus();
+    } else if (result) {
+      // Free-text error from the server (throttled, unreachable, misconfigured …)
+      setError(result);
+      triggerShake();
     }
     setLoading(false);
   }

@@ -174,7 +174,7 @@ function inlineElement(el, parentMarks = []) {
   else if (tag === 's') marks.push({ type: 'strike' });
   else if (tag === 'code') marks.push({ type: 'code' });
   else if (tag === 'a') {
-    const href = el.getAttribute('href');
+    const href = safeHref(el.getAttribute('href'));
     if (href) marks.push({ type: 'link', attrs: { href } });
   } else if (tag === 'span') {
     const color = el.style?.color;
@@ -477,6 +477,13 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Only allow safe link schemes. A `javascript:` href stored in a Jira
+// description would otherwise become a live link once rendered in the editor.
+function safeHref(href) {
+  const h = String(href || '').trim();
+  return /^(https?:|mailto:)/i.test(h) ? h : '';
+}
+
 function adfInline(node) {
   if (!node) return '';
   if (node.type !== 'text') return adfBlock(node);
@@ -487,7 +494,10 @@ function adfInline(node) {
     else if (mark.type === 'underline') text = `<u>${text}</u>`;
     else if (mark.type === 'strike')    text = `<s>${text}</s>`;
     else if (mark.type === 'code')      text = `<code>${text}</code>`;
-    else if (mark.type === 'link')      text = `<a href="${escHtml(mark.attrs?.href || '')}">${text}</a>`;
+    else if (mark.type === 'link') {
+      const href = safeHref(mark.attrs?.href);
+      if (href) text = `<a href="${escHtml(href).replace(/"/g, '&quot;')}">${text}</a>`;
+    }
     else if (mark.type === 'textColor') text = `<span style="color:${escHtml(mark.attrs?.color || '')}">${text}</span>`;
   }
   return text;

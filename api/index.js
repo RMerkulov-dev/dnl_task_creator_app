@@ -29,6 +29,102 @@ const jiraEmail = process.env.JIRA_EMAIL      || '';
 const jiraToken = process.env.JIRA_API_TOKEN  || '';
 const jiraAuth  = `Basic ${Buffer.from(`${jiraEmail}:${jiraToken}`).toString('base64')}`;
 
+// ─── App authentication ───────────────────────────────────────────────────────
+// The SPA "login" used to be a client-side password check, which left every
+// /api route (including the raw Jira/Azure proxies with admin credentials)
+// open to anyone who knew the deploy URL. Now /api/login validates credentials
+// server-side and issues an HMAC-signed bearer token; the middleware below
+// requires it on every /api route except login itself and the Fathom OAuth
+// handshake (a popup redirect chain that cannot carry headers).
+const APP_PASSWORD   = (process.env.APP_PASSWORD || process.env.VITE_APP_PASSWORD || '').trim();
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || process.env.VITE_ALLOWED_EMAILS || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const AUTH_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+// Prefer an explicit secret; otherwise derive a stable one from existing
+// long-lived secrets (same pattern as FATHOM_OAUTH_STATE_SECRET below).
+const AUTH_TOKEN_SECRET = process.env.AUTH_TOKEN_SECRET
+  ? Buffer.from(process.env.AUTH_TOKEN_SECRET)
+  : crypto.createHash('sha256')
+      .update(APP_PASSWORD || 'dev-app-auth')
+      .update(jiraToken)
+      .update(':app-auth-token')
+      .digest();
+
+function signAuthToken(email) {
+  const body = b64url(JSON.stringify({ e: email, x: Date.now() + AUTH_TOKEN_TTL_MS }));
+  const sig  = b64url(crypto.createHmac('sha256', AUTH_TOKEN_SECRET).update(body).digest());
+  return `${body}.${sig}`;
+}
+
+function verifyAuthToken(token) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  const expected = b64url(crypto.createHmac('sha256', AUTH_TOKEN_SECRET).update(body).digest());
+  const a = Buffer.from(sig), b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(b64urlDecode(body).toString('utf8'));
+    if (!payload.e || !payload.x || Date.now() > payload.x) return null;
+    return payload;
+  } catch { return null; }
+}
+
+const AUTH_EXEMPT = [/^\/api\/login$/, /^\/api\/fathom\/oauth\//];
+
+app.use('/api', (req, res, next) => {
+  const path = (req.originalUrl || '').split('?')[0];
+  if (AUTH_EXEMPT.some(re => re.test(path))) return next();
+  if (!APP_PASSWORD) {
+    // Fail closed: an unset password must not silently reopen the API.
+    return res.status(503).json({ error: 'Server auth is not configured — set APP_PASSWORD (or VITE_APP_PASSWORD) in the environment.' });
+  }
+  const m = (req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+  const payload = m ? verifyAuthToken(m[1]) : null;
+  if (!payload) {
+    // X-Auth-Required lets the SPA distinguish "app session invalid" from
+    // domain-level 401s (e.g. Fathom's reconnect flow) and force a re-login.
+    return res.status(401).set('X-Auth-Required', '1').json({ error: 'Not authenticated. Please sign in again.' });
+  }
+  req.authEmail = payload.e;
+  next();
+});
+
+// Best-effort brute-force throttle. In-memory, so per serverless instance —
+// not bulletproof, but it turns an online guessing attack from free to slow.
+const loginFailures = new Map(); // ip -> { count, resetAt }
+const LOGIN_MAX_FAILURES = 10;
+const LOGIN_WINDOW_MS    = 15 * 60_000;
+
+function clientIp(req) {
+  return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.socket?.remoteAddress || 'unknown';
+}
+
+app.post('/api/login', express.json({ limit: '2kb' }), (req, res) => {
+  if (!APP_PASSWORD) {
+    return res.status(503).json({ error: 'Server auth is not configured — set APP_PASSWORD in the environment.' });
+  }
+  const ip  = clientIp(req);
+  const rec = loginFailures.get(ip);
+  if (rec && Date.now() < rec.resetAt && rec.count >= LOGIN_MAX_FAILURES) {
+    return res.status(429).json({ error: 'Too many failed attempts. Try again in 15 minutes.' });
+  }
+
+  const email    = String(req.body?.email    || '').trim().toLowerCase();
+  const password = String(req.body?.password || '').trim();
+  const fail = (code, msg) => {
+    if (!rec || Date.now() > rec.resetAt) loginFailures.set(ip, { count: 1, resetAt: Date.now() + LOGIN_WINDOW_MS });
+    else rec.count++;
+    return res.status(401).json({ error: msg, code });
+  };
+
+  if (!ALLOWED_EMAILS.includes(email))  return fail('email',    'This email is not authorized to access the app.');
+  if (password !== APP_PASSWORD)        return fail('password', 'Incorrect password.');
+
+  loginFailures.delete(ip);
+  res.json({ token: signAuthToken(email), email, expiresAt: Date.now() + AUTH_TOKEN_TTL_MS });
+});
+
 // ─── Generic proxy ────────────────────────────────────────────────────────────
 // Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)
 async function readBody(req) {
@@ -47,14 +143,30 @@ function isTransientFetchError(err) {
   return m === 'fetch failed' || /ECONN(REFUSED|RESET)|ETIMEDOUT|EAI_AGAIN|ENOTFOUND/i.test(m + (err?.cause?.code || ''));
 }
 
-async function fetchWithRetry(url, init, attempts = 2) {
+function isTimeoutError(err) {
+  return err?.name === 'TimeoutError' || err?.name === 'AbortError';
+}
+
+const IDEMPOTENT_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+// Every upstream call goes through here so it gets a hard timeout (a hung
+// Jira/OpenRouter connection must not pin the serverless function until the
+// platform kills it) and transient network errors are retried — but ONLY for
+// requests that are safe to repeat. A POST that creates a Jira issue must never
+// be retried blindly: the first attempt may have landed even though the
+// response was lost, and a retry would create a duplicate. Callers whose POSTs
+// are side-effect-free (LLM calls, JQL search, read-only MCP tools) opt in via
+// `retryNonIdempotent`.
+async function fetchWithRetry(url, init = {}, { attempts = 2, retryNonIdempotent = false, timeoutMs = 30_000 } = {}) {
+  const method = (init.method || 'GET').toUpperCase();
+  const max = (retryNonIdempotent || IDEMPOTENT_METHODS.has(method)) ? attempts : 1;
   let lastErr;
-  for (let i = 0; i < attempts; i++) {
+  for (let i = 0; i < max; i++) {
     try {
-      return await fetch(url, init);
+      return await fetch(url, { signal: AbortSignal.timeout(timeoutMs), ...init });
     } catch (err) {
       lastErr = err;
-      if (!isTransientFetchError(err) || i === attempts - 1) throw err;
+      if (!isTransientFetchError(err) || i === max - 1) throw err;
       await new Promise(r => setTimeout(r, 400 * (i + 1)));
     }
   }
@@ -62,6 +174,9 @@ async function fetchWithRetry(url, init, attempts = 2) {
 }
 
 function humaniseFetchError(err) {
+  if (isTimeoutError(err)) {
+    return 'The external service took too long to respond. Please try again.';
+  }
   if (isTransientFetchError(err)) {
     return 'Could not reach external service (Jira / OpenRouter). Check your network and try again.';
   }
@@ -86,11 +201,13 @@ function openRouterHeaders(apiKey) {
 }
 
 async function callOpenRouter(apiKey, body) {
+  // Chat completions have no server-side side effects, so retrying a failed
+  // POST is safe; reasoning models can take a while, hence the long timeout.
   const upstream = await fetchWithRetry(OPENROUTER_URL, {
     method:  'POST',
     headers: openRouterHeaders(apiKey),
     body:    JSON.stringify(body),
-  });
+  }, { retryNonIdempotent: true, timeoutMs: 120_000 });
   const data = await upstream.json();
   if (!upstream.ok) throw new Error(data.error?.message || `OpenRouter error ${upstream.status}`);
   return data;
@@ -201,10 +318,11 @@ async function proxyTo(req, res, upstreamUrl, authHeader) {
 
   try {
     // В Node.js 18+ fetch встроен по умолчанию, Vercel его поддерживает
-    const upstream = await fetch(upstreamUrl, { 
-      method: req.method, 
-      headers, 
-      body 
+    const upstream = await fetch(upstreamUrl, {
+      method: req.method,
+      headers,
+      body,
+      signal: AbortSignal.timeout(30_000),
     });
     
     const text = await upstream.text();
@@ -250,6 +368,7 @@ app.get('/api/jira/attachment-binary/:cloudId/:attachmentId', async (req, res) =
     const upstream = await fetch(url, {
       headers: { Authorization: jiraAuth, Accept: '*/*' },
       redirect: 'follow',
+      signal: AbortSignal.timeout(60_000),
     });
     if (!upstream.ok) {
       return res.status(upstream.status).json({ error: `Jira attachment fetch failed: ${upstream.status}` });
@@ -276,7 +395,7 @@ app.get('/api/jira/attachment-media-id/:cloudId/:attachmentId', async (req, res)
   const { cloudId, attachmentId } = req.params;
   const url = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/attachment/content/${attachmentId}`;
   try {
-    const upstream = await fetch(url, { headers: { Authorization: jiraAuth }, redirect: 'manual' });
+    const upstream = await fetch(url, { headers: { Authorization: jiraAuth }, redirect: 'manual', signal: AbortSignal.timeout(30_000) });
     const loc = upstream.headers.get('location') || '';
     const mediaId = loc.match(/\/file\/([0-9a-f-]+)\//)?.[1] || null;
     if (!mediaId) {
@@ -330,6 +449,7 @@ app.post('/api/transcribe', async (req, res) => {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
       body: formData,
+      signal: AbortSignal.timeout(120_000),
     });
     const data = await upstream.json();
     res.status(upstream.status).json(data);
@@ -377,6 +497,18 @@ const ASK_USER_TOOL = {
     },
   },
 };
+
+// Chat history arrives from the browser and is spliced straight into the LLM
+// prompt. Never trust roles from the client: a crafted request could inject
+// `system` messages and override the agent's instructions, or `tool` messages
+// to fake tool results. Only plain user/assistant text survives.
+function sanitizeHistory(history, max = 20) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+    .slice(-max)
+    .map(m => ({ role: m.role, content: m.content.slice(0, 20_000) }));
+}
 
 function findAskUserCall(toolCalls) {
   return (toolCalls || []).find(tc => tc.function?.name === 'ask_user');
@@ -479,6 +611,7 @@ async function executeJiraTool(name, args, cloudId) {
   switch (name) {
     case 'search_jira': {
       const max = Math.min(args.maxResults || 20, 50);
+      // POST, but read-only (JQL search) — safe to retry.
       const res = await fetchWithRetry(`${base}/search/jql`, {
         method: 'POST',
         headers,
@@ -487,7 +620,7 @@ async function executeJiraTool(name, args, cloudId) {
           maxResults: max,
           fields:     ['summary', 'status', 'assignee', 'priority', 'issuetype', 'parent', 'labels'],
         }),
-      });
+      }, { retryNonIdempotent: true });
       const data = await res.json();
       if (!res.ok) throw new Error(data.errorMessages?.join(', ') || `Jira error ${res.status}`);
       const issues = data.issues ?? [];
@@ -579,7 +712,8 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { message, history = [], cloudId, userEmail, confirmedPlan } = req.body ?? {};
+  const { message, cloudId, userEmail, confirmedPlan } = req.body ?? {};
+  const history = sanitizeHistory(req.body?.history);
   if (!message) return res.status(400).json({ error: 'message is required' });
 
   const userCtx = userEmail
@@ -793,7 +927,9 @@ async function mcpRequest(token, method, params, { sessionId, isNotification } =
   };
   if (sessionId) headers['Mcp-Session-Id'] = sessionId;
 
-  const r = await fetchWithRetry(FATHOM_MCP_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+  // JSON-RPC over POST, but every Fathom MCP tool is read-only — safe to retry.
+  const r = await fetchWithRetry(FATHOM_MCP_URL, { method: 'POST', headers, body: JSON.stringify(body) },
+    { retryNonIdempotent: true, timeoutMs: 60_000 });
   if (r.status === 401) {
     const err = new Error('Fathom MCP rejected your access token (401). Please reconnect Fathom.');
     err.reconnect = true;
@@ -947,6 +1083,7 @@ async function getOrRegisterFathomClient(redirectUri) {
   if (fathomDcrCache.has(redirectUri)) return fathomDcrCache.get(redirectUri);
   const r = await fetch(FATHOM_OAUTH_REGISTER, {
     method:  'POST',
+    signal:  AbortSignal.timeout(15_000),
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body:    JSON.stringify({
       client_name:                'Dynamica Task Creator (Fathom MCP)',
@@ -1056,6 +1193,7 @@ app.get('/api/fathom/oauth/callback', async (req, res) => {
     const redirectUri = `${parsed.o}/api/fathom/oauth/callback`;
     const r = await fetch(FATHOM_OAUTH_TOKEN_URL, {
       method:  'POST',
+      signal:  AbortSignal.timeout(15_000),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
       body:    new URLSearchParams({
         grant_type:    'authorization_code',
@@ -1087,7 +1225,8 @@ app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) 
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { message, history = [], userEmail, confirmedPlan, fathomToken } = req.body ?? {};
+  const { message, userEmail, confirmedPlan, fathomToken } = req.body ?? {};
+  const history = sanitizeHistory(req.body?.history);
   if (!message)      return res.status(400).json({ error: 'message is required' });
   if (!fathomToken)  return res.status(401).json({ error: 'Fathom is not connected. Click "Connect Fathom" to authorize.', reconnect: true });
 
@@ -1640,16 +1779,19 @@ app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) =
     '\n=== END STYLE INSTRUCTIONS ===';
 
   try {
-    const plan = await buildPlan(apiKey, {
+    const planResult = await buildPlan(apiKey, {
       domain:       'email rewriting',
       systemPrompt,
       tools:        [],
       history:      [],
       message,
     });
+    // buildPlan returns { mode, plan, … }. Only a real "plan" is injected;
+    // "direct"/"clarify" modes mean the rewrite needs no extra guidance.
+    const planText = planResult.mode === 'plan' ? planResult.plan : '';
 
-    const planNotice = plan && plan !== 'DIRECT'
-      ? `=== REWRITE PLAN (from planner, English — internal only) ===\n${plan}\n=== END PLAN ===\nApply this plan when rewriting. Still obey the HARD OUTPUT RULES above. The plan itself is in English for internal reasoning; the rewritten message must be in the same language as the user's draft.`
+    const planNotice = planText
+      ? `=== REWRITE PLAN (from planner, English — internal only) ===\n${planText}\n=== END PLAN ===\nApply this plan when rewriting. Still obey the HARD OUTPUT RULES above. The plan itself is in English for internal reasoning; the rewritten message must be in the same language as the user's draft.`
       : '';
 
     const msgs = [

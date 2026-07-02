@@ -67,6 +67,28 @@ function getSavedFilters(projId) {
   return loadSaved()[projId] || {};
 }
 
+// ─── Draft autosave ─────────────────────────────────────────────────────────
+// Keeps unsent title/description per project so an accidental refresh or a
+// session expiry doesn't wipe half an hour of writing. Attachments are File
+// objects and can't be serialised — they are intentionally not persisted.
+const DRAFT_KEY = 'dnl-task-draft';
+
+function loadDraft(projId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(DRAFT_KEY)) || {};
+    return all[projId] || null;
+  } catch { return null; }
+}
+
+function saveDraft(projId, draft) {
+  try {
+    const all = JSON.parse(localStorage.getItem(DRAFT_KEY)) || {};
+    if (draft) all[projId] = draft;
+    else       delete all[projId];
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(all));
+  } catch { /* quota / private mode — drafts are best-effort */ }
+}
+
 // ─── Restore selected project from localStorage ────────────────────────────
 function getInitialProject(visible) {
   const saved = loadSaved();
@@ -88,8 +110,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   // ── Core form state ───────────────────────────────────────────────────────
   const [proj,        setProj]        = useState(() => getInitialProject(visibleProjects));
   const [mode,        setMode]        = useState('create');
-  const [title,       setTitle]       = useState('');
-  const [description, setDescription] = useState('');
+  // Restore an unsent draft for the initial project (create mode starts empty otherwise)
+  const [title,       setTitle]       = useState(() => loadDraft(getInitialProject(visibleProjects)?.id)?.title || '');
+  const [description, setDescription] = useState(() => loadDraft(getInitialProject(visibleProjects)?.id)?.description || '');
   const [attachments, setAttachments] = useState([]);
   const [formError,   setFormError]   = useState('');
 
@@ -250,6 +273,17 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     });
   }, [proj.id, selectedIteration, selectedStory, selectedBoard, selectedJiraProj]);
 
+  // ── Draft autosave (create mode only, debounced) ──────────────────────────
+  useEffect(() => {
+    if (mode !== 'create') return;
+    const id = setTimeout(() => {
+      // A bare default prefix (or empty form) is not worth keeping as a draft.
+      const meaningful = (title.trim() && !ALL_PREFIXES.has(title.trim())) || !isDescriptionEmpty(description);
+      saveDraft(proj.id, meaningful ? { title, description, at: Date.now() } : null);
+    }, 600);
+    return () => clearTimeout(id);
+  }, [proj.id, mode, title, description]);
+
   // ── Auto-set default title prefix when project / board / jira project changes
   useEffect(() => {
     if (mode !== 'create') return;
@@ -299,6 +333,12 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
     setSelectedBoard('');
     setSelectedJiraProj('');
     setProj(p);
+    // Restore this project's unsent draft, if any (create mode after reset)
+    const draft = loadDraft(p.id);
+    if (draft) {
+      if (draft.title)       setTitle(draft.title);
+      if (draft.description) setDescription(draft.description);
+    }
     // Save last selected project
     const all = loadSaved();
     all._lastProject = id;
@@ -384,13 +424,16 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   }
 
   // ── Submit ────────────────────────────────────────────────────────────────
-  async function runSync() {
+  // `resume` carries ids from a previous failed run ({ epicId, epicUrl, jiraKey })
+  // so retrying skips the steps that already succeeded instead of duplicating them.
+  async function runSync(resume = null) {
     const extras = {
       iterationPath:  selectedIteration || undefined,
       storyUrl:       selectedStory?.url || undefined,
       areaPath:       selectedBoard || undefined,
       jiraProjectKey: selectedJiraProj || undefined,
       attachments:    attachments.length ? attachments : undefined,
+      resume:         resume || undefined,
     };
 
     // createFromJira: Jira issue exists, Azure doesn't — create Azure + link back
@@ -422,8 +465,12 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       if (mode === 'create') {
         res = await createTask(proj, title.trim(), description.trim(), extras, updateStep);
         resetForm();
+        saveDraft(proj.id, null);   // task landed — the draft has served its purpose
       } else {
-        res = await updateTask(proj, epicId.trim(), title.trim(), description.trim(), jiraKey, updateStep, extras);
+        // On retry, reuse the Jira key a previous run already created so we
+        // update it instead of creating a second issue.
+        const knownJiraKey = jiraKey || resume?.jiraKey || null;
+        res = await updateTask(proj, epicId.trim(), title.trim(), description.trim(), knownJiraKey, updateStep, extras);
         // Keep jiraKey in sync — if Jira was just created, store the key so next save updates instead of creating
         if (res.jiraKey && res.jiraKey !== jiraKey) setJiraKey(res.jiraKey);
         if (res.epicId  && !epicId.trim())          setEpicId(String(res.epicId));
@@ -431,6 +478,18 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       setResult(res);
     } catch { /* errors shown in modal */ }
     finally { setSyncing(false); }
+  }
+
+  // ── Retry after a failed step ─────────────────────────────────────────────
+  // Collect ids from the steps that DID succeed (epicId / jiraKey live in the
+  // step data recorded by updateStep) and re-run the sync with them, so the
+  // retry picks up where the failure happened instead of duplicating work.
+  function handleRetry() {
+    const resume = steps.reduce(
+      (acc, s) => (s?.status === 'done' && s.data ? { ...acc, ...s.data } : acc),
+      {}
+    );
+    runSync(Object.keys(resume).length ? resume : null);
   }
 
   async function handleSubmit(e) {
@@ -751,6 +810,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
           steps={steps}
           result={result}
           onClose={handleCloseModal}
+          onRetry={handleRetry}
         />
       )}
 

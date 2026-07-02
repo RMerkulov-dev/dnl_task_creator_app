@@ -83,7 +83,7 @@ function SuccessPanel({ result, onClose }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function SyncModal({ mode, project, steps, result, onClose }) {
+export default function SyncModal({ mode, project, steps, result, onClose, onRetry }) {
   const defs   = buildStepDefs(mode, project, steps.length);
   const hasErr = steps.some(s => s?.status === 'error');
   const isDone = !!result && !hasErr;
@@ -123,7 +123,14 @@ export default function SyncModal({ mode, project, steps, result, onClose }) {
             </ul>
 
             {hasErr && (
-              <button className="btn btn-primary" onClick={onClose}>Close</button>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {onRetry && (
+                  <button className="btn btn-primary" style={{ flex: 1 }} onClick={onRetry}>
+                    Retry failed step
+                  </button>
+                )}
+                <button className="btn btn-ghost" style={{ flex: 1 }} onClick={onClose}>Close</button>
+              </div>
             )}
           </>
         )}

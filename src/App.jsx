@@ -2,9 +2,6 @@ import { useState, useEffect } from 'react';
 import LoginScreen from './components/LoginScreen.jsx';
 import PlatformShell from './platform/PlatformShell.jsx';
 
-// ─── Auth config ─────────────────────────────────────────────────────────────
-const APP_PASSWORD = import.meta.env.VITE_APP_PASSWORD || 'puxcof-tegnib-diZgy5';
-
 // ─── Kyiv sunrise/sunset ──────────────────────────────────────────────────────
 const KYIV_LAT = 50.4501;
 const KYIV_LON = 30.5234;
@@ -42,17 +39,15 @@ const ROLES = {
   'kateryna.romanenko@dynamicalabs.com': ['ABS'],
 };
 
-const ALLOWED_EMAILS = Object.keys(ROLES);
-
 const TOKEN_KEY = 'dnl_auth_token';
-const TOKEN_TTL = 24 * 60 * 60 * 1000; // 24 hours
 
 function getStoredSession() {
   try {
     const raw = localStorage.getItem(TOKEN_KEY);
     if (!raw) return null;
     const session = JSON.parse(raw);
-    if (Date.now() > session.expiresAt) {
+    // Sessions without a server token predate server-side auth — force re-login.
+    if (!session.token || Date.now() > session.expiresAt) {
       localStorage.removeItem(TOKEN_KEY);
       return null;
     }
@@ -129,15 +124,37 @@ export default function App() {
     return () => clearInterval(timer);
   }, [session]);
 
-  // Returns null on success, or 'email' / 'password' error key
-  function handleLogin(email, password) {
-    if (!ALLOWED_EMAILS.includes(email.trim().toLowerCase())) return 'email';
-    if (password.trim() !== APP_PASSWORD) return 'password';
+  // The fetch patch (services/http.js) fires this when the server rejects the
+  // app token — expired or invalidated. Drop the dead session.
+  useEffect(() => {
+    const onUnauthorized = () => handleLogout();
+    window.addEventListener('dnl:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('dnl:unauthorized', onUnauthorized);
+  }, []);
+
+  // Returns null on success, 'email' / 'password' error keys, or a free-text
+  // error message. Credentials are validated server-side (/api/login), which
+  // issues the bearer token the fetch patch attaches to every /api call.
+  async function handleLogin(email, password) {
     const normalised = email.trim().toLowerCase();
+    let res, data;
+    try {
+      res = await fetch('/api/login', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ email: normalised, password }),
+      });
+      data = await res.json().catch(() => ({}));
+    } catch {
+      return 'Could not reach the server. Check your connection and try again.';
+    }
+    if (!res.ok) return data.code || data.error || 'Sign-in failed. Please try again.';
+
     const newSession = {
       email:      normalised,
+      token:      data.token,
       projects:   ROLES[normalised] ?? null,
-      expiresAt:  Date.now() + TOKEN_TTL,
+      expiresAt:  data.expiresAt || (Date.now() + 24 * 60 * 60 * 1000),
     };
     localStorage.setItem(TOKEN_KEY, JSON.stringify(newSession));
     localStorage.setItem(THEME_KEY(normalised), themeMode);
