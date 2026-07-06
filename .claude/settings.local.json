@@ -100,7 +100,8 @@
       "Bash(git stash *)",
       "Bash(npx eslint *)",
       "Bash(ls -la .env*)",
-      "Bash(grep -rh \"JIRA_FIELD\\\\|JiraID\\\\|JiraLink\\\\|jiraIdField\" .env*)"
+      "Bash(grep -rh \"JIRA_FIELD\\\\|JiraID\\\\|JiraLink\\\\|jiraIdField\" .env*)",
+      "WebFetch(domain:community.developer.atlassian.com)"
     ]
   }
 }

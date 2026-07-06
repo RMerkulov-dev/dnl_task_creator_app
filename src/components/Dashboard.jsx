@@ -21,7 +21,7 @@ function getDefaultTitlePrefix(projId, boardName, jiraProj) {
     if (!boardName)                             return '';
     if (boardName.includes('Customer Service'))   return 'ABS. [WS]. Customer Service.';
     if (boardName.includes('Bureau'))             return 'ABS. QMP.';
-    if (boardName.includes('Marketing Migration')) return 'ABS. MAM.';
+    if (boardName.includes('Marketing'))          return 'ABS. MAM.';
     return jiraProj === 'ABSPO' ? 'ABSPO.' : 'ABS.';
   }
   return '';
