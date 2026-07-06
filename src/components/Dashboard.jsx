@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../config/projects.js';
 import { getIterations, getStories, getAreaPaths, findWorkItemByJiraKey } from '../services/azureDevops.js';
 import { createTask, updateTask, fetchTaskForEdit, createAzureFromJira, getCreateStepCount, getEditStepCount } from '../services/taskSync.js';
-import { getJiraIssueByKey, getJiraUrl } from '../services/jira.js';
+import { getJiraIssueByKey, getJiraUrl, getProjectComponents } from '../services/jira.js';
 import SyncModal from './SyncModal.jsx';
 import ToastContainer from './Toast.jsx';
 import RichTextEditor from './RichTextEditor.jsx';
@@ -132,8 +132,14 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   const [selectedStory,      setSelectedStory]      = useState(null);
   const [selectedBoard,      setSelectedBoard]      = useState('');
   const [selectedJiraProj,   setSelectedJiraProj]   = useState('');
+  const [components,         setComponents]         = useState([]);
+  const [selectedComponent,  setSelectedComponent]  = useState('');
   const [loadingExtras,      setLoadingExtras]      = useState(false);
   const [extrasErr,          setExtrasErr]          = useState('');
+
+  // Effective Jira project key drives which components to load: ABS lets the user
+  // switch between ABS/ABSPO at runtime, other projects use their fixed key.
+  const effectiveJiraKey = proj.jira ? (selectedJiraProj || proj.jira.projectKey) : null;
 
   // ── Sync state ────────────────────────────────────────────────────────────
   const [syncing,   setSyncing]   = useState(false);
@@ -237,6 +243,25 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       .catch(() => {});
     return () => { cancelled = true; };
   }, [selectedIteration]);
+
+  // ── Load Jira components for the effective project key ────────────────────
+  useEffect(() => {
+    if (!proj.features.component || !proj.jira || !effectiveJiraKey) {
+      setComponents([]);
+      setSelectedComponent('');
+      return;
+    }
+    let cancelled = false;
+    getProjectComponents(proj.jira.cloudId, effectiveJiraKey)
+      .then(list => {
+        if (cancelled) return;
+        setComponents(list);
+        // Drop a stale selection that doesn't exist in the new project's components.
+        setSelectedComponent(prev => (list.some(c => String(c.id) === prev) ? prev : ''));
+      })
+      .catch(() => { if (!cancelled) setComponents([]); });
+    return () => { cancelled = true; };
+  }, [proj.id, effectiveJiraKey]);
 
   // ── Restore saved filters once extras are loaded ──────────────────────────
   useEffect(() => {
@@ -432,6 +457,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
       storyUrl:       selectedStory?.url || undefined,
       areaPath:       selectedBoard || undefined,
       jiraProjectKey: selectedJiraProj || undefined,
+      componentId:    selectedComponent || undefined,
       attachments:    attachments.length ? attachments : undefined,
       resume:         resume || undefined,
     };
@@ -518,7 +544,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
   const canSubmit = title.trim() && hasDescription
     && (mode === 'create' || epicId.trim() || createFromJira);
   const { features } = proj;
-  const showExtrasSection = features.iteration || features.story || features.board || features.jiraProject;
+  const showExtrasSection = features.iteration || features.story || features.board || features.jiraProject || features.component;
 
   return (
     <div className="app-shell">
@@ -787,6 +813,20 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
                               .map(key => (
                                 <option key={key} value={key}>{key}</option>
                               ))}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* ── Jira Component ── */}
+                      {features.component && components.length > 0 && (
+                        <div className="field">
+                          <label className="field-label">Jira Component</label>
+                          <select className="select" value={selectedComponent}
+                            onChange={e => setSelectedComponent(e.target.value)}>
+                            <option value="">— No component —</option>
+                            {components.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
                           </select>
                         </div>
                       )}

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../config/projects.js';
 import { getIterations, getStories, getAreaPaths } from '../services/azureDevops.js';
 import { createTask, getCreateStepCount } from '../services/taskSync.js';
+import { getProjectComponents } from '../services/jira.js';
 import RichTextEditor from './RichTextEditor.jsx';
 import SyncModal from './SyncModal.jsx';
 
@@ -130,8 +131,13 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
   const [selectedStory,     setSelectedStory]     = useState(null);
   const [selectedBoard,     setSelectedBoard]     = useState('');
   const [selectedJiraProj,  setSelectedJiraProj]  = useState('');
+  const [components,        setComponents]        = useState([]);
+  const [selectedComponent, setSelectedComponent] = useState('');
   const [loadingExtras,     setLoadingExtras]     = useState(false);
   const [extrasErr,         setExtrasErr]         = useState('');
+
+  // Effective Jira key: ABS switches ABS/ABSPO at runtime, others use a fixed key.
+  const effectiveJiraKey = proj.jira ? (selectedJiraProj || proj.jira.projectKey) : null;
 
   const [syncing,  setSyncing]  = useState(false);
   const [steps,    setSteps]    = useState([]);
@@ -208,6 +214,22 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
     return () => { cancelled = true; };
   }, [selectedIteration]);
 
+  // ── Load Jira components for the effective project key ────────────────────
+  useEffect(() => {
+    if (!proj.features.component || !proj.jira || !effectiveJiraKey) {
+      setComponents([]); setSelectedComponent(''); return;
+    }
+    let cancelled = false;
+    getProjectComponents(proj.jira.cloudId, effectiveJiraKey)
+      .then(list => {
+        if (cancelled) return;
+        setComponents(list);
+        setSelectedComponent(prev => (list.some(c => String(c.id) === prev) ? prev : ''));
+      })
+      .catch(() => { if (!cancelled) setComponents([]); });
+    return () => { cancelled = true; };
+  }, [proj.id, effectiveJiraKey]);
+
   // ── Notify parent + close on success ─────────────────────────────────────
   useEffect(() => {
     if (!result) return;
@@ -230,6 +252,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
       storyUrl:       selectedStory?.url || undefined,
       areaPath:       selectedBoard || undefined,
       jiraProjectKey: selectedJiraProj || undefined,
+      componentId:    selectedComponent || undefined,
       attachments:    attachments.length ? attachments : undefined,
     };
     setSteps(Array(getCreateStepCount(proj)).fill({ status: 'idle' }));
@@ -252,7 +275,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
   }
 
   const { features } = proj;
-  const showExtras = features.iteration || features.story || features.board || features.jiraProject;
+  const showExtras = features.iteration || features.story || features.board || features.jiraProject || features.component;
   const canSubmit  = title.trim() && !isDescriptionEmpty(description);
 
   return (
@@ -321,6 +344,15 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
                       {(proj.jiraProjectOptions || [])
                         .filter(key => key !== 'ABSPO' || proj.abspoBoards?.includes(selectedBoard))
                         .map(key => <option key={key} value={key}>{key}</option>)}
+                    </select>
+                  </div>
+                )}
+                {features.component && components.length > 0 && (
+                  <div className="field">
+                    <label className="field-label">Jira Component</label>
+                    <select className="select" value={selectedComponent} onChange={e => setSelectedComponent(e.target.value)}>
+                      <option value="">— No component —</option>
+                      {components.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
                 )}

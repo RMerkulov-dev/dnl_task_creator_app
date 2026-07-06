@@ -25,8 +25,8 @@ export const PROJECTS = {
       issueTypeId:          import.meta.env.VITE_JIRA_ABS_ISSUE_TYPE_ID  || '10035',
       clientRequestIdField: import.meta.env.VITE_JIRA_ABS_CUSTOM_FIELD   || 'customfield_10034',
     },
-    // Shows Board (Area Path) + Jira Project selectors on the form
-    features: { iteration: false, story: false, board: true, jiraProject: true },
+    // Shows Board (Area Path) + Jira Project + Component selectors on the form
+    features: { iteration: false, story: false, board: true, jiraProject: true, component: true },
     jiraProjectOptions: ['ABS', 'ABSPO'],
     // ABSPO is only available for these boards
     abspoBoards: ['ABS - Dynamics 365'],
@@ -51,7 +51,7 @@ export const PROJECTS = {
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMG_CUSTOM_FIELD  || 'customfield_10034',
     },
     // Shows Sprint (Iteration) + Parent Story selectors; iterations filtered to active + placement
-    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true, component: true },
     statusUpdates: { excludeStates: ['closed', 'resolved', 'done', 'cancelled', 'removed'] },
   },
 
@@ -71,7 +71,7 @@ export const PROJECTS = {
       issueTypeId:          import.meta.env.VITE_JIRA_NSMG_MARKER_ISSUE_TYPE_ID   || '10035',
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMG_MARKER_CUSTOM_FIELD    || 'customfield_10034',
     },
-    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true, component: true },
     statusUpdates: { excludeStates: ['resolved', 'closed', 'done', 'cancelled', 'removed'] },
   },
 
@@ -91,7 +91,7 @@ export const PROJECTS = {
       issueTypeId:          import.meta.env.VITE_JIRA_NSMGCM_ISSUE_TYPE_ID || '10035',
       clientRequestIdField: import.meta.env.VITE_JIRA_NSMGCM_CUSTOM_FIELD  || 'customfield_10034',
     },
-    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true },
+    features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true, component: true },
     statusUpdates: { excludeStates: ['closed', 'resolved', 'done', 'cancelled', 'removed'] },
   },
 
@@ -111,7 +111,7 @@ export const PROJECTS = {
       issueTypeId:          import.meta.env.VITE_JIRA_HT_ISSUE_TYPE_ID  || '10035',
       clientRequestIdField: import.meta.env.VITE_JIRA_HT_CUSTOM_FIELD   || 'customfield_10034',
     },
-    features: { iteration: false, story: false, board: false },
+    features: { iteration: false, story: false, board: false, component: true },
   },
 
 };

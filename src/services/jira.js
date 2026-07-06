@@ -253,7 +253,7 @@ async function parseJira(res, label) {
   return data;
 }
 
-export async function createIssue(cloudId, projectKey, issueTypeId, summary, description, epicId, epicUrl, clientRequestIdField) {
+export async function createIssue(cloudId, projectKey, issueTypeId, summary, description, epicId, epicUrl, clientRequestIdField, componentId) {
   const url = `${jiraBase(cloudId)}/issue`;
   const body = {
     fields: {
@@ -262,6 +262,7 @@ export async function createIssue(cloudId, projectKey, issueTypeId, summary, des
       summary,
       description: toAdfWithLink(description, epicId, epicUrl),
       [clientRequestIdField]: epicId,
+      ...(componentId ? { components: [{ id: String(componentId) }] } : {}),
     },
   };
   console.log('[createIssue] body:', JSON.stringify(body, null, 2));
@@ -592,6 +593,16 @@ export async function getJiraProjects(cloudId) {
   const res = await fetch(url);
   const data = await parseJira(res, 'getJiraProjects');
   return data.values ?? [];
+}
+
+// Components defined on a Jira project — used to populate the "Component"
+// selector on the create form. Returns [{ id, name, description }, ...].
+export async function getProjectComponents(cloudId, projectKey) {
+  const url = `${jiraBase(cloudId)}/project/${encodeURIComponent(projectKey)}/components`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getProjectComponents');
+  // The non-paginated endpoint returns a bare array; guard for the paginated shape too.
+  return Array.isArray(data) ? data : (data.values ?? []);
 }
 
 export async function createRawIssue(cloudId, fields) {

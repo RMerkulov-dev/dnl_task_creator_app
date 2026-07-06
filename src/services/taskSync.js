@@ -172,7 +172,7 @@ export async function createTask(project, title, description, extras = {}, onSte
     try {
       jiraItem = await createIssue(
         jira.cloudId, jira.projectKey, jira.issueTypeId,
-        title, processedDesc, itemId, itemUrl, jira.clientRequestIdField
+        title, processedDesc, itemId, itemUrl, jira.clientRequestIdField, extras.componentId
       );
     } catch (err) {
       onStep(1, 'error', err.message);
@@ -367,7 +367,7 @@ export async function updateTask(project, itemId, title, description, jiraKey, o
   try {
     jiraItem = await createIssue(
       jira.cloudId, jira.projectKey, jira.issueTypeId,
-      title, processedDesc, numericId, itemUrl, jira.clientRequestIdField
+      title, processedDesc, numericId, itemUrl, jira.clientRequestIdField, extras.componentId
     );
   } catch (err) {
     onStep(1, 'error', err.message);
