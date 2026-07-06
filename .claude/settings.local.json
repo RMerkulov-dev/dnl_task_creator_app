@@ -101,7 +101,9 @@
       "Bash(npx eslint *)",
       "Bash(ls -la .env*)",
       "Bash(grep -rh \"JIRA_FIELD\\\\|JiraID\\\\|JiraLink\\\\|jiraIdField\" .env*)",
-      "WebFetch(domain:community.developer.atlassian.com)"
+      "WebFetch(domain:community.developer.atlassian.com)",
+      "Bash(ls MEMORY.md)",
+      "Bash(cat MEMORY.md)"
     ]
   }
 }
