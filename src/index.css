@@ -559,6 +559,28 @@ body {
 }
 .sync-link:hover { border-color: var(--accent-1); background: rgba(0,229,255,0.05); }
 
+/* ── Inline status editors in the success popup ───────────────────────────── */
+.sync-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.sync-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sync-status-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
 .modal-title {
   font-family: var(--font-display);
   font-size: 28px;
