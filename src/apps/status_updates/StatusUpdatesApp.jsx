@@ -142,6 +142,31 @@ const StatusEditCtx = createContext(null);
 // item type, a lazy loader, and the optimistic "state changed" callback.
 const AzureEditCtx = createContext(null);
 
+// ─── Anchored popover positioning ─────────────────────────────────────────────
+// Keep a fixed-position menu glued to its trigger. Previously these menus closed
+// on *any* scroll — but a capture-phase scroll listener also fires when the user
+// scrolls *inside* a tall menu (the status list is scrollable), dismissing it
+// mid-interaction. Instead we reposition the menu to follow its button, and
+// ignore scroll events that originate within the menu itself.
+function useAnchoredMenu(open, btnRef, menuRef, setPos) {
+  useEffect(() => {
+    if (!open) return;
+    const reposition = (e) => {
+      if (e?.type === 'scroll' && menuRef.current?.contains(e.target)) return;
+      const btn = btnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.left });
+    };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [open, btnRef, menuRef, setPos]);
+}
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 function RefreshIcon() {
   return (
@@ -195,20 +220,12 @@ function CopyMenu({ title, count, options }) {
   const [open,   setOpen]   = useState(false);
   const [copied, setCopied] = useState(false);
   const [pos,    setPos]    = useState(null);
-  const btnRef = useRef(null);
+  const btnRef  = useRef(null);
+  const menuRef = useRef(null);
 
   // Fixed positioning (computed from the button) so the menu isn't clipped by
-  // the table's overflow:hidden. Close on any scroll/resize to stay anchored.
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [open]);
+  // the table's overflow:hidden. Reposition (don't close) on scroll/resize.
+  useAnchoredMenu(open, btnRef, menuRef, setPos);
 
   function toggle() {
     if (open) { setOpen(false); return; }
@@ -239,7 +256,7 @@ function CopyMenu({ title, count, options }) {
       {open && (
         <>
           <div className="su-status-backdrop" onClick={() => setOpen(false)} />
-          <div className="su-copycol-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+          <div ref={menuRef} className="su-copycol-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
             <div className="su-copycol-head">{count} rows — copy what:</div>
             {options.map(opt => (
               <button key={opt.key} type="button" className="su-copycol-item" onClick={() => pick(opt)}>
@@ -295,7 +312,8 @@ function typeClass(type) {
 // state optimistically (the workflow guarantees only valid targets are offered).
 function StatusChip({ issueKey, status, statusCategory }) {
   const ctx = useContext(StatusEditCtx);
-  const btnRef = useRef(null);
+  const btnRef  = useRef(null);
+  const menuRef = useRef(null);
   const [open,        setOpen]        = useState(false);
   const [pos,         setPos]         = useState(null);
   const [loading,     setLoading]     = useState(false);
@@ -305,18 +323,9 @@ function StatusChip({ issueKey, status, statusCategory }) {
 
   const editable = !!ctx?.cloudId && !!issueKey;
 
-  // Reposition the menu to the chip and close it on scroll/resize so a fixed-
-  // position popover never detaches from its row.
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [open]);
+  // Keep the fixed-position popover glued to its chip (reposition, don't close)
+  // so scrolling the tall status list doesn't dismiss it.
+  useAnchoredMenu(open, btnRef, menuRef, setPos);
 
   async function toggle(e) {
     e.stopPropagation();
@@ -370,7 +379,7 @@ function StatusChip({ issueKey, status, statusCategory }) {
       {open && (
         <>
           <div className="su-status-backdrop" onClick={() => setOpen(false)} />
-          <div className="su-status-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+          <div ref={menuRef} className="su-status-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
             {loading && <div className="su-status-menu-item muted"><span className="spinner" style={{ width: 12, height: 12 }} /> Loading…</div>}
             {err && <div className="su-status-menu-item su-status-menu-err">⚠ {err}</div>}
             {!loading && !err && transitions?.length === 0 && (
@@ -423,7 +432,8 @@ function JiraTree({ nodes }) {
 // move server-side, so an illegal transition surfaces as an error in the menu.
 function AzureStateChip({ item }) {
   const ctx = useContext(AzureEditCtx);
-  const btnRef = useRef(null);
+  const btnRef  = useRef(null);
+  const menuRef = useRef(null);
   const [open,    setOpen]    = useState(false);
   const [pos,     setPos]     = useState(null);
   const [loading, setLoading] = useState(false);
@@ -436,16 +446,7 @@ function AzureStateChip({ item }) {
   const cat      = (cached || []).find(s => s.name === item.state)?.category;
   const tone     = AZURE_STATE_TONE[cat] || 'todo';
 
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [open]);
+  useAnchoredMenu(open, btnRef, menuRef, setPos);
 
   async function toggle(e) {
     e.stopPropagation();
@@ -499,7 +500,7 @@ function AzureStateChip({ item }) {
       {open && (
         <>
           <div className="su-status-backdrop" onClick={() => setOpen(false)} />
-          <div className="su-status-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+          <div ref={menuRef} className="su-status-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
             {loading && <div className="su-status-menu-item muted"><span className="spinner" style={{ width: 12, height: 12 }} /> Loading…</div>}
             {err && <div className="su-status-menu-item su-status-menu-err">⚠ {err}</div>}
             {!loading && !err && states?.length === 0 && (
@@ -534,7 +535,9 @@ function WorkItemRow({ item, jira, jiraChildren, depth }) {
       {/* Left — Azure DevOps work item */}
       <div className="su-cell su-azure">
         <span className={`su-type su-type-${item.type.toLowerCase().replace(/\s+/g, '-')}`}>{item.type}</span>
-        <span className="su-az-id">#{item.id}</span>
+        {item.url
+          ? <a className="su-az-id su-az-link" href={item.url} target="_blank" rel="noreferrer" title="Open in Azure DevOps">#{item.id}</a>
+          : <span className="su-az-id">#{item.id}</span>}
         <span className="su-title" title={item.title}>{item.title}</span>
         <AzureStateChip item={item} />
       </div>

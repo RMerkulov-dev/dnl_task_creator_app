@@ -1184,6 +1184,71 @@ body {
   min-height: 100vh;
 }
 
+/* ── PM workspace — grouped tools with a floating segmented switcher ── */
+.pm-workspace { position: relative; }
+
+/* A zero-height sticky rail so the switcher overlays the empty centre of each
+   sub-app's 60px header and stays put while the page scrolls. align-items must
+   be flex-start — otherwise the switcher stretches to the rail's 0 height and
+   collapses. */
+.pm-switcher-bar {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Solid segmented control: one track holding the four tabs, active tab filled. */
+.pm-switcher {
+  pointer-events: auto;
+  align-self: flex-start;
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;                     /* centres the ~40px control in the 60px header */
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-hi, var(--border));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.pm-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 9px 18px;
+  border-radius: 9px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pm-tab:hover:not(.active) {
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--bg-app) 55%, transparent);
+}
+
+.pm-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, #5b63fe 0%, #8b5cf6 100%);
+  box-shadow: 0 2px 10px rgba(91, 99, 254, 0.45);
+}
+
+@media (max-width: 720px) {
+  .pm-tab { padding: 9px 12px; letter-spacing: 0.04em; }
+}
+
 /* ── Sidebar logo ── */
 .sidebar-logo {
   display: flex;
@@ -3906,6 +3971,13 @@ html, body, #root {
   color: var(--text-3);
   flex-shrink: 0;
 }
+
+a.su-az-link {
+  color: var(--accent-1);
+  text-decoration: none;
+  transition: color 0.12s ease;
+}
+a.su-az-link:hover { text-decoration: underline; }
 
 .su-title {
   font-size: 13px;

@@ -193,6 +193,19 @@ export function extractJiraKey(value) {
 }
 
 /**
+ * Convert a work-item REST API URL into its browsable Azure Boards web URL.
+ *   API:  https://dev.azure.com/{org}/_apis/wit/workItems/{id}
+ *   Web:  https://dev.azure.com/{org}/{project}/_workitems/edit/{id}
+ * The batch endpoint (when a `fields` filter is set) omits `_links.html`, so we
+ * derive the web link from the API url ourselves. Returns null if it can't.
+ */
+export function workItemWebUrl(apiUrl, project) {
+  const m = String(apiUrl || '').match(/^(https?:\/\/[^/]+\/[^/]+)\/_apis\/wit\/workItems\/(\d+)/i);
+  if (!m) return null;
+  return `${m[1]}/${encodeURIComponent(project)}/_workitems/edit/${m[2]}`;
+}
+
+/**
  * List the Azure DevOps work items under a board (area path) and/or a sprint
  * (iteration path) — or the whole project when both are null — together with
  * their stored Jira key.
@@ -240,7 +253,7 @@ export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath
         parentId:   f['System.Parent'] ?? null,
         jiraRaw:    raw,
         jiraKey:    extractJiraKey(raw),
-        url:        item._links?.html?.href || item.url,
+        url:        item._links?.html?.href || workItemWebUrl(item.url, project) || item.url,
       });
     }
   }

@@ -10,7 +10,7 @@ import RichTextEditor from './RichTextEditor.jsx';
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
 // ─── Default title prefixes ────────────────────────────────────────────────
-const ALL_PREFIXES = new Set(['HT.', 'NSMGM.', 'NSMG.', 'NSMGCM.', 'ABS.', 'ABSPO.', 'ABS. [WS]. Customer Service.', 'ABS. QMP.', 'ABS. MAM.']);
+const ALL_PREFIXES = new Set(['HT.', 'NSMGM.', 'NSMG.', 'NSMGCM.', 'ABS.', 'ABSPO.', 'ABS. [WS]. Customer Service.', 'ABS. QMP.', 'ABS. MAM.', 'ABS. CM.']);
 
 function getDefaultTitlePrefix(projId, boardName, jiraProj) {
   if (projId === 'HT')          return 'HT.';
@@ -22,6 +22,7 @@ function getDefaultTitlePrefix(projId, boardName, jiraProj) {
     if (boardName.includes('Customer Service'))   return 'ABS. [WS]. Customer Service.';
     if (boardName.includes('Bureau'))             return 'ABS. QMP.';
     if (boardName.includes('Marketing'))          return 'ABS. MAM.';
+    if (boardName.includes('Commission'))         return 'ABS. CM.';
     return jiraProj === 'ABSPO' ? 'ABSPO.' : 'ABS.';
   }
   return '';

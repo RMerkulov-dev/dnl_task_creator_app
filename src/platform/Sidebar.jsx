@@ -94,7 +94,20 @@ function StatusUpdatesIcon() {
   );
 }
 
+function PmIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Kanban board — three columns of stacked cards */}
+      <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.4"/>
+      <path d="M8.5 3.5v17M15.5 3.5v17" stroke="currentColor" strokeWidth="1.4"/>
+      <path d="M4.5 7h2M11 7h2M17.5 7h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      <path d="M4.5 10.5h2M11 10.5h2M17.5 10.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
+  'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
   'voice':         VoiceIcon,
   'task-agent':    TaskAgentIcon,

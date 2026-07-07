@@ -31,7 +31,7 @@ export const PROJECTS = {
     // ABSPO is only available for these boards
     abspoBoards: ['ABS - Dynamics 365'],
     // Only show these two boards in the selector
-    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service', 'ABS Bureau and Group Only', 'ABS - Marketing Migration'],
+    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service', 'ABS Bureau and Group Only', 'ABS - Marketing Migration', 'ABS - Commission Module'],
   },
 
   // ── NSMG ───────────────────────────────────────────────────────────────────
