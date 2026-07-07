@@ -2,6 +2,8 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  color-scheme: dark;
+
   --bg-app:         #0A0A0B;
   --bg-surface:     #111113;
   --bg-card:        #111113;
@@ -44,6 +46,8 @@
 }
 
 [data-theme="light"] {
+  color-scheme: light;
+
   --bg-app:         #FAFAF7;
   --bg-surface:     #FFFFFF;
   --bg-card:        #FFFFFF;
@@ -212,6 +216,13 @@ body {
   background-repeat: no-repeat;
   background-position: right 2px center;
   padding-right: 22px;
+}
+
+/* Native dropdown popup: give options a solid, theme-matched background so
+   they stay readable on Windows dark mode (where the popup is OS-painted). */
+.select option {
+  background-color: var(--bg-surface);
+  color: var(--text-1);
 }
 
 /* ─── Buttons ────────────────────────────────────────────────────────────────── */
