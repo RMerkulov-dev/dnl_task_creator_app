@@ -106,6 +106,20 @@ function PmIcon() {
   );
 }
 
+function ReportIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Chart frame */}
+      <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.4"/>
+      {/* Horizontal bars: planned vs tracked pairs */}
+      <path d="M6 8h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M6 11h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M6 14h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M6 17h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
@@ -115,6 +129,7 @@ const ICON_MAP = {
   'fathom-agent':  FathomIcon,
   'email-agent':   EmailAgentIcon,
   'status-updates': StatusUpdatesIcon,
+  'report':        ReportIcon,
 };
 
 function PlatformLogo() {

@@ -605,6 +605,25 @@ export async function getProjectComponents(cloudId, projectKey) {
   return Array.isArray(data) ? data : (data.values ?? []);
 }
 
+// Generic enhanced-search that follows nextPageToken pagination and returns all
+// matching issues (capped by maxTotal as a safety valve).
+export async function searchIssuesPaged(cloudId, jql, fields, { maxTotal = 2000 } = {}) {
+  const out = [];
+  let nextPageToken = null;
+  do {
+    const body = { jql, maxResults: 100, fields, ...(nextPageToken ? { nextPageToken } : {}) };
+    const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await parseJira(res, 'searchIssuesPaged');
+    out.push(...(data.issues ?? []));
+    nextPageToken = data.nextPageToken ?? null;
+  } while (nextPageToken && out.length < maxTotal);
+  return out;
+}
+
 // Valid statuses per issue type in a project: [{ id, name, statuses: [...] }].
 // Needs the read:issue-status:jira scope on granular tokens.
 export async function getProjectStatuses(cloudId, projectKey) {

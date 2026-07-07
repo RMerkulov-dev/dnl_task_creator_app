@@ -4465,3 +4465,245 @@ button.su-status {
   .ea-split { grid-template-columns: 1fr; }
   .ea-pane { min-height: 320px; }
 }
+
+/* ─── Report addon ──────────────────────────────────────────────────────────── */
+
+.rp-main {
+  height: calc(100vh - 60px);
+  overflow-y: auto;
+  margin: 0 auto;
+  width: 100%;
+  /* No top padding: .rp-sticky supplies it, so the sticky bar can pin flush
+     to the scrollport without negative-margin tricks (which offset sticky
+     positioning by the margin and leave a see-through gap). */
+  padding: 0 28px 40px;
+  box-sizing: border-box;
+}
+
+/* Filters + summary tiles pinned to the top of the report's scroll area. */
+.rp-sticky {
+  position: sticky;
+  top: 0;
+  margin: 0 -28px; /* span edge to edge under .rp-main's side padding */
+  padding: 20px 28px 14px;
+  background: var(--bg-app);
+  border-bottom: 1px solid var(--border);
+  z-index: 40;
+}
+
+.rp-controls {
+  display: flex;
+  gap: 14px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.rp-sticky .rp-tiles { margin-top: 14px; }
+.rp-sticky .rp-tile { padding: 10px 14px; }
+.rp-sticky .rp-tile-num { font-size: 20px; }
+.rp-control { display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
+
+.rp-empty {
+  margin-top: 28px;
+  color: var(--text-3);
+  font-size: 14px;
+}
+
+.rp-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+}
+.rp-tile {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 10px);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rp-tile-num {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-1);
+  line-height: 1;
+}
+.rp-tile-label {
+  font-size: 12px;
+  color: var(--text-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rp-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.rp-card {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm, 10px);
+  margin-top: 16px;
+  overflow: hidden;
+}
+.rp-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.rp-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.rp-legend {
+  font-size: 12px;
+  color: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rp-chart-scroll { overflow-x: auto; padding: 14px 16px; }
+.rp-bar { transition: filter .12s; }
+.rp-bar-group:hover .rp-bar { filter: brightness(1.25); }
+
+.rp-table-scroll { overflow-x: auto; }
+.rp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.rp-table th, .rp-table td {
+  padding: 9px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.rp-table th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.rp-table td { color: var(--text-2); }
+.rp-table tbody tr:hover td { background: var(--bg-card-hover); }
+.rp-table tfoot td {
+  border-bottom: none;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.rp-num { text-align: right !important; font-variant-numeric: tabular-nums; }
+.rp-key { color: var(--accent-1); text-decoration: none; font-weight: 600; }
+.rp-key:hover { text-decoration: underline; }
+.rp-summary {
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.rp-chip-done     { color: #34d399; border-color: rgba(52, 211, 153, .35); }
+.rp-chip-progress { color: #60a5fa; border-color: rgba(96, 165, 250, .35); }
+.rp-chip-todo     { color: var(--text-2); border-color: var(--border-hi); }
+
+@media (max-width: 720px) {
+  .rp-control { min-width: 100%; }
+}
+
+.rp-dash {
+  width: 16px;
+  height: 0;
+  border-top: 2px dashed;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.rp-control-date { min-width: 170px; }
+.rp-control-date input[type="date"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] .rp-control-date input[type="date"],
+[data-theme="light"] .rp-control-date input[type="date"] {
+  color-scheme: light;
+}
+
+/* Report: the picker dropdown must overlay the controls row, not stretch it */
+.rp-control .project-picker-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin-top: 0;
+  z-index: 30;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+/* Report: two-column layout — epic bars left, dynamics + progress right */
+.rp-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+.rp-columns > .rp-card { margin-top: 0; }
+.rp-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rp-column > .rp-card { margin-top: 0; }
+
+.rp-progress {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 18px;
+  flex-wrap: wrap;
+}
+.rp-progress-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 170px;
+  flex: 1;
+}
+.rp-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.rp-progress-num {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+.rp-progress-total {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  color: var(--text-3);
+}
+
+@media (max-width: 1100px) {
+  .rp-columns { grid-template-columns: 1fr; }
+}

@@ -29,6 +29,13 @@ export const APP_REGISTRY = [
     gradient: 'linear-gradient(135deg, #10b981 0%, #06b6d4 100%)',
     glow: 'rgba(16, 185, 129, 0.5)',
   },
+  {
+    id: 'report',
+    name: 'Report',
+    shortName: 'Report',
+    gradient: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
+    glow: 'rgba(245, 158, 11, 0.5)',
+  },
 ];
 
 // The "PM" workspace bundles four project-management tools behind a single
@@ -60,4 +67,5 @@ export const APP_COMPONENTS = {
   'fathom-agent':  lazy(() => import('../apps/fathom_agent/FathomAgentApp.jsx')),
   'email-agent':   lazy(() => import('../apps/email_agent/EmailAgentApp.jsx')),
   'status-updates': lazy(() => import('../apps/status_updates/StatusUpdatesApp.jsx')),
+  'report':        lazy(() => import('../apps/report/ReportApp.jsx')),
 };
