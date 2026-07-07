@@ -16,6 +16,7 @@ import {
   getJiraUrl,
   getBoardsForProject,
   getSprintsForBoard,
+  getProjectStatuses,
 } from '../../services/jira.js';
 
 // Fields that Jira manages automatically — never include in a create payload
@@ -232,23 +233,54 @@ export async function loadSprintsForProject(cloudId, projectKey) {
   return all;
 }
 
-export async function loadUserFields(cloudId, projectKey, issueTypeId, sourceFields) {
-  const meta   = await getCreateMetaFields(cloudId, projectKey, issueTypeId);
-  const result = [];
+// Estimate fields exposed as editable inputs on the clone form.
+const ESTIMATE_FIELD_NAMES = new Set(['developer estimate', 'qa estimate']);
+
+export async function loadCloneFields(cloudId, projectKey, issueTypeId, sourceFields) {
+  const meta           = await getCreateMetaFields(cloudId, projectKey, issueTypeId);
+  const userFields     = [];
+  const estimateFields = [];
   for (const [fieldId, fieldMeta] of Object.entries(meta)) {
-    if (fieldId === 'reporter') continue;
     const schema = fieldMeta.schema ?? {};
-    if (schema.type !== 'user') continue;
-    const raw = sourceFields[fieldId];
-    result.push({
-      id:      fieldId,
-      name:    fieldMeta.name ?? fieldId,
-      current: raw?.accountId
-        ? { accountId: raw.accountId, displayName: raw.displayName ?? raw.accountId }
-        : null,
-    });
+    const name   = fieldMeta.name ?? fieldId;
+    if (schema.type === 'user') {
+      if (fieldId === 'reporter') continue;
+      const raw = sourceFields[fieldId];
+      userFields.push({
+        id:      fieldId,
+        name,
+        current: raw?.accountId
+          ? { accountId: raw.accountId, displayName: raw.displayName ?? raw.accountId }
+          : null,
+      });
+    } else if (schema.type === 'number' && ESTIMATE_FIELD_NAMES.has(name.toLowerCase())) {
+      const raw = sourceFields[fieldId];
+      estimateFields.push({ id: fieldId, name, current: typeof raw === 'number' ? raw : null });
+    }
   }
-  return result;
+  return { userFields, estimateFields };
+}
+
+// Statuses offered for the clone. Primary source is the project's per-issue-type
+// status list; if the token lacks the read:issue-status:jira scope for it, fall
+// back to the statuses reachable via the source issue's transitions.
+export async function loadStatusesForIssueType(cloudId, projectKey, issueTypeId, sourceIssueKey) {
+  try {
+    const all   = await getProjectStatuses(cloudId, projectKey);
+    const entry = all.find(t => String(t.id) === String(issueTypeId));
+    const statuses = entry?.statuses ?? [];
+    if (statuses.length) return statuses.map(s => ({ id: s.id, name: s.name }));
+  } catch { /* fall through to transitions */ }
+  try {
+    const transitions = await getTransitions(cloudId, sourceIssueKey);
+    const seen = new Map();
+    for (const t of transitions) {
+      if (t.to?.name && !seen.has(t.to.name)) seen.set(t.to.name, { id: t.to.id, name: t.to.name });
+    }
+    return [...seen.values()];
+  } catch {
+    return [];
+  }
 }
 
 export async function loadIssue(cloudId, issueKey) {
@@ -272,7 +304,7 @@ export async function loadIssue(cloudId, issueKey) {
 }
 
 // Clone into same project, keeping parent. Steps: 0 schema, 1 create, 2 add-link
-export async function cloneInSameProject(cloudId, issue, { summaryOverride, fieldOverrides = {} }, onStep) {
+export async function cloneInSameProject(cloudId, issue, { summaryOverride, fieldOverrides = {}, targetStatusName = null }, onStep) {
   const { key: sourceKey, projectKey, issueTypeId, raw } = issue;
 
   onStep(0, 'pending');
@@ -293,8 +325,15 @@ export async function cloneInSameProject(cloudId, issue, { summaryOverride, fiel
     const result  = await createRawIssue(cloudId, payload);
     newKey = result.key;
     newUrl = getJiraUrl(newKey);
-    // Recover any filled fields that weren't on the create screen.
-    try { await recoverFields(cloudId, newKey, raw.fields, Object.keys(payload)); } catch { /* best-effort */ }
+    // Recover any filled fields that weren't on the create screen. Overridden
+    // fields are skipped too — the user's explicit choice (including a cleared
+    // value) must not be undone by re-copying the source value.
+    try { await recoverFields(cloudId, newKey, raw.fields, [...Object.keys(payload), ...Object.keys(fieldOverrides)]); } catch { /* best-effort */ }
+    // Walk the workflow to the requested status (a new issue starts in the
+    // workflow's initial status).
+    if (targetStatusName) {
+      try { await replicateStatus(cloudId, newKey, targetStatusName); } catch { /* best-effort */ }
+    }
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../config/projects.js';
-import { getIterations, getStories, getAreaPaths } from '../services/azureDevops.js';
+import { getIterations, filterCurrentAndFutureIterations, getStories, getAreaPaths } from '../services/azureDevops.js';
 import { createTask, getCreateStepCount } from '../services/taskSync.js';
 import { getProjectComponents } from '../services/jira.js';
 import RichTextEditor from './RichTextEditor.jsx';
@@ -172,10 +172,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
       loads.push(getIterations(azure.proxyKey, azure.project).then(all => {
         if (loadIdRef.current !== currentLoadId) return;
         if (features.iterationFilter) {
-          const filtered = all.filter(it =>
-            it.attributes?.timeFrame === 'current' ||
-            it.name.toLowerCase().includes('tasks for sprint placement'));
-          setIterations(filtered.length ? filtered : all);
+          setIterations(filterCurrentAndFutureIterations(all));
         } else setIterations(all);
       }).catch(e => { if (loadIdRef.current === currentLoadId) setExtrasErr(e.message); }));
     }

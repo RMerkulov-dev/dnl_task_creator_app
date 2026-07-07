@@ -539,6 +539,9 @@ function WorkItemRow({ item, jira, jiraChildren, depth }) {
           ? <a className="su-az-id su-az-link" href={item.url} target="_blank" rel="noreferrer" title="Open in Azure DevOps">#{item.id}</a>
           : <span className="su-az-id">#{item.id}</span>}
         <span className="su-title" title={item.title}>{item.title}</span>
+        <span className="su-assignee" title={item.assignedTo || 'Unassigned'} style={{ maxWidth: 140, flexShrink: 0 }}>
+          {item.assignedTo || 'Unassigned'}
+        </span>
         <AzureStateChip item={item} />
       </div>
 
@@ -795,16 +798,28 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
   const clearAiMatch = useCallback(() => setAiMatchIds(null), []);
 
+  // A request that is still In Progress while every one of its Jira children is
+  // already Done — a signal it can probably be closed.
+  const isReadyToClose = useCallback((it) => {
+    const j = it.jiraKey ? jira.get(it.jiraKey) : null;
+    if (!j || j.statusCategory !== 'indeterminate') return false;
+    const flat = [];
+    const walk = (nodes) => { for (const n of nodes || []) { flat.push(n); walk(n.children); } };
+    walk(jiraChildren.get(j.key));
+    return flat.length > 0 && flat.every(n => n.statusCategory === 'done');
+  }, [jira, jiraChildren]);
+
   // ── Summary counts (always over the full set, not the filtered view) ───────
   const stats = useMemo(() => {
-    let linked = 0, missing = 0, unlinked = 0;
+    let linked = 0, missing = 0, unlinked = 0, ready = 0;
     for (const it of items) {
       if (!it.jiraKey) unlinked++;
       else if (jira.has(it.jiraKey)) linked++;
       else missing++;
+      if (isReadyToClose(it)) ready++;
     }
-    return { total: items.length, linked, missing, unlinked };
-  }, [items, jira]);
+    return { total: items.length, linked, missing, unlinked, ready };
+  }, [items, jira, isReadyToClose]);
 
   // ── Apply search + filter, then rebuild the tree from the surviving items ───
   const filteredItems = useMemo(() => {
@@ -816,14 +831,15 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         if (activeFilter === 'linked'   && !(it.jiraKey && jira.has(it.jiraKey)))  return false;
         if (activeFilter === 'missing'  && !(it.jiraKey && !jira.has(it.jiraKey))) return false;
         if (activeFilter === 'unlinked' && it.jiraKey)                             return false;
+        if (activeFilter === 'ready'    && !isReadyToClose(it))                    return false;
       }
       if (!q) return true;
       const j = it.jiraKey ? jira.get(it.jiraKey) : null;
-      const hay = [`#${it.id}`, it.title, it.state, it.jiraKey, j?.summary, j?.status]
+      const hay = [`#${it.id}`, it.title, it.state, it.assignedTo, it.jiraKey, j?.summary, j?.status]
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [items, jira, query, activeFilter, aiMatchIds]);
+  }, [items, jira, query, activeFilter, aiMatchIds, isReadyToClose]);
 
   const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
 
@@ -941,6 +957,15 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
               >
                 <span className="su-stat-num">{stats.linked}</span> in Jira
               </button>
+              {stats.ready > 0 && (
+                <button
+                  className={`su-stat su-stat-ready su-stat-btn${activeFilter === 'ready' ? ' active' : ''}`}
+                  onClick={() => toggleFilter('ready')}
+                  title="Request is In Progress while all its Jira children are Done"
+                >
+                  <span className="su-stat-num">{stats.ready}</span> ready to close
+                </button>
+              )}
               {stats.missing > 0 && (
                 <button
                   className={`su-stat su-stat-warn su-stat-btn${activeFilter === 'missing' ? ' active' : ''}`}

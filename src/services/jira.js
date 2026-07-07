@@ -605,6 +605,15 @@ export async function getProjectComponents(cloudId, projectKey) {
   return Array.isArray(data) ? data : (data.values ?? []);
 }
 
+// Valid statuses per issue type in a project: [{ id, name, statuses: [...] }].
+// Needs the read:issue-status:jira scope on granular tokens.
+export async function getProjectStatuses(cloudId, projectKey) {
+  const url = `${jiraBase(cloudId)}/project/${encodeURIComponent(projectKey)}/statuses`;
+  const res = await fetch(url);
+  const data = await parseJira(res, 'getProjectStatuses');
+  return Array.isArray(data) ? data : [];
+}
+
 export async function createRawIssue(cloudId, fields) {
   const url = `${jiraBase(cloudId)}/issue`;
   const res = await fetch(url, {

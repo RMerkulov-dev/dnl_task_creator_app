@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
-import { getJiraProjects, searchJiraUsers, getChildIssues } from '../../services/jira.js';
-import { loadIssue, loadUserFields, findSprintField, loadSprintsForProject, cloneInSameProject, bulkMoveForest, moveToProject } from './jiraAgent.js';
+import { getJiraProjects, searchJiraUsers, getChildIssues, getProjectComponents } from '../../services/jira.js';
+import { loadIssue, loadCloneFields, findSprintField, loadSprintsForProject, loadStatusesForIssueType, cloneInSameProject, bulkMoveForest, moveToProject } from './jiraAgent.js';
 
 const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 const CLOUD_ID = PROJECT_LIST.find(p => p.jira)?.jira.cloudId ?? '';
@@ -497,6 +497,15 @@ export default function TaskAgentApp({ user, onLogout }) {
   const [loadingSprints,   setLoadingSprints]   = useState(false);
   const [sprintLoadErr,    setSprintLoadErr]    = useState('');
 
+  // Clone extra fields (status / labels / components / estimates)
+  const [availableStatuses,   setAvailableStatuses]   = useState([]);
+  const [selectedStatus,      setSelectedStatus]      = useState('');
+  const [sourceStatus,        setSourceStatus]        = useState('');
+  const [labelsInput,         setLabelsInput]         = useState('');
+  const [availableComponents, setAvailableComponents] = useState([]);
+  const [selectedComponents,  setSelectedComponents]  = useState([]);
+  const [estimateFields,      setEstimateFields]      = useState([]);
+
   // Move state
   const moveIdRef = useRef(1);
   const [moveItems, setMoveItems] = useState([{ id: 0, key: '', source: null, loadErr: '', loading: false, children: [], loadingChildren: false }]);
@@ -543,6 +552,13 @@ export default function TaskAgentApp({ user, onLogout }) {
     setAvailableSprints([]);
     setSelectedSprint(null);
     setSprintLoadErr('');
+    setAvailableStatuses([]);
+    setSelectedStatus('');
+    setSourceStatus('');
+    setLabelsInput('');
+    setAvailableComponents([]);
+    setSelectedComponents([]);
+    setEstimateFields([]);
   }
 
   function handleModeChange(m) {
@@ -586,15 +602,30 @@ export default function TaskAgentApp({ user, onLogout }) {
         .finally(() => setLoadingSprints(false));
 
       setLoadingUserFields(true);
-      loadUserFields(CLOUD_ID, issue.projectKey, issue.issueTypeId, issue.raw.fields)
-        .then(fields => {
-          setUserFields(fields);
+      loadCloneFields(CLOUD_ID, issue.projectKey, issue.issueTypeId, issue.raw.fields)
+        .then(({ userFields, estimateFields }) => {
+          setUserFields(userFields);
           const initial = {};
-          for (const f of fields) initial[f.id] = f.current;
+          for (const f of userFields) initial[f.id] = f.current;
           setUserSelections(initial);
+          setEstimateFields(estimateFields.map(f => ({ ...f, value: f.current ?? '' })));
         })
         .catch(() => {})
         .finally(() => setLoadingUserFields(false));
+
+      // Extra clone fields, prefilled from the source issue.
+      const statusName = issue.raw.fields.status?.name ?? '';
+      setSourceStatus(statusName);
+      setSelectedStatus(statusName);
+      loadStatusesForIssueType(CLOUD_ID, issue.projectKey, issue.issueTypeId, issue.key)
+        .then(setAvailableStatuses)
+        .catch(() => {});
+
+      setLabelsInput((issue.labels ?? []).join(', '));
+      setSelectedComponents((issue.raw.fields.components ?? []).map(c => ({ id: c.id, name: c.name })));
+      getProjectComponents(CLOUD_ID, issue.projectKey)
+        .then(setAvailableComponents)
+        .catch(() => {});
     } catch (err) {
       setLoadErr(err.message);
     } finally {
@@ -660,6 +691,15 @@ export default function TaskAgentApp({ user, onLogout }) {
         overrides[sprintFieldId] = undefined;
       }
     }
+    const labels = labelsInput.split(',').map(s => s.trim()).filter(Boolean);
+    overrides.labels = labels.length ? labels : undefined;
+    overrides.components = selectedComponents.length
+      ? selectedComponents.map(c => ({ id: String(c.id) }))
+      : undefined;
+    for (const f of estimateFields) {
+      const num = f.value === '' || f.value === null ? undefined : Number(f.value);
+      overrides[f.id] = Number.isFinite(num) ? num : undefined;
+    }
     return overrides;
   }
 
@@ -673,7 +713,11 @@ export default function TaskAgentApp({ user, onLogout }) {
     try {
       const res = await cloneInSameProject(
         CLOUD_ID, source,
-        { summaryOverride: cloneSummary || source.summary, fieldOverrides: buildFieldOverrides() },
+        {
+          summaryOverride:  cloneSummary || source.summary,
+          fieldOverrides:   buildFieldOverrides(),
+          targetStatusName: selectedStatus || null,
+        },
         onStep,
       );
       setResult(res);
@@ -992,6 +1036,90 @@ export default function TaskAgentApp({ user, onLogout }) {
                   )}
                 </div>
               )}
+
+              {source && availableStatuses.length > 0 && (
+                <div className="field" style={{ marginTop: 16 }}>
+                  <label className="field-label">Status</label>
+                  <select
+                    className="select"
+                    value={selectedStatus}
+                    onChange={e => setSelectedStatus(e.target.value)}
+                  >
+                    {sourceStatus && !availableStatuses.some(s => s.name === sourceStatus) && (
+                      <option value={sourceStatus}>{sourceStatus} (current)</option>
+                    )}
+                    {availableStatuses.map(s => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {source && (
+                <div className="field" style={{ marginTop: 16 }}>
+                  <label className="field-label">Labels</label>
+                  <input
+                    className="input"
+                    value={labelsInput}
+                    onChange={e => setLabelsInput(e.target.value)}
+                    placeholder="label1, label2"
+                  />
+                </div>
+              )}
+
+              {source && (availableComponents.length > 0 || selectedComponents.length > 0) && (
+                <div className="field" style={{ marginTop: 16 }}>
+                  <label className="field-label">Components</label>
+                  {selectedComponents.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                      {selectedComponents.map(c => (
+                        <span
+                          key={c.id}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
+                        >
+                          {c.name}
+                          <button
+                            type="button"
+                            onClick={() => setSelectedComponents(prev => prev.filter(x => x.id !== c.id))}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0, fontSize: 14, lineHeight: 1 }}
+                            aria-label={`Remove ${c.name}`}
+                          >×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {availableComponents.some(c => !selectedComponents.some(x => x.id === c.id)) && (
+                    <select
+                      className="select"
+                      value=""
+                      onChange={e => {
+                        const c = availableComponents.find(x => String(x.id) === e.target.value);
+                        if (c) setSelectedComponents(prev => [...prev, { id: c.id, name: c.name }]);
+                      }}
+                    >
+                      <option value="">+ Add component…</option>
+                      {availableComponents
+                        .filter(c => !selectedComponents.some(x => x.id === c.id))
+                        .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
+
+              {source && estimateFields.map(f => (
+                <div className="field" style={{ marginTop: 16 }} key={f.id}>
+                  <label className="field-label">{f.name}</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={f.value}
+                    onChange={e => setEstimateFields(prev => prev.map(x => x.id === f.id ? { ...x, value: e.target.value } : x))}
+                    placeholder="—"
+                  />
+                </div>
+              ))}
 
               {source && (
                 <button

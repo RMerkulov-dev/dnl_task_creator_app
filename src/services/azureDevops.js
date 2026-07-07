@@ -99,6 +99,23 @@ export async function getIterations(proxyKey, project) {
   return nodes.filter(n => n.path.includes('\\'));
 }
 
+/**
+ * Iterations worth offering in a sprint dropdown: the current and future ones
+ * (past sprints are dropped by finish date) plus the special "tasks for sprint
+ * placement" backlog node. Classification nodes carry only startDate/finishDate
+ * (no timeFrame), so the cutoff is date-based. Falls back to the full list when
+ * nothing matches so the dropdown is never empty.
+ */
+export function filterCurrentAndFutureIterations(all) {
+  const now = Date.now();
+  const filtered = all.filter(it => {
+    if (it.name.toLowerCase().includes('tasks for sprint placement')) return true;
+    const finish = it.attributes?.finishDate;
+    return finish ? new Date(finish).getTime() >= now : false;
+  });
+  return filtered.length ? filtered : all;
+}
+
 // ─── User Stories — used by NSMG ─────────────────────────────────────────────
 
 /**

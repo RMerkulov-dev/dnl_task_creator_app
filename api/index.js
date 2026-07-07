@@ -1,6 +1,7 @@
 import express from 'express';
 import dotenv  from 'dotenv';
 import crypto  from 'node:crypto';
+import fs      from 'node:fs';
 import { FOLLOWUP_SKILLS, listFollowupSkills } from './followupSkills.js';
 
 dotenv.config();
@@ -1912,6 +1913,49 @@ app.post('/api/email-agent', express.json({ limit: '50kb' }), async (req, res) =
   } catch (err) {
     console.error('[Email Agent error]', err.message);
     res.status(500).json({ error: humaniseFetchError(err) });
+  }
+});
+
+// ─── Email Agent feedback ────────────────────────────────────────────────────
+// Thumbs up/down on refined outputs, collected to improve the skill prompts.
+// Appended as JSONL next to the API code when the FS is writable (local dev);
+// on serverless deploys the write fails silently and the log line is the record.
+const EMAIL_FEEDBACK_FILE = new URL('./email-agent-feedback.jsonl', import.meta.url);
+
+app.post('/api/email-agent/feedback', express.json({ limit: '200kb' }), (req, res) => {
+  const { rating, input, output, skillId, skillName, customized, userEmail } = req.body ?? {};
+  if (rating !== 'up' && rating !== 'down') {
+    return res.status(400).json({ error: 'rating must be "up" or "down"' });
+  }
+  const entry = {
+    ts:         new Date().toISOString(),
+    rating,
+    skillId:    skillId   ?? null,
+    skillName:  skillName ?? null,
+    customized: !!customized,
+    userEmail:  userEmail ?? null,
+    input:      String(input  ?? '').slice(0, 8000),
+    output:     String(output ?? '').slice(0, 8000),
+  };
+  console.log(`[Email Agent feedback] ${entry.rating} — ${entry.skillName ?? 'unknown skill'} (${entry.userEmail ?? 'anon'})`);
+  try {
+    fs.appendFileSync(EMAIL_FEEDBACK_FILE, JSON.stringify(entry) + '\n');
+  } catch (err) {
+    console.warn('[Email Agent feedback] file write failed:', err.message);
+  }
+  res.json({ ok: true });
+});
+
+// Review collected feedback (for prompt-improvement analysis).
+app.get('/api/email-agent/feedback', (req, res) => {
+  try {
+    const text = fs.readFileSync(EMAIL_FEEDBACK_FILE, 'utf8');
+    const entries = text.split('\n').filter(Boolean)
+      .map(l => { try { return JSON.parse(l); } catch { return null; } })
+      .filter(Boolean);
+    res.json({ count: entries.length, entries });
+  } catch {
+    res.json({ count: 0, entries: [] });
   }
 });
 
