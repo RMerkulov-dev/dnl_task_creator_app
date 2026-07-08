@@ -5,3 +5,5 @@ dist/
 .DS_Store
 *.local
 api/email-agent-feedback.jsonl
+storage/
+CLAUDE.md

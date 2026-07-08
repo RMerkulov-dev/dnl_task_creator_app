@@ -3,6 +3,7 @@ import dotenv  from 'dotenv';
 import crypto  from 'node:crypto';
 import fs      from 'node:fs';
 import { FOLLOWUP_SKILLS, listFollowupSkills } from './followupSkills.js';
+import { registerDocumentAgentRoutes } from './documentAgent.js';
 
 dotenv.config();
 
@@ -343,6 +344,10 @@ async function proxyTo(req, res, upstreamUrl, authHeader) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+
+// Documentation AI (Beta) — /api/doc-agent/* (registered after the auth
+// middleware above so every route requires the app bearer token).
+registerDocumentAgentRoutes(app);
 
 // Azure DevOps proxy
 app.use('/api/azure-devops/:key', async (req, res) => {

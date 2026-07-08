@@ -120,6 +120,20 @@ function ReportIcon() {
   );
 }
 
+function DocAiIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Document page */}
+      <path d="M6 2.5h8.5L19.5 7.5V19c0 1.4-1.1 2.5-2.5 2.5H6c-1.4 0-2.5-1.1-2.5-2.5V5C3.5 3.6 4.6 2.5 6 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+      <path d="M14.5 2.5v5h5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+      {/* Text lines */}
+      <path d="M7 12h9M7 15h9M7 18h5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+      {/* AI sparkle */}
+      <path d="M9.2 5.2l.55 1.3 1.3.55-1.3.55-.55 1.3-.55-1.3-1.3-.55 1.3-.55z" fill="currentColor"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
@@ -130,6 +144,7 @@ const ICON_MAP = {
   'email-agent':   EmailAgentIcon,
   'status-updates': StatusUpdatesIcon,
   'report':        ReportIcon,
+  'doc-ai':        DocAiIcon,
 };
 
 function PlatformLogo() {
@@ -186,6 +201,7 @@ export default function Sidebar({ activeId, onSelect, user, onLogout }) {
               {isActive && <span className="sidebar-active-bar" />}
               <span className="sidebar-app-icon">
                 {IconComp && <IconComp />}
+                {app.beta && <span className="sidebar-beta-badge">Beta</span>}
               </span>
               <span className="sidebar-app-label">{app.shortName}</span>
             </button>

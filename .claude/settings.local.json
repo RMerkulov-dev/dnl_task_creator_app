@@ -114,7 +114,14 @@
       "Bash(node scripts/validate_palette.js \"#00E5FF,#8B5CF6\" --mode dark --surface \"#111113\")",
       "Bash(node scripts/validate_palette.js \"#00E5FF,#8B5CF6\" --mode dark)",
       "Bash(node scripts/validate_palette.js \"#22B8CF,#9775FA\" --mode dark --surface \"#111113\")",
-      "Bash(node scripts/validate_palette.js \"#22B8CF,#9775FA\" --mode light --surface \"#FFFFFF\")"
+      "Bash(node scripts/validate_palette.js \"#22B8CF,#9775FA\" --mode light --surface \"#FFFFFF\")",
+      "Bash(npm install *)",
+      "Bash(node -e \"import\\('multer'\\).then\\(m=>console.log\\('multer ok', typeof m.default\\)\\); import\\('pdfkit'\\).then\\(m=>console.log\\('pdfkit ok', typeof m.default\\)\\)\")",
+      "Bash(node --check api/documentAgent.js)",
+      "Bash(ffmpeg -y -v error -f lavfi -i testsrc=duration=25:size=640x360:rate=10 -pix_fmt yuv420p /private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/test.mp4)",
+      "Bash(SCRATCH_PDF=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/test-out.pdf SCRATCH=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad true)",
+      "Bash(SCRATCH_PDF=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/test-out.pdf node --input-type=module -e ' *)",
+      "Bash(pkill -f \"node api/index.js\")"
     ]
   }
 }
