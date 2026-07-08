@@ -323,7 +323,7 @@ function extractJson(text) {
   }
 }
 
-async function analyzeFrames(modelKey, framePaths, { customPrompt, preset, targetPages, customInstructions, transcriptText }) {
+async function analyzeFrames(modelKey, framePaths, { customPrompt, preset, targetPages, customInstructions, transcriptText, actionsText }) {
   if (!MODELS[modelKey]) throw new Error(`Unknown model key: ${modelKey}`);
   if (!cfg.openrouterApiKey) throw new Error('OPENROUTER_API_KEY is not configured');
   if (!framePaths.length) throw new Error('No frames provided for analysis');
@@ -340,6 +340,9 @@ async function analyzeFrames(modelKey, framePaths, { customPrompt, preset, targe
         + 'the document format described in the system prompt.'
         + `\n\n--- TRANSCRIPT START ---\n${transcriptText.trim()}\n--- TRANSCRIPT END ---`,
     });
+  }
+  if (actionsText && actionsText.trim()) {
+    content.push({ type: 'text', text: actionsText.trim() });
   }
   for (let i = 0; i < framePaths.length; i++) {
     const b64 = (await fsp.readFile(framePaths[i])).toString('base64');
@@ -703,6 +706,186 @@ async function smartExtract(videoPath, outDir, cap, durationS) {
   return { frames, info };
 }
 
+// ─── Action (click) detection — Scribe-style frame selection ──────────────────
+// Clicks are recovered from the video itself: a click almost always produces a
+// burst of on-screen change (dropdown opens, dialog appears, page navigates).
+// We scan a low-res grayscale stream for stable→burst transitions and snip the
+// full-res frame just BEFORE each burst (the screen the user acted on), plus a
+// "result" frame after large transitions (page changes). Frame count therefore
+// equals the number of detected actions — no slider guessing needed.
+
+const ACTION_FPS = 4;
+const ACTION_W = 160, ACTION_H = 90;
+
+async function actionDiffProfile(videoPath) {
+  const { rc, out } = await run('ffmpeg', [
+    '-v', 'error', '-i', videoPath,
+    '-vf', `fps=${ACTION_FPS},scale=${ACTION_W}:${ACTION_H}`,
+    '-f', 'rawvideo', '-pix_fmt', 'gray', '-',
+  ], { binaryOut: true });
+  const frameBytes = ACTION_W * ACTION_H;
+  if (rc !== 0 || out.length < frameBytes * 3) return null;
+  const n = Math.floor(out.length / frameBytes);
+  const diffs = new Float64Array(n); // diffs[i] = mean abs pixel delta frame i-1 → i
+  for (let i = 1; i < n; i++) {
+    const a = (i - 1) * frameBytes, b = i * frameBytes;
+    let sum = 0;
+    for (let p = 0; p < frameBytes; p++) sum += Math.abs(out[b + p] - out[a + p]);
+    diffs[i] = sum / frameBytes;
+  }
+  return diffs;
+}
+
+function detectActionEvents(diffs) {
+  // Adaptive threshold above idle noise (cursor movement, caret blink). On
+  // videos with continuous motion the baseline rises and few events fire —
+  // the caller then falls back to the smart/visual pipelines.
+  const sorted = [...diffs].slice(1).sort((x, y) => x - y);
+  const median = sorted[Math.floor(sorted.length / 2)] || 0;
+  const thr = Math.max(1.2, median * 5);
+  const bigThr = Math.max(thr * 4, 12); // page-level transition
+
+  const events = [];
+  let i = 1;
+  while (i < diffs.length) {
+    if (diffs[i] > thr && diffs[i - 1] <= thr) {
+      let j = i, magnitude = 0;
+      // Follow the burst (allowing 1-sample dips) but cap the scan at 3s so a
+      // playing animation can't swallow the whole timeline into one event.
+      while (
+        j < diffs.length && j - i < ACTION_FPS * 3
+        && (diffs[j] > thr || (j + 1 < diffs.length && diffs[j + 1] > thr))
+      ) {
+        magnitude = Math.max(magnitude, diffs[j]);
+        j++;
+      }
+      events.push({
+        beforeT: Math.max(0, (i - 1) / ACTION_FPS),
+        afterT: j / ACTION_FPS,
+        magnitude,
+        big: magnitude >= bigThr,
+      });
+      i = j + 1;
+    } else i++;
+  }
+
+  // Merge bursts closer than 0.7s — double-clicks, dropdown open+select.
+  const merged = [];
+  for (const e of events) {
+    const last = merged[merged.length - 1];
+    if (last && e.beforeT - last.afterT < 0.7) {
+      last.afterT = e.afterT;
+      last.magnitude = Math.max(last.magnitude, e.magnitude);
+      last.big = last.big || e.big;
+    } else merged.push({ ...e });
+  }
+  return merged;
+}
+
+async function actionExtract(videoPath, outDir, cap, durationS) {
+  const diffs = await actionDiffProfile(videoPath);
+  if (!diffs) return null;
+  const events = detectActionEvents(diffs);
+  if (events.length < 2) {
+    console.warn('[doc-agent] actions: only %d event(s) detected; falling back', events.length);
+    return null;
+  }
+
+  let shots = [];
+  if (events[0].beforeT > 1.5) shots.push({ t: 0.2, kind: 'initial', magnitude: Infinity });
+  for (const e of events) {
+    shots.push({ t: e.beforeT, kind: 'action', magnitude: e.magnitude });
+    if (e.big) {
+      shots.push({
+        t: Math.min(e.afterT + 0.3, Math.max(0, durationS - 0.1)),
+        kind: 'result',
+        magnitude: e.magnitude * 0.9,
+      });
+    }
+  }
+  if (shots.length > cap) {
+    shots.sort((a, b) => b.magnitude - a.magnitude);
+    shots = shots.slice(0, cap);
+  }
+  shots.sort((a, b) => a.t - b.t);
+
+  const candidates = [];
+  for (let i = 0; i < shots.length; i++) {
+    const target = path.join(outDir, `act_${String(i).padStart(4, '0')}.jpg`);
+    if (await snipFrameAt(videoPath, shots[i].t, target)) {
+      candidates.push({ p: target, shot: shots[i] });
+    }
+  }
+  if (candidates.length < 2) {
+    for (const c of candidates) await fsp.unlink(c.p).catch(() => {});
+    return null;
+  }
+
+  // Drop near-identical shots (e.g. a dropdown that closed back to the same
+  // screen) with the same pHash dedup the visual pipeline uses.
+  const keptSet = new Set(await dedupFrames(candidates.map(c => c.p)));
+  const final = candidates.filter(c => keptSet.has(c.p));
+  for (const c of candidates) {
+    if (!keptSet.has(c.p)) await fsp.unlink(c.p).catch(() => {});
+  }
+
+  const frames = [], framesMeta = [];
+  for (let i = 0; i < final.length; i++) {
+    const target = path.join(outDir, `frame_${String(i).padStart(4, '0')}.jpg`);
+    await fsp.rename(final[i].p, target);
+    frames.push(target);
+    framesMeta.push({
+      index: i,
+      t: Math.round(final[i].shot.t * 10) / 10,
+      kind: final[i].shot.kind,
+    });
+  }
+
+  await fsp.writeFile(path.join(outDir, 'actions.json'), JSON.stringify({
+    events_detected: events.length,
+    frames: framesMeta,
+  }, null, 2));
+
+  // Best-effort transcript: frames come from action detection, but narration
+  // (when present) still improves the analysis. Silent skip on no-audio.
+  let transcriptSegments = 0;
+  try {
+    const audioPath = await extractAudio(videoPath, outDir);
+    const segments = await transcribe(audioPath);
+    await fsp.writeFile(path.join(outDir, 'transcript.json'), JSON.stringify({
+      duration_s: durationS, segments, chunks: [],
+    }, null, 2));
+    transcriptSegments = segments.length;
+  } catch { /* most recordings have no narration */ }
+
+  return {
+    frames,
+    info: {
+      events_detected: events.length,
+      shots_planned: shots.length,
+      transcript_segments: transcriptSegments,
+      final_count: frames.length,
+    },
+  };
+}
+
+async function loadActions(framesDir) {
+  try { return JSON.parse(await fsp.readFile(path.join(framesDir, 'actions.json'), 'utf8')); }
+  catch { return null; }
+}
+
+function actionsSummaryForAnalysis(data) {
+  const frames = data?.frames || [];
+  if (!frames.length) return null;
+  const lines = frames.map(f => `frame_index=${f.index} → ${Number(f.t).toFixed(1)}s (${f.kind})`);
+  return 'Frames were captured automatically at the moments of detected user '
+    + 'actions (bursts of on-screen change — typically clicks or page '
+    + 'transitions). "initial" is the starting screen, "action" is the screen '
+    + 'right before the user acted, "result" is the screen after a major '
+    + 'transition settled. Frame → video timestamp map:\n'
+    + lines.join('\n');
+}
+
 async function loadTranscript(framesDir) {
   try { return JSON.parse(await fsp.readFile(path.join(framesDir, 'transcript.json'), 'utf8')); }
   catch { return null; }
@@ -721,7 +904,9 @@ function transcriptSummaryForAnalysis(data) {
 
 // ─── Frame extraction orchestrator (port of video.extract_frames) ─────────────
 
-async function extractFrames(videoPath, outDir, maxFrames) {
+// mode: 'auto' (action detection → smart → visual), 'smart' (transcript-driven
+// → visual), 'manual' (visual pipeline with the user-provided frame cap).
+export async function extractFrames(videoPath, outDir, maxFrames, mode = 'auto') {
   await fsp.mkdir(outDir, { recursive: true });
   for (const f of await listGlob(outDir, '')) await fsp.unlink(f).catch(() => {});
 
@@ -730,12 +915,38 @@ async function extractFrames(videoPath, outDir, maxFrames) {
   let cap = (maxFrames && maxFrames > 0) ? maxFrames : plan.defaultMaxFrames;
   cap = Math.max(5, Math.min(cap, cfg.maxFramesHardLimit));
 
-  const smartResult = await smartExtract(videoPath, outDir, cap, duration);
-  if (smartResult) {
-    return {
-      frames: smartResult.frames,
-      info: { strategy: 'smart', duration_s: Math.round(duration * 100) / 100, cap_applied: cap, ...smartResult.info },
-    };
+  if (mode === 'auto') {
+    // Action count is organic — the cap only guards against noisy videos, so
+    // give it more headroom than the duration-based default.
+    const actionCap = (maxFrames && maxFrames > 0)
+      ? cap
+      : Math.min(cfg.maxFramesHardLimit, Math.max(plan.defaultMaxFrames * 2, 40));
+    const actionResult = await actionExtract(videoPath, outDir, actionCap, duration);
+    if (actionResult) {
+      return {
+        frames: actionResult.frames,
+        info: {
+          strategy: 'actions',
+          duration_s: Math.round(duration * 100) / 100,
+          cap_applied: actionCap,
+          ...actionResult.info,
+        },
+      };
+    }
+    // Clean partial action artefacts before trying the next strategy.
+    for (const f of await listGlob(outDir, '')) await fsp.unlink(f).catch(() => {});
+    await fsp.unlink(path.join(outDir, 'actions.json')).catch(() => {});
+    await fsp.unlink(path.join(outDir, 'transcript.json')).catch(() => {});
+  }
+
+  if (mode !== 'manual') {
+    const smartResult = await smartExtract(videoPath, outDir, cap, duration);
+    if (smartResult) {
+      return {
+        frames: smartResult.frames,
+        info: { strategy: 'smart', duration_s: Math.round(duration * 100) / 100, cap_applied: cap, ...smartResult.info },
+      };
+    }
   }
 
   // Visual fallback: clean partial smart artefacts first.
@@ -1008,20 +1219,21 @@ export function buildPdf(outputPath, result, framePaths, settings) {
 
 // ─── Pipeline orchestrators (port of workers/pipeline.py) ─────────────────────
 
-async function runPipeline(jobId, videoPath, modelKey, preset, customPrompt, maxFrames, targetPages, customInstructions) {
+async function runPipeline(jobId, videoPath, modelKey, preset, customPrompt, maxFrames, targetPages, customInstructions, extractionMode) {
   try {
     updateJob(jobId, { status: 'extracting', progress: 10 });
     const framesDir = path.join(framesRoot, jobId);
-    const { frames, info } = await extractFrames(videoPath, framesDir, maxFrames);
+    const { frames, info } = await extractFrames(videoPath, framesDir, maxFrames, extractionMode);
     if (!frames.length) throw new Error('No frames extracted from video');
     console.log('[doc-agent] extraction info for %s: %j', jobId, info);
-    updateJob(jobId, { frame_count: frames.length, progress: 35 });
+    updateJob(jobId, { frame_count: frames.length, progress: 35, extraction_strategy: info.strategy });
 
     updateJob(jobId, { status: 'analyzing', progress: 45 });
     const transcript = await loadTranscript(framesDir);
     const transcriptText = transcriptSummaryForAnalysis(transcript);
+    const actionsText = actionsSummaryForAnalysis(await loadActions(framesDir));
     const result = await analyzeFrames(modelKey, frames, {
-      customPrompt, preset, targetPages, customInstructions, transcriptText,
+      customPrompt, preset, targetPages, customInstructions, transcriptText, actionsText,
     });
     updateJob(jobId, { result, progress: 80 });
 
@@ -1047,8 +1259,9 @@ async function runRegenerate(jobId, modelKey, preset, customPrompt, customInstru
     });
     const transcript = await loadTranscript(path.join(framesRoot, jobId));
     const transcriptText = transcriptSummaryForAnalysis(transcript);
+    const actionsText = actionsSummaryForAnalysis(await loadActions(path.join(framesRoot, jobId)));
     const result = await analyzeFrames(modelKey, frames, {
-      customPrompt, preset, targetPages, customInstructions, transcriptText,
+      customPrompt, preset, targetPages, customInstructions, transcriptText, actionsText,
     });
     updateJob(jobId, { result, progress: 80 });
 
@@ -1127,6 +1340,7 @@ export function registerDocumentAgentRoutes(app) {
         const customInstructions = req.body.custom_instructions || null;
         const maxFrames = req.body.max_frames ? Number(req.body.max_frames) : null;
         const targetPages = req.body.target_pages ? Number(req.body.target_pages) : null;
+        const extractionMode = req.body.extraction_mode || 'auto';
 
         const fail = (code, msg) => {
           fs.unlink(file.path, () => {});
@@ -1134,6 +1348,9 @@ export function registerDocumentAgentRoutes(app) {
         };
         if (!MODELS[model]) return fail(400, `Unknown model '${model}'. Use one of: ${Object.keys(MODELS).join(', ')}`);
         if (preset && !PRESETS[preset]) return fail(400, `Unknown preset '${preset}'. Use one of: ${Object.keys(PRESETS).join(', ')}`);
+        if (!['auto', 'smart', 'manual'].includes(extractionMode)) {
+          return fail(400, `Unknown extraction_mode '${extractionMode}'. Use auto, smart or manual`);
+        }
         if (maxFrames != null && (maxFrames < 5 || maxFrames > cfg.maxFramesHardLimit)) {
           return fail(400, `max_frames must be between 5 and ${cfg.maxFramesHardLimit}`);
         }
@@ -1148,12 +1365,13 @@ export function registerDocumentAgentRoutes(app) {
         const jobId = createJob({
           model, preset, custom_prompt: customPrompt,
           custom_instructions: customInstructions, target_pages: targetPages,
+          extraction_mode: extractionMode,
         });
         const dest = path.join(uploadsDir, `${jobId}${ext}`);
         await fsp.rename(file.path, dest);
 
         // Fire-and-forget background pipeline (FastAPI BackgroundTasks port).
-        runPipeline(jobId, dest, model, preset, customPrompt, maxFrames, targetPages, customInstructions);
+        runPipeline(jobId, dest, model, preset, customPrompt, maxFrames, targetPages, customInstructions, extractionMode);
         res.json({ job_id: jobId, status: 'queued' });
       } catch (e) {
         res.status(500).json({ error: String(e.message || e) });

@@ -190,8 +190,24 @@ function PromptEditor({ value, defaultValue, onChange, disabled }) {
 
 // ─── Analysis options form ────────────────────────────────────────────────────
 
+const EXTRACTION_MODES = [
+  {
+    key: 'auto', name: 'Auto — detect user actions (recommended)',
+    description: 'Finds moments of on-screen change (clicks, page transitions) and captures a frame per action — no need to guess the frame count.',
+  },
+  {
+    key: 'smart', name: 'Smart — by speech topics',
+    description: 'Transcribes the narration and captures one frame per spoken topic. Best for videos with voice-over.',
+  },
+  {
+    key: 'manual', name: 'Manual — fixed frame count',
+    description: 'Classic mode: uniform sampling + scene detection, capped by the slider below.',
+  },
+];
+
 function AnalysisOptions({ options, state, setState, disabled, showMaxFrames = true }) {
   const presetObj = options.presets.find(p => p.key === state.preset);
+  const modeObj = EXTRACTION_MODES.find(m => m.key === state.extractionMode);
 
   useEffect(() => {
     if (!state.promptIsCustom && presetObj && state.customPrompt !== presetObj.prompt) {
@@ -224,8 +240,21 @@ function AnalysisOptions({ options, state, setState, disabled, showMaxFrames = t
         </div>
       </div>
 
-      <div className={showMaxFrames ? 'docai-grid-2' : ''}>
-        {showMaxFrames && (
+      {showMaxFrames && (
+        <div className="docai-field">
+          <label className="docai-label"><span>Frame selection</span></label>
+          <select
+            className="select" value={state.extractionMode} disabled={disabled}
+            onChange={e => setState({ ...state, extractionMode: e.target.value })}
+          >
+            {EXTRACTION_MODES.map(m => <option key={m.key} value={m.key}>{m.name}</option>)}
+          </select>
+          <p className="docai-hint">{modeObj?.description}</p>
+        </div>
+      )}
+
+      <div className={showMaxFrames && state.extractionMode === 'manual' ? 'docai-grid-2' : ''}>
+        {showMaxFrames && state.extractionMode === 'manual' && (
           <Slider
             label="Frame count" value={state.maxFrames} valueLabel={`${state.maxFrames}`}
             min={5} max={options.max_frames_hard_limit} step={1} disabled={disabled}
@@ -643,6 +672,7 @@ export default function DocumentAiApp() {
           customPrompt: preset?.prompt ?? '',
           promptIsCustom: false,
           customInstructions: '',
+          extractionMode: 'auto',
           maxFrames: 30,
           targetPages: opts.default_target_pages || 3,
         });
@@ -683,7 +713,9 @@ export default function DocumentAiApp() {
       if (!form.promptIsCustom && form.preset) fd.append('preset', form.preset);
       if (form.promptIsCustom && form.customPrompt.trim()) fd.append('custom_prompt', form.customPrompt);
       if (form.customInstructions.trim()) fd.append('custom_instructions', form.customInstructions);
-      fd.append('max_frames', String(form.maxFrames));
+      fd.append('extraction_mode', form.extractionMode);
+      // In auto/smart modes the backend derives the frame count itself.
+      if (form.extractionMode === 'manual') fd.append('max_frames', String(form.maxFrames));
       fd.append('target_pages', String(form.targetPages));
       const data = await apiJson('/analyze', { method: 'POST', body: fd });
       clearFrameCache();
