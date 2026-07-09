@@ -120,20 +120,6 @@ function ReportIcon() {
   );
 }
 
-function DocAiIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Document page */}
-      <path d="M6 2.5h8.5L19.5 7.5V19c0 1.4-1.1 2.5-2.5 2.5H6c-1.4 0-2.5-1.1-2.5-2.5V5C3.5 3.6 4.6 2.5 6 2.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-      <path d="M14.5 2.5v5h5" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-      {/* Text lines */}
-      <path d="M7 12h9M7 15h9M7 18h5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-      {/* AI sparkle */}
-      <path d="M9.2 5.2l.55 1.3 1.3.55-1.3.55-.55 1.3-.55-1.3-1.3-.55 1.3-.55z" fill="currentColor"/>
-    </svg>
-  );
-}
-
 const ICON_MAP = {
   'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
@@ -144,7 +130,6 @@ const ICON_MAP = {
   'email-agent':   EmailAgentIcon,
   'status-updates': StatusUpdatesIcon,
   'report':        ReportIcon,
-  'doc-ai':        DocAiIcon,
 };
 
 function PlatformLogo() {
@@ -182,7 +167,33 @@ function getInitials(email) {
   return name.slice(0, 2).toUpperCase();
 }
 
-export default function Sidebar({ activeId, onSelect, user, onLogout }) {
+function SunIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.8"/>
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
+function ClockIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8"/>
+      <path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+export default function Sidebar({ activeId, onSelect, user, onLogout, themeMode, setThemeMode }) {
   const initials = getInitials(user);
 
   return (
@@ -217,6 +228,38 @@ export default function Sidebar({ activeId, onSelect, user, onLogout }) {
       </nav>
 
       <div style={{ flex: 1 }} />
+
+      {setThemeMode && (
+        <div className="theme-toggle theme-toggle-vertical" role="group" aria-label="Theme">
+          <button
+            type="button"
+            className={`theme-toggle-opt ${themeMode === 'light' ? 'active' : ''}`}
+            onClick={() => setThemeMode('light')}
+            aria-label="Light theme"
+            title="Light theme"
+          >
+            <SunIcon />
+          </button>
+          <button
+            type="button"
+            className={`theme-toggle-opt ${themeMode === 'scheduled' ? 'active' : ''}`}
+            onClick={() => setThemeMode('scheduled')}
+            aria-label="Scheduled theme (Kyiv time)"
+            title="Auto: light after sunrise, dark after sunset (Kyiv)"
+          >
+            <ClockIcon />
+          </button>
+          <button
+            type="button"
+            className={`theme-toggle-opt ${themeMode === 'dark' ? 'active' : ''}`}
+            onClick={() => setThemeMode('dark')}
+            aria-label="Dark theme"
+            title="Dark theme"
+          >
+            <MoonIcon />
+          </button>
+        </div>
+      )}
 
       <div className="sidebar-user">
         <div className="sidebar-user-avatar" title={user}>{initials}</div>

@@ -101,7 +101,7 @@ function getInitialProject(visible) {
   return visible[0];
 }
 
-export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, theme, themeMode, setThemeMode }) {
+export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }) {
   // null = all projects (System Admin); array = restricted list
   const visibleProjects = allowedProjects
     ? PROJECT_LIST.filter(p => allowedProjects.includes(p.id))
@@ -554,43 +554,6 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout, 
         <div className="header-sep" />
         <span className="header-title">DNL Tasks Creator</span>
         <div className="header-spacer" />
-        {setThemeMode && (
-          <div className="theme-toggle" role="group" aria-label="Theme" style={{ marginRight: 12 }}>
-            <button
-              type="button"
-              className={`theme-toggle-opt ${themeMode === 'light' ? 'active' : ''}`}
-              onClick={() => setThemeMode('light')}
-              aria-label="Light theme"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.8"/>
-                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`theme-toggle-opt ${themeMode === 'scheduled' ? 'active' : ''}`}
-              onClick={() => setThemeMode('scheduled')}
-              aria-label="Scheduled theme (Kyiv time)"
-              title="Auto: light after sunrise, dark after sunset (Kyiv)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8"/>
-                <path d="M12 7v5l3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-            <button
-              type="button"
-              className={`theme-toggle-opt ${themeMode === 'dark' ? 'active' : ''}`}
-              onClick={() => setThemeMode('dark')}
-              aria-label="Dark theme"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </button>
-          </div>
-        )}
         {user && <span className="header-user" title={`Session expires in ~${hoursLeft}h`}>{user}</span>}
         <button className="btn btn-ghost" onClick={onLogout} style={{ marginLeft: 12 }}>
           Sign out

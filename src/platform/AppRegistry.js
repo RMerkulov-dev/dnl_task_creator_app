@@ -36,14 +36,6 @@ export const APP_REGISTRY = [
     gradient: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
     glow: 'rgba(245, 158, 11, 0.5)',
   },
-  {
-    id: 'doc-ai',
-    name: 'Documentation AI',
-    shortName: 'Docs AI',
-    beta: true,
-    gradient: 'linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%)',
-    glow: 'rgba(139, 92, 246, 0.5)',
-  },
 ];
 
 // The "PM" workspace bundles four project-management tools behind a single
@@ -78,5 +70,4 @@ export const APP_COMPONENTS = {
   'email-agent':   lazy(() => import('../apps/email_agent/EmailAgentApp.jsx')),
   'status-updates': lazy(() => import('../apps/status_updates/StatusUpdatesApp.jsx')),
   'report':        lazy(() => import('../apps/report/ReportApp.jsx')),
-  'doc-ai':        lazy(() => import('../apps/document_ai/DocumentAiApp.jsx')),
 };

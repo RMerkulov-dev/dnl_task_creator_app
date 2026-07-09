@@ -32,6 +32,8 @@ export default function PlatformShell({ session, onLogout, theme, themeMode, set
         onSelect={setActiveId}
         user={session.email}
         onLogout={onLogout}
+        themeMode={themeMode}
+        setThemeMode={setThemeMode}
       />
       <div className="platform-content">
         <Suspense fallback={<AppLoader />}>
