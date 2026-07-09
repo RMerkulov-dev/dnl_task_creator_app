@@ -210,14 +210,34 @@ export function extractJiraKey(value) {
 }
 
 /**
+ * Find the raw Jira-link value on a work item's `fields` map. The configured
+ * reference name (jiraIdField) is preferred, but different work-item types /
+ * projects sometimes store the link under a differently-named custom field
+ * (e.g. Custom.JiraLink vs Custom.JiraID) — so when the preferred field is
+ * empty we scan any field whose reference name mentions "jira" for a value that
+ * parses to a Jira key. Returns the raw value (or null).
+ */
+export function resolveJiraFieldValue(fields, preferred) {
+  if (!fields) return null;
+  if (preferred && extractJiraKey(fields[preferred])) return fields[preferred];
+  for (const [name, value] of Object.entries(fields)) {
+    if (/jira/i.test(name) && extractJiraKey(value)) return value;
+  }
+  return preferred ? (fields[preferred] ?? null) : null;
+}
+
+/**
  * Convert a work-item REST API URL into its browsable Azure Boards web URL.
  *   API:  https://dev.azure.com/{org}/_apis/wit/workItems/{id}
+ *   API:  https://dev.azure.com/{org}/{projectId}/_apis/wit/workItems/{id}
  *   Web:  https://dev.azure.com/{org}/{project}/_workitems/edit/{id}
- * The batch endpoint (when a `fields` filter is set) omits `_links.html`, so we
- * derive the web link from the API url ourselves. Returns null if it can't.
+ * The batch endpoint never returns `_links.html` and its `url` carries the
+ * project GUID between the org and `_apis`, so the optional middle segment must
+ * be tolerated. We rebuild the web link from the org + the (named) project.
+ * Returns null if it can't.
  */
 export function workItemWebUrl(apiUrl, project) {
-  const m = String(apiUrl || '').match(/^(https?:\/\/[^/]+\/[^/]+)\/_apis\/wit\/workItems\/(\d+)/i);
+  const m = String(apiUrl || '').match(/^(https?:\/\/[^/]+\/[^/]+)\/(?:[^/]+\/)?_apis\/wit\/workItems\/(\d+)/i);
   if (!m) return null;
   return `${m[1]}/${encodeURIComponent(project)}/_workitems/edit/${m[2]}`;
 }
@@ -247,20 +267,18 @@ export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath
   const ids = (wiql.workItems || []).map(w => w.id);
   if (!ids.length) return [];
 
-  const fields = [
-    'System.Id', 'System.Title', 'System.WorkItemType', 'System.State',
-    'System.AssignedTo', 'System.Parent', jiraIdField,
-  ].join(',');
-
-  // The batch endpoint accepts at most 200 ids per call.
+  // Fetch the full field set (no `fields` filter) rather than a fixed list: the
+  // Jira link can live under a custom-field reference name that differs from the
+  // configured jiraIdField, and resolveJiraFieldValue() needs to see all fields
+  // to find it. It also keeps `_links.html` (the fields filter strips it).
   const items = [];
   for (let i = 0; i < ids.length; i += 200) {
     const chunk = ids.slice(i, i + 200);
-    const batchUrl = `${BASE}/${proxyKey}/_apis/wit/workitems?ids=${chunk.join(',')}&fields=${encodeURIComponent(fields)}&api-version=7.0`;
+    const batchUrl = `${BASE}/${proxyKey}/_apis/wit/workitems?ids=${chunk.join(',')}&api-version=7.0`;
     const batch = await parse(await fetch(batchUrl), 'getBoardWorkItems-batch');
     for (const item of batch.value || []) {
       const f = item.fields || {};
-      const raw = f[jiraIdField] ?? null;
+      const raw = resolveJiraFieldValue(f, jiraIdField);
       items.push({
         id:         item.id,
         title:      f['System.Title'] || `#${item.id}`,

@@ -1799,6 +1799,56 @@ app.post('/api/translate', express.json({ limit: '50kb' }), async (req, res) => 
   }
 });
 
+// ─── Extract issue IDs from a screenshot (PM › Component tab) ─────────────────
+// Body: { image: "data:image/png;base64,…" }. Sends the screenshot to a vision
+// model and returns { ids: [...] } — the raw tokens it reads off the cards
+// (Azure DevOps work-item numbers and/or Jira keys like ABS-123). The client
+// classifies and resolves them; here we only OCR. Uses a vision-capable model
+// (deepseek executor is text-only), configurable via OPENROUTER_VISION_MODEL.
+app.post('/api/component/extract-ids', express.json({ limit: '12mb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { image } = req.body ?? {};
+  if (!image || typeof image !== 'string' || !image.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'image (data URL) is required' });
+  }
+
+  const visionModel = process.env.OPENROUTER_VISION_MODEL || 'google/gemini-2.5-flash';
+  const systemPrompt =
+    'You read identifiers off a screenshot of Azure DevOps or Jira cards/boards. ' +
+    'Extract every issue identifier you can see: Azure DevOps work-item numbers (bare integers, often prefixed with # or shown as a card id) AND Jira keys (e.g. ABS-123, NSMG-45). ' +
+    'Do NOT invent ids, do NOT include story-point values, sprint numbers, dates, avatars, or unrelated numbers — only work-item / card identifiers. ' +
+    'Respond with VALID JSON ONLY, no markdown fences, no prose: {"ids": ["1234", "ABS-56", …]} in the order they appear.';
+
+  try {
+    const data = await callOpenRouter(apiKey, {
+      model: visionModel,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: [
+          { type: 'text', text: 'Extract all issue identifiers from this screenshot.' },
+          { type: 'image_url', image_url: { url: image } },
+        ] },
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0,
+      max_tokens: 2000,
+    });
+    const raw = extractReply(data.choices?.[0]?.message);
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    let ids = [];
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed.ids)) ids = parsed.ids.map(String);
+    } catch { /* fall through with empty list */ }
+    res.json({ ids });
+  } catch (err) {
+    console.error('[component/extract-ids error]', err.message);
+    res.status(500).json({ error: humaniseFetchError(err) });
+  }
+});
+
 // ─── Stats query (Status Updates tab) ─────────────────────────────────────────
 // Body: { question, data }. `data` is a client-built snapshot of the already-
 // fetched Azure work items and their linked Jira issues (+ descendant tree). The

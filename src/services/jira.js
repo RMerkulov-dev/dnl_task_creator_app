@@ -605,6 +605,33 @@ export async function getProjectComponents(cloudId, projectKey) {
   return Array.isArray(data) ? data : (data.values ?? []);
 }
 
+// Add a component to an existing issue WITHOUT removing the components already
+// on it. Uses the ADF `update` verb (`add`) instead of overwriting the whole
+// `components` field, so a request that already has other components keeps them.
+// Never throws — returns { ok } or { ok:false, error } so a batch keeps going.
+export async function addIssueComponent(cloudId, issueKey, componentId) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ update: { components: [{ add: { id: String(componentId) } }] } }),
+    });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  if (res.status === 204) return { ok: true };
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
+  if (res.ok) return { ok: true };
+  const parts = [];
+  if (data.errorMessages?.length) parts.push(...data.errorMessages);
+  if (data.errors && Object.keys(data.errors).length) parts.push(Object.values(data.errors).join('; '));
+  return { ok: false, error: parts.join(' | ') || `HTTP ${res.status}` };
+}
+
 // Generic enhanced-search that follows nextPageToken pagination and returns all
 // matching issues (capped by maxTotal as a safety valve).
 export async function searchIssuesPaged(cloudId, jql, fields, { maxTotal = 2000 } = {}) {

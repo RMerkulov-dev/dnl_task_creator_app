@@ -4123,6 +4123,8 @@ button.su-status {
 }
 .su-search-clear:hover { color: var(--text-1); }
 
+.su-state-filter { width: auto; max-width: 220px; flex-shrink: 0; }
+
 .su-result-count {
   font-size: 12px;
   color: var(--text-3);
@@ -5170,3 +5172,74 @@ button.su-status {
 }
 
 .docai-footer { text-align: center; padding-top: 6px; }
+
+/* ─── PM › Component tab (.jcomp-*) ─────────────────────────────────────────── */
+.jcomp { max-width: 1100px; margin: 0 auto; padding: 24px 20px 48px; }
+.jcomp-head { margin-bottom: 20px; }
+.jcomp-title { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+.jcomp-sub { font-size: 13px; color: var(--text-3); margin: 0; max-width: 640px; line-height: 1.5; }
+
+.jcomp-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 860px) { .jcomp-grid { grid-template-columns: 1fr; } }
+
+.jcomp-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 18px;
+}
+
+.jcomp-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.jcomp-muted { color: var(--text-3); font-weight: 400; }
+.jcomp-textarea { width: 100%; resize: vertical; font-family: inherit; line-height: 1.5; }
+
+.jcomp-drop {
+  margin-top: 12px;
+  border: 1px dashed var(--border-hi);
+  border-radius: var(--r-md);
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.jcomp-drop:hover { border-color: var(--accent-1); background: var(--bg-card-hover); }
+.jcomp-thumbwrap { display: flex; align-items: center; gap: 10px; justify-content: center; }
+.jcomp-thumb { max-height: 72px; max-width: 160px; border-radius: var(--r-sm); border: 1px solid var(--border); }
+.jcomp-thumbname { font-size: 12px; color: var(--text-2); }
+
+.jcomp-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; align-items: center; }
+.jcomp-run { margin-left: auto; }
+.jcomp-error { margin-top: 12px; font-size: 13px; color: var(--red); }
+
+.jcomp-results { min-height: 220px; }
+.jcomp-empty { color: var(--text-3); font-size: 13px; text-align: center; padding: 40px 0; }
+.jcomp-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.jcomp-row { border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; }
+.jcomp-row-error { border-color: color-mix(in srgb, var(--red) 40%, var(--border)); }
+.jcomp-row-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.jcomp-row-token { font-weight: 600; font-variant-numeric: tabular-nums; }
+.jcomp-arrow { color: var(--text-3); font-size: 12px; }
+.jcomp-row-msg { color: var(--red); font-size: 12px; }
+
+.jcomp-targets { list-style: none; margin: 8px 0 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 5px; }
+.jcomp-target { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.jcomp-target-type {
+  color: var(--text-3); text-transform: uppercase; font-size: 10px; letter-spacing: .04em;
+  min-width: 54px;
+}
+.jcomp-target-key { color: var(--accent-1); text-decoration: none; }
+.jcomp-target-key:hover { text-decoration: underline; }
+.jcomp-target-err { color: var(--red); }
+
+.jcomp-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-3); }
+.jcomp-dot-pending { background: var(--border-hi); }
+.jcomp-dot-working { background: var(--yellow, #eab308); animation: jcomp-pulse 1s ease-in-out infinite; }
+.jcomp-dot-done { background: var(--green); }
+.jcomp-dot-error { background: var(--red); }
+@keyframes jcomp-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }

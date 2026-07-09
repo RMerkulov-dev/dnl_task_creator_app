@@ -123,7 +123,8 @@
       "Bash(SCRATCH_PDF=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/test-out.pdf node --input-type=module -e ' *)",
       "Bash(pkill -f \"node api/index.js\")",
       "Bash(ffmpeg -y -v error -f lavfi -i color=c=0x303030:d=5:s=640x360:r=10 -f lavfi -i color=c=0x505580:d=5:s=640x360:r=10 -f lavfi -i color=c=0x306050:d=5:s=640x360:r=10 -f lavfi -i color=c=0x804040:d=5:s=640x360:r=10 -f lavfi -i color=c=0x606030:d=5:s=640x360:r=10 -f lavfi -i color=c=0x404070:d=5:s=640x360:r=10 -filter_complex [0][1][2][3][4][5]concat=n=6:v=1:a=0 -pix_fmt yuv420p /private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/clicks.mp4)",
-      "Bash(VIDEO=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/clicks.mp4 OUT=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/actions_test node --input-type=module -e ' *)"
+      "Bash(VIDEO=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/clicks.mp4 OUT=/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/41937f0b-02c0-4cba-8fc9-ae37fb69767c/scratchpad/actions_test node --input-type=module -e ' *)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

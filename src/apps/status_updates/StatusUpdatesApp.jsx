@@ -608,6 +608,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   // Search + filter
   const [query,        setQuery]        = useState('');
   const [activeFilter, setActiveFilter] = useState('all');   // all | linked | missing | unlinked
+  const [azureStateFilter, setAzureStateFilter] = useState(''); // '' = all Azure states
 
   // Azure state editing: cache valid states per work-item type (per project)
   const [azStatesByType, setAzStatesByType] = useState({});
@@ -672,8 +673,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     if (hasBoards && !selectedBoard) { setError('Select a board first.'); return; }
     setLoading(true);
     setError('');
-    // A fresh dataset invalidates any prior AI answer/matches.
-    setAiAnswer(''); setAiError(''); setAiMatchIds(null);
+    // A fresh dataset invalidates any prior AI answer/matches and stale filters.
+    setAiAnswer(''); setAiError(''); setAiMatchIds(null); setAzureStateFilter('');
     try {
       const azItems = await getBoardWorkItems(
         proj.azure.proxyKey,
@@ -821,10 +822,24 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     return { total: items.length, linked, missing, unlinked, ready };
   }, [items, jira, isReadyToClose]);
 
+  // Distinct Azure work-item states present in the loaded set (+ counts), for
+  // the status filter dropdown.
+  const azureStates = useMemo(() => {
+    const m = new Map();
+    for (const it of items) {
+      const s = (it.state || '').trim();
+      if (!s) continue;
+      m.set(s, (m.get(s) || 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [items]);
+
   // ── Apply search + filter, then rebuild the tree from the surviving items ───
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter(it => {
+      // Azure state filter is independent — it narrows regardless of link/AI mode.
+      if (azureStateFilter && (it.state || '').trim() !== azureStateFilter) return false;
       // AI match, when active, takes precedence over the status filters.
       if (aiMatchIds) { if (!aiMatchIds.has(it.id)) return false; }
       else {
@@ -839,11 +854,11 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [items, jira, query, activeFilter, aiMatchIds, isReadyToClose]);
+  }, [items, jira, query, activeFilter, azureStateFilter, aiMatchIds, isReadyToClose]);
 
   const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
 
-  const isFiltering = !!query.trim() || activeFilter !== 'all' || !!aiMatchIds;
+  const isFiltering = !!query.trim() || activeFilter !== 'all' || !!azureStateFilter || !!aiMatchIds;
   const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
 
   const toggleSidebar = useCallback(() => {
@@ -1018,6 +1033,19 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                   <button className="su-search-clear" onClick={() => setQuery('')} title="Clear">✕</button>
                 )}
               </div>
+              {azureStates.length > 0 && (
+                <select
+                  className="select su-state-filter"
+                  value={azureStateFilter}
+                  onChange={e => setAzureStateFilter(e.target.value)}
+                  title="Filter by Azure DevOps status"
+                >
+                  <option value="">All statuses</option>
+                  {azureStates.map(([s, n]) => (
+                    <option key={s} value={s}>{s} ({n})</option>
+                  ))}
+                </select>
+              )}
               {isFiltering && (
                 <span className="su-result-count">{filteredItems.length} / {items.length}</span>
               )}
