@@ -124,6 +124,7 @@ export default function JiraComponentApp() {
   const [rows, setRows] = useState([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
+  const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef(null);
 
   // Load Jira projects once.
@@ -146,6 +147,18 @@ export default function JiraComponentApp() {
 
   const tokens = useMemo(() => parseTokens(text), [text]);
   const componentName = components.find(c => c.value === componentId)?.label ?? '';
+
+  // Overall progress across every target (request + epics) for the progress bar.
+  const progress = useMemo(() => {
+    let total = 0, done = 0, failed = 0;
+    for (const r of rows) for (const t of r.targets) {
+      total++;
+      if (t.state === 'done') done++;
+      else if (t.state === 'error') failed++;
+    }
+    const settled = done + failed;
+    return { total, done, failed, pct: total ? Math.round((settled / total) * 100) : 0 };
+  }, [rows]);
 
   const readFile = useCallback((file) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -308,9 +321,11 @@ export default function JiraComponentApp() {
           />
 
           <div
-            className="jcomp-drop"
+            className={`jcomp-drop${dragOver ? ' is-drag' : ''}${image ? ' has-image' : ''}`}
             onDragOver={e => { e.preventDefault(); }}
-            onDrop={e => { e.preventDefault(); readFile(e.dataTransfer.files?.[0]); }}
+            onDragEnter={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={e => { e.preventDefault(); setDragOver(false); }}
+            onDrop={e => { e.preventDefault(); setDragOver(false); readFile(e.dataTransfer.files?.[0]); }}
             onClick={() => fileRef.current?.click()}
           >
             <input
@@ -343,7 +358,7 @@ export default function JiraComponentApp() {
             )}
             <button
               type="button"
-              className="btn btn-primary jcomp-run"
+              className={`btn btn-primary jcomp-run${running ? ' is-running' : ''}`}
               onClick={run}
               disabled={running || !projectKey || !componentId || !tokens.length}
             >
@@ -352,6 +367,18 @@ export default function JiraComponentApp() {
                 : `Apply${componentName ? ` "${componentName}"` : ''} to ${tokens.length} item${tokens.length === 1 ? '' : 's'}`}
             </button>
           </div>
+
+          {progress.total > 0 && (
+            <div className={`jcomp-progress${running ? ' is-running' : ''}`}>
+              <div className="jcomp-progress-track">
+                <div className="jcomp-progress-fill" style={{ width: `${progress.pct}%` }} />
+              </div>
+              <span className="jcomp-progress-label">
+                {progress.done + progress.failed} / {progress.total}
+                {progress.failed > 0 && <span className="jcomp-progress-failed"> · {progress.failed} failed</span>}
+              </span>
+            </div>
+          )}
 
           {error && <div className="jcomp-error">{error}</div>}
         </div>
@@ -362,8 +389,8 @@ export default function JiraComponentApp() {
             <div className="jcomp-empty">Results will appear here after you apply.</div>
           ) : (
             <ul className="jcomp-rows">
-              {rows.map((row) => (
-                <li key={row.token} className={`jcomp-row jcomp-row-${row.state}`}>
+              {rows.map((row, i) => (
+                <li key={row.token} className={`jcomp-row jcomp-row-${row.state}`} style={{ '--i': i }}>
                   <div className="jcomp-row-head">
                     {stateDot(row.state)}
                     <span className="jcomp-row-token">{row.token}</span>
@@ -374,8 +401,8 @@ export default function JiraComponentApp() {
                   </div>
                   {row.targets.length > 0 && (
                     <ul className="jcomp-targets">
-                      {row.targets.map(t => (
-                        <li key={t.key} className="jcomp-target">
+                      {row.targets.map((t, ti) => (
+                        <li key={t.key} className="jcomp-target" style={{ '--i': ti }}>
                           {stateDot(t.state)}
                           <span className="jcomp-target-type">{t.type}</span>
                           <a
