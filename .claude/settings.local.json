@@ -127,7 +127,12 @@
       "mcp__ide__getDiagnostics",
       "Bash(awk '/docai/{print NR\": \"$0}' \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/apps/task_creator_app/src/index.css\")",
       "Bash(python3 -)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "WebFetch(domain:claude.ai)",
+      "Bash(python3 \"/Users/romario/.claude/plugins/cache/anthropic-agent-skills/example-skills/9d2f1ae18723/skills/webapp-testing/scripts/with_server.py\" --server \"npm run dev\" --port 3000 -- python3 \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6c270ac6-9151-4c6f-bb94-ef50b63ba778/scratchpad/gantt_verify.py\")",
+      "Bash(python3 \"/Users/romario/.claude/plugins/cache/anthropic-agent-skills/example-skills/9d2f1ae18723/skills/webapp-testing/scripts/with_server.py\" --server \"npm run dev\" --port 3000 -- python3 \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6c270ac6-9151-4c6f-bb94-ef50b63ba778/scratchpad/gantt_width.py\")",
+      "Bash(lsof -nP -iTCP:3001 -sTCP:LISTEN)",
+      "Bash(lsof -nP -iTCP:3000 -sTCP:LISTEN)"
     ]
   }
 }

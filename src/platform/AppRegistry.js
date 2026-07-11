@@ -36,6 +36,14 @@ export const APP_REGISTRY = [
     gradient: 'linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)',
     glow: 'rgba(245, 158, 11, 0.5)',
   },
+  {
+    id: 'gantt',
+    name: 'Gantt',
+    shortName: 'Gantt',
+    gradient: 'linear-gradient(135deg, #14b8a6 0%, #6366f1 100%)',
+    glow: 'rgba(20, 184, 166, 0.5)',
+    beta: true,
+  },
 ];
 
 // The "PM" workspace bundles four project-management tools behind a single
@@ -70,4 +78,5 @@ export const APP_COMPONENTS = {
   'email-agent':   lazy(() => import('../apps/email_agent/EmailAgentApp.jsx')),
   'status-updates': lazy(() => import('../apps/status_updates/StatusUpdatesApp.jsx')),
   'report':        lazy(() => import('../apps/report/ReportApp.jsx')),
+  'gantt':         lazy(() => import('../apps/gantt/GanttApp.jsx')),
 };

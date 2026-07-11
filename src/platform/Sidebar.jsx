@@ -120,6 +120,21 @@ function ReportIcon() {
   );
 }
 
+function GanttIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Chart frame */}
+      <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.4"/>
+      {/* Staggered gantt bars */}
+      <path d="M5.5 8h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+      <path d="M9 11.5h7.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+      <path d="M12.5 15h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+      {/* Milestone diamond */}
+      <path d="M6.8 15l1.2 1.2L6.8 17.4 5.6 16.2z" fill="currentColor"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
@@ -130,6 +145,7 @@ const ICON_MAP = {
   'email-agent':   EmailAgentIcon,
   'status-updates': StatusUpdatesIcon,
   'report':        ReportIcon,
+  'gantt':         GanttIcon,
 };
 
 function PlatformLogo() {
