@@ -132,7 +132,10 @@
       "Bash(python3 \"/Users/romario/.claude/plugins/cache/anthropic-agent-skills/example-skills/9d2f1ae18723/skills/webapp-testing/scripts/with_server.py\" --server \"npm run dev\" --port 3000 -- python3 \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6c270ac6-9151-4c6f-bb94-ef50b63ba778/scratchpad/gantt_verify.py\")",
       "Bash(python3 \"/Users/romario/.claude/plugins/cache/anthropic-agent-skills/example-skills/9d2f1ae18723/skills/webapp-testing/scripts/with_server.py\" --server \"npm run dev\" --port 3000 -- python3 \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/6c270ac6-9151-4c6f-bb94-ef50b63ba778/scratchpad/gantt_width.py\")",
       "Bash(lsof -nP -iTCP:3001 -sTCP:LISTEN)",
-      "Bash(lsof -nP -iTCP:3000 -sTCP:LISTEN)"
+      "Bash(lsof -nP -iTCP:3000 -sTCP:LISTEN)",
+      "Bash(python3 repro.py)",
+      "Bash(cd *)",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }

@@ -303,8 +303,11 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
 
   const REQUEST_TIMEOUT_MS = 90_000;
 
+  // Scroll the message list itself rather than scrollIntoView — that walks every
+  // scrollable ancestor and drags the whole shell up with it.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const list = bottomRef.current?.parentElement;
+    list?.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
   }, [messages, loading]);
 
   useEffect(() => {

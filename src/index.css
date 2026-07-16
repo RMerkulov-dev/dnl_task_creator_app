@@ -1177,6 +1177,12 @@ body {
   padding: 61px 0 20px;
   position: relative;
   z-index: 20;
+  /* Contain our own overflow on short viewports. Without this the nav spills out
+     of the 100vh box and makes .platform-shell scrollable — and since the shell
+     is overflow:hidden, anything that scrolls it (scrollIntoView, autofocus)
+     shifts the whole UI up with no way to scroll back. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .platform-content {
