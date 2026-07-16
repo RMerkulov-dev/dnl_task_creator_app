@@ -29,9 +29,9 @@ export const PROJECTS = {
     features: { iteration: false, story: false, board: true, jiraProject: true, component: true },
     jiraProjectOptions: ['ABS', 'ABSPO'],
     // ABSPO is only available for these boards
-    abspoBoards: ['ABS - Dynamics 365'],
-    // Only show these two boards in the selector
-    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service', 'ABS Bureau and Group Only', 'ABS - Marketing Migration', 'ABS - Commission Module'],
+    abspoBoards: ['ABS - Project Operations'],
+    // Only show these boards in the selector
+    boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service', 'ABS Bureau and Group Only', 'ABS - Marketing Migration', 'ABS - Commission Module', 'ABS - Project Operations'],
   },
 
   // ── NSMG ───────────────────────────────────────────────────────────────────
