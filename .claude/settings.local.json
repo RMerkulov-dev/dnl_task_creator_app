@@ -135,7 +135,13 @@
       "Bash(lsof -nP -iTCP:3000 -sTCP:LISTEN)",
       "Bash(python3 repro.py)",
       "Bash(cd *)",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "Skill(run)",
+      "Bash(python3 -c \"import playwright\")",
+      "Bash(python3 verify_abspo.py)",
+      "Bash(python3 verify_abspo2.py)",
+      "Bash(lsof -ti:3000,3001)",
+      "Bash(xargs -r kill)"
     ]
   }
 }

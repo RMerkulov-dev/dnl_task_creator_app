@@ -328,7 +328,10 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
                       onChange={e => {
                         const board = e.target.value;
                         setSelectedBoard(board);
-                        if (selectedJiraProj === 'ABSPO' && !proj.abspoBoards?.includes(board)) setSelectedJiraProj('');
+                        if (features.jiraProject && (proj.jiraProjectOptions || []).length) {
+                          const name = boards.find(b => b.path === board)?.name ?? '';
+                          setSelectedJiraProj(proj.abspoBoards?.includes(name) ? 'ABSPO' : 'ABS');
+                        }
                       }}>
                       <option value="">— Select board —</option>
                       {boards.map(b => <option key={b.id} value={b.path}>{b.name}</option>)}
@@ -341,7 +344,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
                     <select className="select" value={selectedJiraProj} onChange={e => setSelectedJiraProj(e.target.value)}>
                       <option value="">— Select Jira project —</option>
                       {(proj.jiraProjectOptions || [])
-                        .filter(key => key !== 'ABSPO' || proj.abspoBoards?.includes(selectedBoard))
+                        .filter(key => key !== 'ABSPO' || proj.abspoBoards?.includes(boards.find(b => b.path === selectedBoard)?.name))
                         .map(key => <option key={key} value={key}>{key}</option>)}
                     </select>
                   </div>
