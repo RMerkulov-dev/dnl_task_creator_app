@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { PROJECT_LIST } from '../../config/projects.js';
 import { getAreaPaths, getBoardWorkItems, getFields, setWorkItemField } from '../../services/azureDevops.js';
 
@@ -7,6 +6,13 @@ import { getAreaPaths, getBoardWorkItems, getFields, setWorkItemField } from '..
 // qualify. ABS is the one today. Unlike the Status tab, every board is shown —
 // the project's boardAllowList is intentionally ignored here.
 const BOARD_PROJECTS = PROJECT_LIST.filter(p => p.features?.board);
+
+// Finished work is irrelevant to a release plan — hide these terminal states.
+const EXCLUDED_STATES = new Set(['done', 'closed', 'resolved', 'removed', 'cancelled', 'completed']);
+
+const MONTHS   = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const keyOfDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 // Resolve a field reference name by matching its display name against a set of
 // substrings (all must be present, case-insensitive). When `dateOnly`, only
@@ -37,7 +43,6 @@ function detectField(fields, kind) {
   return '';
 }
 
-// How many of the loaded items have a non-empty value for a field reference.
 function fillCount(list, ref) {
   if (!ref) return 0;
   let n = 0;
@@ -68,8 +73,7 @@ function parseDate(value) {
   const t = Date.parse(value);
   if (Number.isNaN(t)) return { ts: null, label: '' };
   const d = new Date(t);
-  const label = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  return { ts: t, label };
+  return { ts: t, label: keyOfDate(d) };
 }
 
 function typeTone(type) {
@@ -80,32 +84,18 @@ function typeTone(type) {
   return 'task';
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const keyOfDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-// Build a GitHub-style week grid spanning [min,max], padded to whole Mon–Sun
-// weeks. Returns an array of weeks, each an array of 7 Date objects.
-function buildWeeks(minKey, maxKey) {
-  const start = new Date(`${minKey}T00:00:00`);
-  const end   = new Date(`${maxKey}T00:00:00`);
-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));       // back to Monday
-  end.setDate(end.getDate() + (6 - ((end.getDay() + 6) % 7)));       // forward to Sunday
-  const weeks = [];
+// Whole Mon–Sun weeks covering a given month.
+function monthDays(first) {
+  const y = first.getFullYear(), m = first.getMonth();
+  const start = new Date(y, m, 1);
+  start.setDate(1 - ((start.getDay() + 6) % 7));         // back to Monday
+  const last = new Date(y, m + 1, 0);
+  const end = new Date(last);
+  end.setDate(end.getDate() + (6 - ((end.getDay() + 6) % 7)));  // forward to Sunday
+  const days = [];
   const cur = new Date(start);
-  while (cur <= end) {
-    const week = [];
-    for (let i = 0; i < 7; i++) { week.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
-    weeks.push(week);
-  }
-  return weeks;
-}
-
-function Chevron() {
-  return (
-    <svg className="rel-section-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-    </svg>
-  );
+  while (cur <= end) { days.push(new Date(cur)); cur.setDate(cur.getDate() + 1); }
+  return days;
 }
 
 export default function ReleaseApp({ allowedProjects }) {
@@ -131,11 +121,9 @@ export default function ReleaseApp({ allowedProjects }) {
   const [error,   setError]   = useState('');
   const [query,   setQuery]   = useState('');
 
-  const [reportOpen, setReportOpen] = useState(false);
-  const [metric,     setMetric]     = useState('prod');   // 'prod' | 'uat'
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [mode, setMode]           = useState('report');  // 'edit' | 'report'
+  const [calFilter, setCalFilter] = useState('all');     // 'all' | 'uat' | 'prod'
 
-  // Inline-edit bookkeeping: which "<id>:<uat|prod>" cells are saving / errored.
   const [saving, setSaving] = useState(() => new Set());
   const [errs,   setErrs]   = useState({});
 
@@ -148,7 +136,11 @@ export default function ReleaseApp({ allowedProjects }) {
 
     setBoardsLoading(true);
     getAreaPaths(proj.azure.proxyKey, proj.azure.project)
-      .then(all => { if (!cancelled) setBoards(all); })
+      .then(all => {
+        if (cancelled) return;
+        const allow = proj.boardAllowList;
+        setBoards(allow?.length ? all.filter(b => allow.includes(b.name)) : all);
+      })
       .catch(e => !cancelled && setError(e.message))
       .finally(() => !cancelled && setBoardsLoading(false));
 
@@ -177,15 +169,10 @@ export default function ReleaseApp({ allowedProjects }) {
     setLoading(true); setError(''); setErrs({});
     try {
       const list = await getBoardWorkItems(
-        proj.azure.proxyKey,
-        proj.azure.project,
-        proj.azure.jiraIdField,
-        selectedBoard,
-        null,
+        proj.azure.proxyKey, proj.azure.project, proj.azure.jiraIdField, selectedBoard, null,
       );
       setItems(list);
       setLoaded(true);
-      // If auto-detected fields hold no data on this board, re-pick by fill count.
       setProdField(prev => refineField(list, candidateFields, 'prod', prev));
       setUatField(prev => refineField(list, candidateFields, 'uat', prev));
     } catch (e) {
@@ -195,13 +182,17 @@ export default function ReleaseApp({ allowedProjects }) {
     }
   }, [proj, selectedBoard, candidateFields]);
 
-  // How many loaded items have each candidate field set — surfaced in the field
-  // pickers so it's obvious which field actually holds the release dates.
   const fieldFill = useMemo(() => {
     const m = new Map();
     for (const c of candidateFields) m.set(c.ref, fillCount(items, c.ref));
     return m;
   }, [items, candidateFields]);
+
+  // Hide finished work from both the edit lists and the calendar.
+  const visibleItems = useMemo(
+    () => items.filter(it => !EXCLUDED_STATES.has((it.state || '').trim().toLowerCase())),
+    [items],
+  );
 
   // ── Inline date edit → PATCH Azure → optimistic update ─────────────────────
   const setDate = useCallback(async (item, which, value) => {
@@ -221,11 +212,10 @@ export default function ReleaseApp({ allowedProjects }) {
     }
   }, [proj, prodField, uatField]);
 
-  // ── Search, then split into 3 mutually-exclusive sections ──────────────────
-  // PROD-dated wins over UAT-only, so every item shows exactly once.
+  // ── Edit mode: 3 mutually-exclusive sections ───────────────────────────────
   const { uatRows, prodRows, noneRows } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const rows = items
+    const rows = visibleItems
       .filter(it => !q
         || String(it.id).includes(q)
         || (it.title || '').toLowerCase().includes(q)
@@ -241,41 +231,43 @@ export default function ReleaseApp({ allowedProjects }) {
       uatRows:  rows.filter(r => r.prod.ts == null && r.uat.ts != null).sort(byId),
       noneRows: rows.filter(r => r.prod.ts == null && r.uat.ts == null).sort(byId),
     };
-  }, [items, query, uatField, prodField]);
+  }, [visibleItems, query, uatField, prodField]);
 
   const total = uatRows.length + prodRows.length + noneRows.length;
   const prodName = fields.find(f => f.referenceName === prodField)?.name || 'Expected PROD';
   const uatName  = fields.find(f => f.referenceName === uatField)?.name  || 'Expected UAT';
 
-  // ── Report calendar: count items per release day for the chosen metric ──────
-  const report = useMemo(() => {
-    const field = metric === 'prod' ? prodField : uatField;
-    const map = new Map();   // 'YYYY-MM-DD' → [ "#id ABS-key" … ]
-    for (const it of items) {
-      const d = parseDate(field ? it.fields?.[field] : null);
-      if (d.ts == null) continue;
-      const arr = map.get(d.label) || [];
-      arr.push(`#${it.id}${it.jiraKey ? ` · ${it.jiraKey}` : ''}${it.title ? ` — ${it.title}` : ''}`);
-      map.set(d.label, arr);
+  // ── Report mode: events per day + the months to render ─────────────────────
+  const calendar = useMemo(() => {
+    const byDay = new Map();   // 'YYYY-MM-DD' → [{ kind, it }]
+    const push = (key, kind, it) => { const a = byDay.get(key) || byDay.set(key, []).get(key); a.push({ kind, it }); };
+    // One entry per item, no duplicates: use PROD (the final date) when set,
+    // otherwise fall back to the UAT date.
+    for (const it of visibleItems) {
+      const u = parseDate(uatField  ? it.fields?.[uatField]  : null);
+      const p = parseDate(prodField ? it.fields?.[prodField] : null);
+      if (p.ts != null) push(p.label, 'prod', it);
+      else if (u.ts != null) push(u.label, 'uat', it);
     }
-    if (map.size === 0) return { weeks: [], map, max: 0, total: 0 };
-    const keys = [...map.keys()].sort();
-    const weeks = buildWeeks(keys[0], keys[keys.length - 1]);
-    const max = Math.max(...[...map.values()].map(a => a.length));
-    const totalItems = [...map.values()].reduce((s, a) => s + a.length, 0);
-    return { weeks, map, max, total: totalItems };
-  }, [items, metric, prodField, uatField]);
+    if (byDay.size === 0) return { months: [], byDay };
+    const keys = [...byDay.keys()].sort();
+    const min = new Date(`${keys[0]}T00:00:00`);
+    const max = new Date(`${keys[keys.length - 1]}T00:00:00`);
+    const months = [];
+    const cur = new Date(min.getFullYear(), min.getMonth(), 1);
+    const end = new Date(max.getFullYear(), max.getMonth(), 1);
+    while (cur <= end) { months.push(new Date(cur)); cur.setMonth(cur.getMonth() + 1); }
+    return { months, byDay };
+  }, [visibleItems, uatField, prodField]);
 
-  const levelOf = (n) => {
-    if (!n) return 0;
-    const m = report.max || 1;
-    if (n >= m) return 4;
-    if (n >= m * 0.66) return 3;
-    if (n >= m * 0.33) return 2;
-    return 1;
-  };
+  const dayEvents = useCallback((key) => {
+    const all = calendar.byDay.get(key) || [];
+    return calFilter === 'all' ? all : all.filter(e => e.kind === calFilter);
+  }, [calendar, calFilter]);
 
-  // A single editable date cell (label + native date input + status).
+  function switchMode(m) { setMode(m); }
+
+  // ── Edit-mode row helpers ──────────────────────────────────────────────────
   function dateCell(it, which, d, ref) {
     const cellKey = `${it.id}:${which}`;
     const isSaving = saving.has(cellKey);
@@ -309,11 +301,7 @@ export default function ReleaseApp({ allowedProjects }) {
             ? <a className="rel-id" href={it.url} target="_blank" rel="noreferrer">#{it.id}</a>
             : <span className="rel-id">#{it.id}</span>}
           {it.jiraKey ? (
-            <a
-              className="rel-jira"
-              href={`https://dynamicalabs.atlassian.net/browse/${it.jiraKey}`}
-              target="_blank" rel="noreferrer" title="Open in Jira"
-            >{it.jiraKey}</a>
+            <a className="rel-jira" href={`https://dynamicalabs.atlassian.net/browse/${it.jiraKey}`} target="_blank" rel="noreferrer" title="Open in Jira">{it.jiraKey}</a>
           ) : (
             <span className="rel-jira rel-jira-none">—</span>
           )}
@@ -334,221 +322,150 @@ export default function ReleaseApp({ allowedProjects }) {
           <span className="rel-section-title">{title}</span>
           <span className="rel-section-right">
             <span className="rel-section-count">{rows.length}</span>
-            <Chevron />
+            <svg className="rel-section-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </span>
         </summary>
         <div className="rel-section-body">
-          {rows.length === 0
-            ? <div className="rel-section-empty">Nothing here.</div>
-            : rows.map(row)}
+          {rows.length === 0 ? <div className="rel-section-empty">Nothing here.</div> : rows.map(row)}
         </div>
       </details>
     );
   }
+
+  // ── Report-mode month renderer ─────────────────────────────────────────────
+  const todayKey = keyOfDate(new Date());
+  function monthCard(first) {
+    const y = first.getFullYear(), m = first.getMonth();
+    const days = monthDays(first);
+    return (
+      <div key={`${y}-${m}`} className="rel-mon">
+        <div className="rel-mon-head">{MONTHS[m]} {y}</div>
+        <div className="rel-mon-dows">
+          {WEEKDAYS.map(w => <div key={w} className="rel-mon-dow">{w}</div>)}
+        </div>
+        <div className="rel-mon-grid">
+          {days.map((day, i) => {
+            const key = keyOfDate(day);
+            const evs = day.getMonth() === m ? dayEvents(key) : [];
+            const outside = day.getMonth() !== m;
+            const shown = evs.slice(0, 8);
+            return (
+              <div key={i} className={`rel-mon-cell${outside ? ' outside' : ''}${key === todayKey ? ' today' : ''}`}>
+                <div className="rel-mon-daynum">{day.getDate()}</div>
+                {shown.map((e, j) => (
+                  <a
+                    key={j}
+                    className={`rel-ev rel-ev-${e.kind}`}
+                    href={e.it.url || undefined}
+                    target="_blank" rel="noreferrer"
+                    title={`${e.kind.toUpperCase()} · #${e.it.id}${e.it.jiraKey ? ` · ${e.it.jiraKey}` : ''}\n${e.it.title || ''}`}
+                  >
+                    <span className="rel-ev-id">#{e.it.id}</span>
+                    <span className="rel-ev-title">{e.it.title || `#${e.it.id}`}</span>
+                  </a>
+                ))}
+                {evs.length > shown.length && <div className="rel-mon-more">+{evs.length - shown.length} more</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const ModeSwitch = (
+    <div className="rel-modeswitch" role="tablist">
+      <button role="tab" aria-selected={mode === 'edit'}   className={mode === 'edit'   ? 'active' : ''} onClick={() => switchMode('edit')}>Edit</button>
+      <button role="tab" aria-selected={mode === 'report'} className={mode === 'report' ? 'active' : ''} onClick={() => switchMode('report')}>Report</button>
+    </div>
+  );
 
   return (
     <div className="rel">
       <div className="rel-head">
         <h2 className="rel-title">Release</h2>
         <p className="rel-sub">
-          Pick an ABS board, then set each item's Expected UAT / PROD release date. Items are
-          grouped into collapsible sections — edits save straight back to the board.
+          Pick an ABS board, then set each item's Expected UAT / PROD release date. Switch to
+          Report for a full calendar of what ships when.
         </p>
       </div>
 
       {projects.length === 0 ? (
         <div className="rel-empty">No board-based projects are available to you.</div>
       ) : (
-      <div className={`rel-grid${filtersOpen ? '' : ' rel-grid-collapsed'}`}>
-        {/* ── Left: board + field selection (collapsible) ── */}
-        <div className={`rel-panel rel-filters${filtersOpen ? '' : ' collapsed'}`}>
-          <button
-            type="button"
-            className="rel-filters-toggle"
-            onClick={() => setFiltersOpen(o => !o)}
-            title={filtersOpen ? 'Collapse filters' : 'Expand filters'}
-          >
-            <svg className="rel-filters-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            <span className="rel-filters-label">Board &amp; fields</span>
+      <>
+        {/* ── Top: board + field selection ── */}
+        <div className="rel-topbar">
+          <div className="rel-field rel-field-proj">
+            <label className="rel-label">Project</label>
+            <select className="select" value={proj?.id ?? ''} onChange={e => setProj(projects.find(p => p.id === e.target.value))}>
+              {projects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </div>
+          <div className="rel-field rel-field-board">
+            <label className="rel-label">Board</label>
+            <select className="select" value={selectedBoard} onChange={e => setSelectedBoard(e.target.value)} disabled={boardsLoading || !boards.length}>
+              <option value="">{boardsLoading ? 'Loading boards…' : '— Select board —'}</option>
+              {boards.map(b => <option key={b.path} value={b.path}>{b.name}</option>)}
+            </select>
+          </div>
+          <button className="btn btn-primary rel-load-top" onClick={load} disabled={loading || !selectedBoard}>
+            {loading ? <><span className="spinner" /> …</> : (loaded ? 'Reload' : 'Load')}
           </button>
 
-          {filtersOpen && (
-            <div className="rel-filters-body">
-              <label className="rel-label">Project</label>
-              <select
-                className="select"
-                value={proj?.id ?? ''}
-                onChange={e => setProj(projects.find(p => p.id === e.target.value))}
-              >
-                {projects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-              </select>
-
-              <label className="rel-label" style={{ marginTop: 16 }}>Board</label>
-              <select
-                className="select"
-                value={selectedBoard}
-                onChange={e => setSelectedBoard(e.target.value)}
-                disabled={boardsLoading || !boards.length}
-              >
-                <option value="">{boardsLoading ? 'Loading boards…' : '— Select board —'}</option>
-                {boards.map(b => <option key={b.path} value={b.path}>{b.name}</option>)}
-              </select>
-
-              <button
-                className="btn btn-primary rel-load"
-                onClick={load}
-                disabled={loading || !selectedBoard}
-              >
-                {loading ? <><span className="spinner" /> Loading…</> : (loaded ? 'Reload' : 'Load board')}
-              </button>
-
-              <div className="rel-divider" />
-
-              <label className="rel-label">Expected PROD field</label>
-              <select className="select" value={prodField} onChange={e => setProdField(e.target.value)}>
-                <option value="">— none —</option>
-                {candidateFields.map(f => {
-                  const n = fieldFill.get(f.ref);
-                  return <option key={f.ref} value={f.ref}>{f.name}{n ? ` · ${n} set` : ''}</option>;
-                })}
-              </select>
-
-              <label className="rel-label" style={{ marginTop: 12 }}>Expected UAT field</label>
-              <select className="select" value={uatField} onChange={e => setUatField(e.target.value)}>
-                <option value="">— none —</option>
-                {candidateFields.map(f => {
-                  const n = fieldFill.get(f.ref);
-                  return <option key={f.ref} value={f.ref}>{f.name}{n ? ` · ${n} set` : ''}</option>;
-                })}
-              </select>
-
-              {error && <div className="rel-error">{error}</div>}
-            </div>
-          )}
+          <div className="rel-topbar-right">
+            {loaded && items.length > 0 && mode === 'report' && (
+              <div className="rel-metric-toggle rel-cal-mixed">
+                <button className={calFilter === 'all'  ? 'active' : ''} onClick={() => setCalFilter('all')}>All</button>
+                <button className={calFilter === 'uat'  ? 'active' : ''} onClick={() => setCalFilter('uat')}>UAT</button>
+                <button className={calFilter === 'prod' ? 'active' : ''} onClick={() => setCalFilter('prod')}>PROD</button>
+              </div>
+            )}
+            {ModeSwitch}
+          </div>
         </div>
+        {error && <div className="rel-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-        {/* ── Right: collapsible sections ── */}
-        <div className="rel-panel rel-listwrap">
-          {!loaded && !loading && (
-            <div className="rel-empty">Load a board to edit release dates.</div>
-          )}
+        {/* ── Content: Edit sections or Report calendar ── */}
+        <div className="rel-panel rel-listwrap rel-content">
+          {!loaded && !loading && <div className="rel-empty">Load a board to edit release dates.</div>}
           {loading && <div className="rel-empty"><span className="spinner spinner-lg" /></div>}
-          {loaded && !loading && items.length === 0 && (
-            <div className="rel-empty">No work items on this board.</div>
-          )}
+          {loaded && !loading && items.length === 0 && <div className="rel-empty">No work items on this board.</div>}
 
           {loaded && !loading && items.length > 0 && (
             <>
-              <div className="rel-toolbar">
-                <input
-                  className="input rel-search"
-                  placeholder="Search by number or title…"
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                />
-                {query && <span className="rel-search-count">{total} / {items.length}</span>}
-                <button type="button" className="btn btn-ghost rel-report-btn" onClick={() => setReportOpen(true)}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-                    <rect x="3" y="4" width="18" height="17" rx="2" stroke="currentColor" strokeWidth="1.8"/>
-                    <path d="M3 9h18M8 2v4M16 2v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-                  </svg>
-                  Report
-                </button>
-              </div>
-              {query && total === 0 ? (
-                <div className="rel-empty">Nothing matches “{query}”.</div>
+              {mode === 'edit' && (
+                <div className="rel-toolbar">
+                  <input className="input rel-search" placeholder="Search by number or title…" value={query} onChange={e => setQuery(e.target.value)} />
+                  {query && <span className="rel-search-count">{total} / {visibleItems.length}</span>}
+                </div>
+              )}
+
+              {mode === 'edit' ? (
+                query && total === 0 ? (
+                  <div className="rel-empty">Nothing matches “{query}”.</div>
+                ) : (
+                  <>
+                    {section('uat',  'uat',  `UAT — ${uatName}`,   uatRows,  true)}
+                    {section('prod', 'prod', `PROD — ${prodName}`, prodRows, true)}
+                    {section('none', 'none', 'Unmarked',           noneRows, false)}
+                  </>
+                )
               ) : (
-                <>
-                  {section('uat',  'uat',  `UAT — ${uatName}`,   uatRows,  true)}
-                  {section('prod', 'prod', `PROD — ${prodName}`, prodRows, true)}
-                  {section('none', 'none', 'Unmarked',           noneRows, false)}
-                </>
+                calendar.months.length === 0 ? (
+                  <div className="rel-empty">No release dates set — add some in Edit mode.</div>
+                ) : (
+                  <div className="rel-cal2">
+                    {calendar.months.map(monthCard)}
+                  </div>
+                )
               )}
             </>
           )}
         </div>
-      </div>
-      )}
-
-      {reportOpen && createPortal(
-        <div className="rel-modal-backdrop" onClick={() => setReportOpen(false)}>
-          <div className={`rel-modal rel-cal-${metric}`} onClick={e => e.stopPropagation()}>
-            <div className="rel-modal-head">
-              <div>
-                <h3 className="rel-modal-title">Release calendar</h3>
-                <p className="rel-modal-sub">
-                  {report.total} item{report.total === 1 ? '' : 's'} scheduled by {metric === 'prod' ? prodName : uatName}
-                </p>
-              </div>
-              <div className="rel-modal-tools">
-                <div className="rel-metric-toggle">
-                  <button className={metric === 'uat'  ? 'active' : ''} onClick={() => setMetric('uat')}>UAT</button>
-                  <button className={metric === 'prod' ? 'active' : ''} onClick={() => setMetric('prod')}>PROD</button>
-                </div>
-                <button className="rel-modal-close" onClick={() => setReportOpen(false)} aria-label="Close">✕</button>
-              </div>
-            </div>
-
-            <div className="rel-modal-body">
-              {report.weeks.length === 0 ? (
-                <div className="rel-empty">No {metric === 'prod' ? 'PROD' : 'UAT'} release dates set.</div>
-              ) : (
-                <div className="rel-cal">
-                  {/* Month labels aligned to week columns */}
-                  <div className="rel-cal-monthrow">
-                    <div className="rel-cal-daycol-spacer" />
-                    {report.weeks.map((w, i) => {
-                      const first = w[0];
-                      const prev = i > 0 ? report.weeks[i - 1][0] : null;
-                      const show = !prev || prev.getMonth() !== first.getMonth();
-                      return (
-                        <div key={i} className="rel-cal-monthcell">
-                          {show ? `${MONTHS[first.getMonth()]}${first.getMonth() === 0 ? ` '${String(first.getFullYear()).slice(2)}` : ''}` : ''}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="rel-cal-body">
-                    <div className="rel-cal-daycol">
-                      {['', 'Mon', '', 'Wed', '', 'Fri', ''].map((l, i) => <span key={i}>{l}</span>)}
-                    </div>
-                    <div className="rel-cal-weeks">
-                      {report.weeks.map((week, wi) => (
-                        <div key={wi} className="rel-cal-week">
-                          {week.map((day, di) => {
-                            const k = keyOfDate(day);
-                            const list = report.map.get(k) || [];
-                            const lvl = levelOf(list.length);
-                            return (
-                              <div
-                                key={di}
-                                className={`rel-cal-cell lvl-${lvl}`}
-                                title={list.length ? `${k} — ${list.length} item${list.length === 1 ? '' : 's'}\n${list.slice(0, 12).join('\n')}${list.length > 12 ? '\n…' : ''}` : k}
-                              >
-                                <span className="rel-cal-daynum">{day.getDate()}</span>
-                                {list.length > 0 && <span className="rel-cal-count">{list.length}</span>}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="rel-cal-legend">
-                    <span>Less</span>
-                    {[0, 1, 2, 3, 4].map(l => <span key={l} className={`rel-cal-cell lvl-${l}`} />)}
-                    <span>More</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>,
-        document.body,
+      </>
       )}
     </div>
   );
