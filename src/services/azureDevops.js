@@ -298,10 +298,46 @@ export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath
         jiraRaw:    raw,
         jiraKey:    extractJiraKey(raw),
         url:        item._links?.html?.href || workItemWebUrl(item.url, project) || item.url,
+        fields:     f,   // full field map — release/custom fields read off this
       });
     }
   }
   return items;
+}
+
+/**
+ * Set (or clear) a single field on a work item. A null/empty value issues a
+ * `remove` op so the field is cleared; otherwise an `add` op writes the value.
+ * Used by the Release view to edit the Expected UAT/PROD release dates inline.
+ */
+export async function setWorkItemField(proxyKey, project, id, fieldRef, value) {
+  const op = (value == null || value === '')
+    ? { op: 'remove', path: `/fields/${fieldRef}` }
+    : { op: 'add',    path: `/fields/${fieldRef}`, value };
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workitems/${id}?api-version=7.0`;
+  const res = await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json-patch+json' },
+    body: JSON.stringify([op]),
+  });
+  return parse(res, 'setWorkItemField');
+}
+
+// ─── Work-item field catalogue — used by the Release view ────────────────────
+
+/**
+ * All work-item fields defined in a project, with their display name, reference
+ * name and type: [{ name, referenceName, type }]. Used to resolve custom fields
+ * (e.g. "Estimated Release PROD") to the reference name the REST API keys them by.
+ */
+export async function getFields(proxyKey, project) {
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/fields?api-version=7.0`;
+  const data = await parse(await fetch(url), 'getFields');
+  return (data.value || []).map(f => ({
+    name:          f.name,
+    referenceName: f.referenceName,
+    type:          f.type,
+  }));
 }
 
 // ─── Area Paths (Boards) — used by ABS ───────────────────────────────────────
