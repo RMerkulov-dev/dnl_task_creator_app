@@ -5708,3 +5708,116 @@ button.su-status {
     print-color-adjust: exact !important;
   }
 }
+
+/* ─── PM › Iterations tab (bulk sprint move) ─────────────────────────────────── */
+.iter { padding: 24px 28px; }
+.iter-head { margin-bottom: 20px; }
+.iter-title { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+.iter-sub { font-size: 13px; color: var(--text-3); margin: 0; max-width: 640px; line-height: 1.5; }
+
+.iter-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(360px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 860px) { .iter-grid { grid-template-columns: 1fr; } }
+
+.iter-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 18px;
+}
+
+.iter-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.iter-divider { height: 1px; background: var(--border); margin: 18px 0; }
+.iter-load { width: 100%; margin-top: 12px; justify-content: center; }
+.iter-move { width: 100%; margin-top: 12px; justify-content: center; }
+.iter-progress { margin-top: 10px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.iter-progress-failed { color: var(--red); }
+.iter-error { margin-top: 12px; font-size: 13px; color: var(--red); }
+
+.iter-boardwrap { min-height: 260px; min-width: 0; }
+.iter-empty { color: var(--text-3); font-size: 13px; text-align: center; padding: 48px 0; }
+
+.iter-list-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--border);
+}
+.iter-count { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.iter-check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+.iter-check input { cursor: pointer; accent-color: var(--accent-1); width: 15px; height: 15px; flex-shrink: 0; }
+
+/* ── Board: one column per status, horizontal scroll ── */
+.iter-board {
+  display: flex; gap: 14px; align-items: flex-start;
+  overflow-x: auto; padding-bottom: 8px;
+  max-height: calc(100vh - 230px);
+}
+.iter-col {
+  flex: 0 0 260px; width: 260px;
+  display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--text-3) 6%, transparent);
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  max-height: 100%;
+}
+.iter-col-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg-card); border-radius: var(--r-md) var(--r-md) 0 0; z-index: 1;
+}
+.iter-col-count { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.iter-col-body { padding: 10px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+
+.iter-state {
+  display: inline-block; padding: 2px 8px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; line-height: 1.5; max-width: 170px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: color-mix(in srgb, var(--text-3) 16%, transparent); color: var(--text-2);
+}
+.iter-state-todo     { background: color-mix(in srgb, var(--text-3) 18%, transparent); color: var(--text-2); }
+.iter-state-progress { background: color-mix(in srgb, var(--yellow) 20%, transparent); color: var(--yellow); }
+.iter-state-done     { background: color-mix(in srgb, var(--green) 20%, transparent);  color: var(--green); }
+
+/* ── Card ── */
+.iter-card {
+  border: 1px solid var(--border); border-left: 3px solid var(--text-3);
+  border-radius: var(--r-sm); padding: 10px 11px; cursor: pointer;
+  background: var(--bg-card); transition: border-color .12s, background .12s, box-shadow .12s;
+}
+.iter-card:hover { background: var(--bg-card-hover); }
+.iter-card.is-selected { border-color: var(--accent-1); box-shadow: 0 0 0 1px var(--accent-1); }
+.iter-card-todo     { border-left-color: var(--text-3); }
+.iter-card-progress { border-left-color: var(--yellow); }
+.iter-card-done     { border-left-color: var(--green); }
+.iter-card.is-moved  { opacity: .5; }
+.iter-card.is-failed { border-color: color-mix(in srgb, var(--red) 45%, var(--border)); }
+
+.iter-card-top { display: flex; align-items: center; gap: 8px; }
+.iter-card-top input { cursor: pointer; accent-color: var(--accent-1); width: 14px; height: 14px; flex-shrink: 0; }
+.iter-card-title { font-size: 13px; line-height: 1.4; margin: 8px 0; word-break: break-word; }
+.iter-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+
+.iter-jira { font-size: 11px; font-weight: 600; color: var(--accent-1); text-decoration: none; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.iter-jira:hover { text-decoration: underline; }
+.iter-jira-none { color: var(--text-3); font-weight: 400; font-style: italic; }
+
+.iter-id { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; text-decoration: none; flex-shrink: 0; }
+a.iter-id:hover { color: var(--accent-1); text-decoration: underline; }
+.iter-assignee { font-size: 11px; color: var(--text-3); flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.iter-type {
+  display: inline-block; padding: 1px 6px; border-radius: var(--r-sm);
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em;
+  flex-shrink: 0; background: color-mix(in srgb, var(--text-3) 15%, transparent); color: var(--text-2);
+}
+.iter-type-epic  { background: color-mix(in srgb, #8b5cf6 22%, transparent); color: #a78bfa; }
+.iter-type-story { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
+.iter-type-bug   { background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red); }
+.iter-type-task  { background: color-mix(in srgb, var(--accent-1) 20%, transparent); color: var(--accent-1); }
+
+.iter-badge { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; flex-shrink: 0; }
+.iter-badge-ok  { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
+.iter-badge-err { background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red); }

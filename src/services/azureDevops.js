@@ -83,6 +83,15 @@ export async function updateWorkItemState(proxyKey, project, id, state) {
   return updateWorkItem(proxyKey, project, id, { 'System.State': state });
 }
 
+/**
+ * Move a work item to another sprint by setting its System.IterationPath.
+ * `iterationPath` is the full node path (e.g. "NSMG\\Sprint 5") as returned by
+ * getIterations(). Azure rejects unknown paths, so the caller surfaces errors.
+ */
+export async function updateWorkItemIteration(proxyKey, project, id, iterationPath) {
+  return updateWorkItem(proxyKey, project, id, { 'System.IterationPath': iterationPath });
+}
+
 // ─── Iterations (Sprints) — used by NSMG ─────────────────────────────────────
 
 /**
