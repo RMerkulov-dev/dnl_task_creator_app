@@ -1544,32 +1544,65 @@ app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, re
     const listTool = findFathomRawTool('list');
     if (listTool) {
       const props = listTool.inputSchema?.properties || {};
-      const args = {};
-      if ('created_after'  in props) args.created_after  = createdAfter;
-      if ('created_before' in props) args.created_before = createdBefore;
-      if ('max_pages'      in props) args.max_pages      = 3;
-      if (!isTeam && userEmail && 'recorded_by' in props) args.recorded_by = [userEmail];
+      const lo = Date.parse(createdAfter), hi = Date.parse(createdBefore);
 
+      // max_pages per call: as many pages as the schema allows (Fathom rejects an
+      // out-of-range value, which would error the whole call and return nothing).
+      let maxPages = 10;
+      if ('max_pages' in props) {
+        const schemaMax = Number(props.max_pages?.maximum);
+        if (Number.isFinite(schemaMax)) maxPages = schemaMax;
+      }
+
+      // Return EVERY call in the range, not just the first window. The tool paginates
+      // internally up to max_pages; to reach further back we walk the window: after a
+      // batch, re-query ending just before the oldest call we've seen and repeat until
+      // the batch reaches the range start or stops yielding new meetings. Dedupe by id.
       try {
-        const raw = await mcpCallTool(fathomToken, sessionId, listTool.name, args);
-        const { text, summary } = summariseMcpResult(listTool.name, raw);
-        toolResults.push({ name: listTool.name, args, result: summary });
+        const byId = new Map();          // id/url → normalized meeting (dedupe)
+        let before = createdBefore;
+        let ok = false;
+        // Hard safety cap so a misbehaving cursor can never loop forever.
+        for (let batch = 0; batch < 40; batch++) {
+          const args = {};
+          if ('created_after'  in props) args.created_after  = createdAfter;
+          if ('created_before' in props) args.created_before = before;
+          if ('max_pages'      in props) args.max_pages      = maxPages;
+          if (!isTeam && userEmail && 'recorded_by' in props) args.recorded_by = [userEmail];
 
-        // Fathom returns a human-readable text listing (not JSON). Try structured
-        // first (future-proof), then the text parser. Either is authoritative —
-        // once the tool call succeeds we never fall through to the slow LLM path.
-        const arr = meetingsFromMcp(raw) || parseMeetingsText(text);
-        const lo = Date.parse(createdAfter), hi = Date.parse(createdBefore);
-        const clean = arr
-          .map(normalizeMeeting)
-          .filter(m => m.id || m.url)
-          // Defensive date filter in case the server ignored the range.
-          .filter(m => {
+          const raw = await mcpCallTool(fathomToken, sessionId, listTool.name, args);
+          const { text, summary } = summariseMcpResult(listTool.name, raw);
+          toolResults.push({ name: listTool.name, args, result: summary });
+          ok = true;
+
+          const arr = (meetingsFromMcp(raw) || parseMeetingsText(text) || []).map(normalizeMeeting);
+          let added = 0, oldest = Infinity;
+          for (const m of arr) {
+            if (!(m.id || m.url)) continue;
             const t = m.date ? Date.parse(m.date) : NaN;
-            return isNaN(t) ? true : (t >= lo && t <= hi);
-          })
-          .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
-        return res.json({ meetings: clean, toolResults });
+            if (!isNaN(t)) {
+              if (t < lo || t > hi) continue;   // outside the requested range
+              if (t < oldest) oldest = t;
+            }
+            const key = m.id || m.url;
+            if (!byId.has(key)) { byId.set(key, m); added++; }
+          }
+
+          // Stop when: nothing new came back, or the batch already reached the
+          // range start, or the window can't shrink any further.
+          if (added === 0 || oldest === Infinity || oldest <= lo) break;
+          // End the next window AT the oldest we've seen (inclusive) so a call sharing
+          // that exact second is never skipped; the 1-call overlap is deduped by id.
+          const nextBefore = new Date(oldest).toISOString();
+          if (nextBefore === before) break;
+          before = nextBefore;
+        }
+
+        if (ok) {
+          const clean = [...byId.values()]
+            .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+          return res.json({ meetings: clean, toolResults });
+        }
       } catch (err) {
         if (err.reconnect) throw err;
         toolResults.push({ name: listTool.name, error: err.message });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
 import ToastContainer from '../../components/Toast.jsx';
 
@@ -81,6 +81,28 @@ function prettyDate(iso) {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+// Derive a short group label from a call title — the leading token before the
+// first separator (period/colon/space), sans trailing punctuation. Titles here
+// follow a "PREFIX. Rest" pattern (ABS, NSMG, WS, HT, ABS-DNL…), so this buckets
+// them cleanly. Empty/odd titles fall back to "Other".
+function callGroup(title) {
+  const first = (title || '').trim().split(/[\s.:]+/)[0] || '';
+  const g = first.replace(/[^A-Za-z0-9-]+$/, '').toUpperCase();
+  return g || 'Other';
+}
+
+// Secondary label used to filter *within* a group: strip the leading group token
+// (e.g. "ABS", "ABS-DNL") and its separator, then take the text up to the next
+// period/colon. Works for both "ABS. Marketing migration. Weekly Call" →
+// "Marketing migration" and period-less titles like "ABS Bureau and Group Only" →
+// "Bureau and Group Only". Empty when nothing is left after the prefix.
+function callSubGroup(title) {
+  const t = (title || '').trim();
+  if (!t) return '';
+  const rest = t.replace(/^[A-Za-z0-9-]+\s*[.:]?\s*/, '');   // drop "ABS" / "ABS." / "ABS-DNL "
+  return rest.split(/[.:]/)[0].trim();
+}
+
 const PRESETS = [
   { id: 'today', label: 'Today',     start: () => fmtDate(new Date()),  end: () => fmtDate(new Date()) },
   { id: '7d',    label: 'Last 7 days',  start: () => fmtDate(daysAgo(7)),  end: () => fmtDate(new Date()) },
@@ -96,6 +118,12 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
   const [loadingCalls, setLoadingCalls] = useState(false);
   const [callsError,   setCallsError]  = useState('');
   const [selectedCall, setSelectedCall] = useState(null);
+
+  // Client-side filtering of the already-loaded calls.
+  const [groupFilter, setGroupFilter] = useState('all'); // 'all' | a group label
+  const [subFilter,   setSubFilter]   = useState('all'); // 'all' | a sub-group label (within the group)
+  const [callSearch,  setCallSearch]  = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(true);  // group/sub chips collapse
 
   const [skills,        setSkills]       = useState([]);
   const [selectedSkill, setSelectedSkill] = useState('');
@@ -138,6 +166,9 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
     setCallsError('');
     setCalls(null);
     setSelectedCall(null);
+    setGroupFilter('all');
+    setSubFilter('all');
+    setCallSearch('');
     setResult('');
     setRunError('');
     try {
@@ -192,6 +223,56 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
     }
   }, [selectedCall, selectedSkill, fathomToken, user]); // eslint-disable-line
 
+  // Groups derived from the loaded calls (label → count), sorted by frequency.
+  const groups = useMemo(() => {
+    if (!calls) return [];
+    const counts = new Map();
+    for (const c of calls) {
+      const g = callGroup(c.title);
+      counts.set(g, (counts.get(g) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [calls]);
+
+  // Sub-groups (label → count) within the currently selected group. Empty unless
+  // a specific group is picked and it contains at least two distinct sub-labels.
+  const subGroups = useMemo(() => {
+    if (!calls || groupFilter === 'all') return [];
+    const counts = new Map();
+    for (const c of calls) {
+      if (callGroup(c.title) !== groupFilter) continue;
+      const s = callSubGroup(c.title);
+      if (!s) continue;
+      counts.set(s, (counts.get(s) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }, [calls, groupFilter]);
+
+  // Calls after applying the group chip + sub-group chip + free-text search.
+  const filteredCalls = useMemo(() => {
+    if (!calls) return calls;
+    const q = callSearch.trim().toLowerCase();
+    return calls.filter(c => {
+      if (groupFilter !== 'all' && callGroup(c.title) !== groupFilter) return false;
+      if (groupFilter !== 'all' && subFilter !== 'all' && callSubGroup(c.title) !== subFilter) return false;
+      if (q) {
+        const hay = `${c.title || ''} ${c.host || ''} ${(c.attendees || []).join(' ')}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [calls, groupFilter, subFilter, callSearch]);
+
+  // Selecting a group resets the sub-filter (its sub-labels are group-specific).
+  function pickGroup(label) {
+    setGroupFilter(prev => (prev === label ? 'all' : label));
+    setSubFilter('all');
+  }
+
   async function copyResult() {
     try {
       await navigator.clipboard.writeText(result);
@@ -237,21 +318,109 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
         <section className="tf-col tf-col-calls">
           <div className="tf-col-head">
             <span className="tf-col-title">{scope === 'team' ? 'Team calls' : 'My calls'}</span>
-            {calls !== null && <span className="tf-count">{calls.length}</span>}
+            {calls !== null && (
+              <span className="tf-count">
+                {filteredCalls.length === calls.length ? calls.length : `${filteredCalls.length} / ${calls.length}`}
+              </span>
+            )}
           </div>
+
+          {calls !== null && calls.length > 0 && (
+            <div className="tf-filterbar">
+              <input
+                className="tf-callsearch"
+                type="text"
+                placeholder="Filter by title, host or attendee…"
+                value={callSearch}
+                onChange={e => setCallSearch(e.target.value)}
+              />
+
+              {groups.length > 1 && (
+                <div className="tf-filter-toprow">
+                  <button
+                    type="button"
+                    className="tf-filter-toggle"
+                    onClick={() => setFiltersOpen(o => !o)}
+                    aria-expanded={filtersOpen}
+                  >
+                    <svg className={`tf-filter-chevron${filtersOpen ? ' open' : ''}`} width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Filters
+                  </button>
+                  {/* When collapsed, show what's active so it's not hidden state. */}
+                  {!filtersOpen && (groupFilter !== 'all' || subFilter !== 'all') && (
+                    <span className="tf-filter-active">
+                      {groupFilter}{subFilter !== 'all' ? ` › ${subFilter}` : ''}
+                      <button
+                        type="button"
+                        className="tf-filter-active-clear"
+                        title="Clear filter"
+                        onClick={() => { setGroupFilter('all'); setSubFilter('all'); }}
+                      >✕</button>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {filtersOpen && groups.length > 1 && (
+                <div className="tf-groups">
+                  <button
+                    className={`tf-chip tf-group${groupFilter === 'all' ? ' active' : ''}`}
+                    onClick={() => { setGroupFilter('all'); setSubFilter('all'); }}
+                  >
+                    All <span className="tf-group-n">{calls.length}</span>
+                  </button>
+                  {groups.map(g => (
+                    <button
+                      key={g.label}
+                      className={`tf-chip tf-group${groupFilter === g.label ? ' active' : ''}`}
+                      onClick={() => pickGroup(g.label)}
+                    >
+                      {g.label} <span className="tf-group-n">{g.count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {filtersOpen && subGroups.length > 1 && (
+                <div className="tf-groups tf-subgroups">
+                  <button
+                    className={`tf-chip tf-group tf-subgroup${subFilter === 'all' ? ' active' : ''}`}
+                    onClick={() => setSubFilter('all')}
+                  >
+                    All {groupFilter}
+                  </button>
+                  {subGroups.map(s => (
+                    <button
+                      key={s.label}
+                      className={`tf-chip tf-group tf-subgroup${subFilter === s.label ? ' active' : ''}`}
+                      onClick={() => setSubFilter(subFilter === s.label ? 'all' : s.label)}
+                      title={s.label}
+                    >
+                      {s.label} <span className="tf-group-n">{s.count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="tf-col-body">
             {calls === null ? (
               <p className="tf-empty">Pick a range and press <strong>Load calls</strong>.</p>
             ) : calls.length === 0 ? (
               <p className="tf-empty">No calls found in this range. Try a wider range or switch scope.</p>
+            ) : filteredCalls.length === 0 ? (
+              <p className="tf-empty">No calls match the current filter. <button type="button" className="tf-linkbtn" onClick={() => { setGroupFilter('all'); setSubFilter('all'); setCallSearch(''); }}>Clear filter</button></p>
             ) : (
               <ul className="tf-call-list">
-                {calls.map((c, i) => {
+                {filteredCalls.map((c, i) => {
                   const active = selectedCall && selectedCall.id === c.id;
                   const sub = [prettyDate(c.date), scope === 'team' ? c.host : null, c.attendees?.slice(0, 3).join(', ')]
                     .filter(Boolean).join(' · ');
                   return (
-                    <li key={c.id || i}>
+                    <li key={c.id || i} className="tf-call-li">
                       <button
                         className={`tf-call${active ? ' active' : ''}`}
                         onClick={() => { setSelectedCall(c); setResult(''); setRunError(''); }}
@@ -259,6 +428,18 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
                         <span className="tf-call-title">{c.title}</span>
                         {sub && <span className="tf-call-meta">{sub}</span>}
                       </button>
+                      {c.url && (
+                        <a
+                          className="tf-call-open"
+                          href={c.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title="Open call in Fathom"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          Open ↗
+                        </a>
+                      )}
                     </li>
                   );
                 })}

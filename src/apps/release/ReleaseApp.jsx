@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { PROJECT_LIST } from '../../config/projects.js';
 import { getAreaPaths, getBoardWorkItems, getFields, setWorkItemField } from '../../services/azureDevops.js';
 
@@ -7,8 +8,14 @@ import { getAreaPaths, getBoardWorkItems, getFields, setWorkItemField } from '..
 // the project's boardAllowList is intentionally ignored here.
 const BOARD_PROJECTS = PROJECT_LIST.filter(p => p.features?.board);
 
-// Finished work is irrelevant to a release plan — hide these terminal states.
+// Finished work is irrelevant to a release plan — hide these terminal states everywhere.
 const EXCLUDED_STATES = new Set(['done', 'closed', 'resolved', 'removed', 'cancelled', 'completed']);
+
+// Per-field calendar exclusions: a "Testing in <phase>" state means that phase's
+// milestone has already been reached, so the item shouldn't clutter that phase's
+// chip on the Report timeline. Testing-in-Prod also implies UAT is long past.
+const PROD_DONE_STATES = new Set(['testing in prod']);
+const UAT_DONE_STATES  = new Set(['testing in uat', 'testing in prod']);
 
 const MONTHS   = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -123,6 +130,7 @@ export default function ReleaseApp({ allowedProjects }) {
 
   const [mode, setMode]           = useState('report');  // 'edit' | 'report'
   const [calFilter, setCalFilter] = useState('all');     // 'all' | 'uat' | 'prod'
+  const [focusKey, setFocusKey]   = useState(null);      // 'YYYY-M' of a month opened fullscreen
 
   const [saving, setSaving] = useState(() => new Set());
   const [errs,   setErrs]   = useState({});
@@ -244,10 +252,13 @@ export default function ReleaseApp({ allowedProjects }) {
     // One entry per item, no duplicates: use PROD (the final date) when set,
     // otherwise fall back to the UAT date.
     for (const it of visibleItems) {
+      const state = (it.state || '').trim().toLowerCase();
       const u = parseDate(uatField  ? it.fields?.[uatField]  : null);
       const p = parseDate(prodField ? it.fields?.[prodField] : null);
-      if (p.ts != null) push(p.label, 'prod', it);
-      else if (u.ts != null) push(u.label, 'uat', it);
+      // Drop the item from a phase's chip once that phase's milestone is reached
+      // (Testing in Prod/UAT) — a shipped release shouldn't clutter the timeline.
+      if (p.ts != null) { if (!PROD_DONE_STATES.has(state)) push(p.label, 'prod', it); }
+      else if (u.ts != null) { if (!UAT_DONE_STATES.has(state)) push(u.label, 'uat', it); }
     }
     if (byDay.size === 0) return { months: [], byDay };
     const keys = [...byDay.keys()].sort();
@@ -336,12 +347,37 @@ export default function ReleaseApp({ allowedProjects }) {
 
   // ── Report-mode month renderer ─────────────────────────────────────────────
   const todayKey = keyOfDate(new Date());
-  function monthCard(first) {
+  function monthCard(first, focus = false) {
     const y = first.getFullYear(), m = first.getMonth();
+    const mkey = `${y}-${m}`;
     const days = monthDays(first);
+    // In fullscreen focus every event is shown; in the grid we cap to keep cells tidy.
+    const cap = focus ? Infinity : 8;
     return (
-      <div key={`${y}-${m}`} className="rel-mon">
-        <div className="rel-mon-head">{MONTHS[m]} {y}</div>
+      <div key={mkey} className={`rel-mon${focus ? ' rel-mon-focus' : ''}`}>
+        {focus ? (
+          <div className="rel-mon-head">
+            <span className="rel-mon-name">{MONTHS[m]} {y}</span>
+            <button type="button" className="rel-mon-btn" title="Close (Esc)" onClick={() => setFocusKey(null)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M6 6L18 18M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+              <span>Close</span>
+            </button>
+          </div>
+        ) : (
+          // Whole header is the expand affordance — click anywhere on it to open
+          // this month fullscreen.
+          <button type="button" className="rel-mon-head rel-mon-head-btn" title="Click to expand this month" onClick={() => setFocusKey(mkey)}>
+            <span className="rel-mon-name">{MONTHS[m]} {y}</span>
+            <span className="rel-mon-expand">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 4H4V9M20 9V4H15M15 20H20V15M4 15V20H9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <span>Expand</span>
+            </span>
+          </button>
+        )}
         <div className="rel-mon-dows">
           {WEEKDAYS.map(w => <div key={w} className="rel-mon-dow">{w}</div>)}
         </div>
@@ -350,7 +386,7 @@ export default function ReleaseApp({ allowedProjects }) {
             const key = keyOfDate(day);
             const evs = day.getMonth() === m ? dayEvents(key) : [];
             const outside = day.getMonth() !== m;
-            const shown = evs.slice(0, 8);
+            const shown = evs.slice(0, cap);
             return (
               <div key={i} className={`rel-mon-cell${outside ? ' outside' : ''}${key === todayKey ? ' today' : ''}`}>
                 <div className="rel-mon-daynum">{day.getDate()}</div>
@@ -374,6 +410,19 @@ export default function ReleaseApp({ allowedProjects }) {
       </div>
     );
   }
+
+  const focusMonth = useMemo(
+    () => (focusKey ? calendar.months.find(first => `${first.getFullYear()}-${first.getMonth()}` === focusKey) : null),
+    [focusKey, calendar.months],
+  );
+
+  // Esc closes the fullscreen month.
+  useEffect(() => {
+    if (!focusMonth) return;
+    const onKey = (e) => { if (e.key === 'Escape') setFocusKey(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusMonth]);
 
   const ModeSwitch = (
     <div className="rel-modeswitch" role="tablist">
@@ -458,7 +507,7 @@ export default function ReleaseApp({ allowedProjects }) {
                   <div className="rel-empty">No release dates set — add some in Edit mode.</div>
                 ) : (
                   <div className="rel-cal2">
-                    {calendar.months.map(monthCard)}
+                    {calendar.months.map(first => monthCard(first))}
                   </div>
                 )
               )}
@@ -466,6 +515,15 @@ export default function ReleaseApp({ allowedProjects }) {
           )}
         </div>
       </>
+      )}
+
+      {focusMonth && createPortal(
+        <div className="rel-mon-overlay" onClick={() => setFocusKey(null)}>
+          <div className="rel-mon-focus-wrap" onClick={e => e.stopPropagation()}>
+            {monthCard(focusMonth, true)}
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
