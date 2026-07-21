@@ -364,6 +364,14 @@ body {
   display: block;
 }
 
+/* The brand asset is a WHITE wordmark (dynamica-white.svg) — invisible on the
+   light theme's pale header. Swap to the dark-wordmark variant (same coloured
+   "LABS" tiles) in light theme. `content:` on an <img> replaces the rendered
+   image, so no per-app JSX change is needed. */
+:root[data-theme="light"] .header-logo img {
+  content: url('https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-black.svg');
+}
+
 .header-sep {
   width: 1px;
   height: 18px;
@@ -1266,6 +1274,16 @@ body {
   .pm-tab { padding: 9px 12px; letter-spacing: 0.04em; }
 }
 
+/* The PM switcher floats centred over the sub-app header; with 7 tabs it overlaps
+   the right-aligned header email on anything narrower than ~1600px (i.e. every
+   normal laptop). The signed-in identity is already shown via the sidebar avatar
+   tooltip, so hide the redundant header email inside PM to give the switcher room.
+   Restore it only on very wide screens where the two comfortably clear each other. */
+.pm-workspace .header-user { display: none; }
+@media (min-width: 1700px) {
+  .pm-workspace .header-user { display: inline; }
+}
+
 /* ── Sidebar logo ── */
 .sidebar-logo {
   display: flex;
@@ -1289,6 +1307,7 @@ body {
   align-items: center;
   gap: 6px;
   width: 100%;
+  flex-shrink: 0;
 }
 
 /* ── App icon button ── */
@@ -1389,6 +1408,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .sidebar-user-avatar {
@@ -2531,6 +2551,10 @@ html, body, #root {
   width: 32px;
   padding: 2px;
   margin-bottom: 12px;
+  /* On short viewports the sidebar's flex column would otherwise squeeze this
+     control and — because .theme-toggle is overflow:hidden — clip the three
+     icons into a thin sliver. Never shrink; let the sidebar scroll instead. */
+  flex-shrink: 0;
 }
 
 .theme-toggle-vertical .theme-toggle-opt {
@@ -6187,7 +6211,41 @@ a.rel-id:hover { color: var(--accent-1); text-decoration: underline; }
 .rel-field-proj  { flex: 0 1 220px; min-width: 180px; }
 .rel-field-board { flex: 0 1 260px; min-width: 200px; }
 .rel-load-top { flex: 0 0 auto; align-self: flex-end; width: auto; padding: 6px 14px; font-size: 12px; }
-.rel-topbar-right { margin-left: auto; display: flex; align-items: flex-end; gap: 10px; }
+.rel-topbar-right { margin-left: auto; display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+/* ── Manage: project-wide search box (icon + controls inside a single pill) ── */
+.rel-manage-searchbox {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 0 14px; height: 44px;
+  margin-bottom: 16px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.rel-manage-searchbox:focus-within {
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-1) 22%, transparent);
+}
+.rel-manage-ico { flex: 0 0 auto; color: var(--text-3); }
+.rel-manage-searchbox:focus-within .rel-manage-ico { color: var(--accent-1); }
+.rel-manage-input {
+  flex: 1; min-width: 0; height: 100%;
+  background: none; border: 0; outline: none;
+  color: var(--text-1); font-size: 14px; font-family: inherit;
+}
+.rel-manage-input::placeholder { color: var(--text-3); }
+.rel-manage-count {
+  flex: 0 0 auto; font-size: 12px; color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-3) 14%, transparent);
+}
+.rel-manage-spin { flex: 0 0 auto; }
+.rel-manage-x {
+  flex: 0 0 auto; display: grid; place-items: center;
+  width: 24px; height: 24px; border: 0; border-radius: 6px;
+  background: none; color: var(--text-3); cursor: pointer; font-size: 13px;
+  transition: color 0.15s, background 0.15s;
+}
+.rel-manage-x:hover { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
 .rel-content { min-width: 0; }
 
 /* ── Edit / Report mode switch ── */
@@ -6247,7 +6305,13 @@ a.rel-id:hover { color: var(--accent-1); text-decoration: underline; }
   box-shadow: 0 20px 60px rgba(0, 0, 0, .5);
 }
 .rel-mon-focus .rel-mon-head { font-size: 18px; padding: 12px 12px 12px 18px; }
-.rel-mon-focus .rel-mon-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* The grid must NOT be the scroll container: a definite-height scroll-container
+   grid auto-sizes its rows from the UNWRAPPED max-content, so a busy day's cell
+   collapses to ~one line per item and clips the rest. Instead the wrapper scrolls
+   and the grid keeps its natural (correctly-wrapped) height, so tall days grow
+   and everything is reachable by scrolling. */
+.rel-mon-focus .rel-mon-gridscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.rel-mon-focus .rel-mon-grid { grid-auto-rows: minmax(120px, auto); }
 .rel-mon-focus .rel-mon-cell { min-height: 120px; }
 .rel-mon-focus .rel-ev { font-size: 12px; }
 .rel-mon-focus .rel-mon-daynum { font-size: 13px; }

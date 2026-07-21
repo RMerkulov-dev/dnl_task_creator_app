@@ -143,7 +143,12 @@
       "Bash(lsof -ti:3000,3001)",
       "Bash(xargs -r kill)",
       "Bash(git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/apps/task_creator_app\" log --oneline -10)",
-      "Bash(git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/apps/task_creator_app\" status --short)"
+      "Bash(git -C \"/Users/romario/Library/Mobile Documents/com~apple~CloudDocs/DYNAMICA_LABS/cowork/apps/task_creator_app\" status --short)",
+      "Bash(python3 -c \"import playwright; print\\('ok'\\)\")",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"concurrently\")",
+      "Bash(python3 check_sidebar.py)",
+      "Bash(python3 verify_cal.py)"
     ]
   }
 }

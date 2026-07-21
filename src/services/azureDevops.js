@@ -306,6 +306,107 @@ export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath
 }
 
 /**
+ * Fetch specific work items by numeric id across the whole project (no board /
+ * area filter) with their stored Jira key — same row shape as
+ * getBoardWorkItems. Missing ids are silently omitted (errorPolicy=omit). Used
+ * by the Release "Manage" search where the user pastes a list of Azure ids.
+ */
+export async function getWorkItemsByIds(proxyKey, project, jiraIdField, ids) {
+  const uniq = [...new Set((ids || []).map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (!uniq.length) return [];
+  const items = [];
+  for (let i = 0; i < uniq.length; i += 200) {
+    const chunk = uniq.slice(i, i + 200);
+    const batchUrl = `${BASE}/${proxyKey}/_apis/wit/workitems?ids=${chunk.join(',')}&errorPolicy=omit&api-version=7.0`;
+    const batch = await parse(await fetch(batchUrl), 'getWorkItemsByIds-batch');
+    for (const item of batch.value || []) {
+      if (!item) continue;   // omitted (missing / no access) ids come back as null
+      const f = item.fields || {};
+      const raw = resolveJiraFieldValue(f, jiraIdField);
+      items.push({
+        id:         item.id,
+        title:      f['System.Title'] || `#${item.id}`,
+        type:       f['System.WorkItemType'] || '',
+        state:      f['System.State'] || '',
+        assignedTo: f['System.AssignedTo']?.displayName || null,
+        parentId:   f['System.Parent'] ?? null,
+        jiraRaw:    raw,
+        jiraKey:    extractJiraKey(raw),
+        url:        item._links?.html?.href || workItemWebUrl(item.url, project) || item.url,
+        fields:     f,
+      });
+    }
+  }
+  // Preserve the order the ids were requested in.
+  const pos = new Map(uniq.map((id, idx) => [id, idx]));
+  items.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+  return items;
+}
+
+/**
+ * Free-text search across the whole project (no board / area filter) — like the
+ * Azure DevOps global search box. The term may be several tokens separated by
+ * commas and/or spaces ("1206, 906 portal"); a work item matches if ANY token
+ * hits. A purely numeric token is treated as a work-item id and matched EXACTLY
+ * on [System.Id] (no substring hunting — otherwise "1059" would also match Jira
+ * ids like ABS-10596). A text token is matched as a substring of [System.Title]
+ * and the Jira id field. Pass `areaPath` to scope the search to a single board
+ * (leave null to search the whole project). Returns the same row shape as
+ * getBoardWorkItems, capped to `max` results. Used by Release "Manage".
+ */
+export async function searchWorkItems(proxyKey, project, jiraIdField, term, areaPath = null, max = 100) {
+  const tokens = [...new Set((term || '').split(/[\s,]+/).map(t => t.trim()).filter(Boolean))];
+  if (!tokens.length) return [];
+  const wiqlUrl = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.0`;
+  const esc = v => v.replace(/'/g, "''");
+  const clauses = [];
+  for (const tok of tokens) {
+    if (/^\d+$/.test(tok)) {
+      clauses.push(`[System.Id] = ${Number(tok)}`);
+    } else {
+      clauses.push(`[System.Title] CONTAINS '${esc(tok)}'`);
+      if (jiraIdField) clauses.push(`[${jiraIdField}] CONTAINS '${esc(tok)}'`);
+    }
+  }
+  const areaClause = areaPath ? ` AND [System.AreaPath] UNDER '${esc(areaPath)}'` : '';
+  const wiqlRes = await fetch(wiqlUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query: `SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project AND (${clauses.join(' OR ')})${areaClause} ORDER BY [System.Id] DESC`,
+    }),
+  });
+  const wiql = await parse(wiqlRes, 'searchWorkItems-wiql');
+  const ids = (wiql.workItems || []).map(w => w.id).slice(0, max);
+  if (!ids.length) return [];
+
+  const items = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const batchUrl = `${BASE}/${proxyKey}/_apis/wit/workitems?ids=${chunk.join(',')}&errorPolicy=omit&api-version=7.0`;
+    const batch = await parse(await fetch(batchUrl), 'searchWorkItems-batch');
+    for (const item of batch.value || []) {
+      if (!item) continue;
+      const f = item.fields || {};
+      const raw = resolveJiraFieldValue(f, jiraIdField);
+      items.push({
+        id:         item.id,
+        title:      f['System.Title'] || `#${item.id}`,
+        type:       f['System.WorkItemType'] || '',
+        state:      f['System.State'] || '',
+        assignedTo: f['System.AssignedTo']?.displayName || null,
+        parentId:   f['System.Parent'] ?? null,
+        jiraRaw:    raw,
+        jiraKey:    extractJiraKey(raw),
+        url:        item._links?.html?.href || workItemWebUrl(item.url, project) || item.url,
+        fields:     f,
+      });
+    }
+  }
+  return items;
+}
+
+/**
  * Set (or clear) a single field on a work item. A null/empty value issues a
  * `remove` op so the field is cleared; otherwise an `add` op writes the value.
  * Used by the Release view to edit the Expected UAT/PROD release dates inline.

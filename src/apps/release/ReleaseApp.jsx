@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { PROJECT_LIST } from '../../config/projects.js';
-import { getAreaPaths, getBoardWorkItems, getFields, setWorkItemField } from '../../services/azureDevops.js';
+import { getAreaPaths, getBoardWorkItems, searchWorkItems, getFields, setWorkItemField } from '../../services/azureDevops.js';
 
 // The Release view is board-based: only projects that expose boards (area paths)
 // qualify. ABS is the one today. Unlike the Status tab, every board is shown —
@@ -135,10 +135,17 @@ export default function ReleaseApp({ allowedProjects }) {
   const [saving, setSaving] = useState(() => new Set());
   const [errs,   setErrs]   = useState({});
 
+  // ── Manage mode: live project-wide server search (like Azure's search box) ──
+  const [manageItems,   setManageItems]   = useState([]);
+  const [manageLoading, setManageLoading] = useState(false);
+  const [manageError,   setManageError]   = useState('');
+  const [manageQuery,   setManageQuery]   = useState('');
+
   // ── On project change: load boards + field catalogue, auto-detect fields ────
   useEffect(() => {
     setBoards([]); setSelectedBoard(''); setItems([]); setLoaded(false); setError(''); setQuery('');
     setFields([]); setProdField(''); setUatField(''); setSaving(new Set()); setErrs({});
+    setManageItems([]); setManageError(''); setManageLoading(false); setManageQuery('');
     if (!proj) return;
     let cancelled = false;
 
@@ -212,7 +219,9 @@ export default function ReleaseApp({ allowedProjects }) {
     setErrs(e => { const n = { ...e }; delete n[cellKey]; return n; });
     try {
       await setWorkItemField(proj.azure.proxyKey, proj.azure.project, item.id, ref, iso);
-      setItems(prev => prev.map(i => (i.id === item.id ? { ...i, fields: { ...i.fields, [ref]: iso } } : i)));
+      const patch = i => (i.id === item.id ? { ...i, fields: { ...i.fields, [ref]: iso } } : i);
+      setItems(prev => prev.map(patch));
+      setManageItems(prev => prev.map(patch));
     } catch (err) {
       setErrs(e => ({ ...e, [cellKey]: err.message || 'Failed to save' }));
     } finally {
@@ -220,14 +229,19 @@ export default function ReleaseApp({ allowedProjects }) {
     }
   }, [proj, prodField, uatField]);
 
-  // ── Edit mode: 3 mutually-exclusive sections ───────────────────────────────
-  const { uatRows, prodRows, noneRows } = useMemo(() => {
-    const q = query.trim().toLowerCase();
+  // ── Edit mode: search + 3 mutually-exclusive sections ──────────────────────
+  // The search box accepts a comma-separated list of tokens ("1234, 5678, ABS-1")
+  // — a row matches if ANY token is a substring of its id / title / Jira key, so
+  // pasting a batch of item numbers surfaces exactly those items across every
+  // bucket. When searching, results are shown as one flat list (see render).
+  const { uatRows, prodRows, noneRows, searchRows, searching } = useMemo(() => {
+    const terms = query.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+    const match = (it) => terms.length === 0 || terms.some(t =>
+      String(it.id).includes(t)
+      || (it.title || '').toLowerCase().includes(t)
+      || (it.jiraKey || '').toLowerCase().includes(t));
     const rows = visibleItems
-      .filter(it => !q
-        || String(it.id).includes(q)
-        || (it.title || '').toLowerCase().includes(q)
-        || (it.jiraKey || '').toLowerCase().includes(q))
+      .filter(match)
       .map(it => ({
         it,
         uat:  parseDate(uatField  ? it.fields?.[uatField]  : null),
@@ -235,15 +249,47 @@ export default function ReleaseApp({ allowedProjects }) {
       }));
     const byId = (a, b) => a.it.id - b.it.id;
     return {
+      searching: terms.length > 0,
+      searchRows: rows.slice().sort(byId),
       prodRows: rows.filter(r => r.prod.ts != null).sort(byId),
       uatRows:  rows.filter(r => r.prod.ts == null && r.uat.ts != null).sort(byId),
       noneRows: rows.filter(r => r.prod.ts == null && r.uat.ts == null).sort(byId),
     };
   }, [visibleItems, query, uatField, prodField]);
 
-  const total = uatRows.length + prodRows.length + noneRows.length;
   const prodName = fields.find(f => f.referenceName === prodField)?.name || 'Expected PROD';
   const uatName  = fields.find(f => f.referenceName === uatField)?.name  || 'Expected UAT';
+
+  // ── Manage: debounced project-wide server search — no board needed ─────────
+  // Types straight into Azure (id / title / Jira id), like the ADO search box.
+  useEffect(() => {
+    if (mode !== 'manage' || !proj) return;
+    const q = manageQuery.trim();
+    if (q.length < 2) { setManageItems([]); setManageError(''); setManageLoading(false); return; }
+    let cancelled = false;
+    setManageLoading(true); setManageError('');
+    const t = setTimeout(() => {
+      searchWorkItems(proj.azure.proxyKey, proj.azure.project, proj.azure.jiraIdField, q, selectedBoard || null)
+        .then(list => {
+          if (cancelled) return;
+          setManageItems(list);
+          setProdField(prev => refineField(list, candidateFields, 'prod', prev));
+          setUatField(prev => refineField(list, candidateFields, 'uat', prev));
+        })
+        .catch(e => !cancelled && setManageError(e.message || 'Search failed.'))
+        .finally(() => !cancelled && setManageLoading(false));
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [manageQuery, mode, proj, selectedBoard, candidateFields]);
+
+  const manageRows = useMemo(() => (
+    manageItems
+      .map(it => ({
+        it,
+        uat:  parseDate(uatField  ? it.fields?.[uatField]  : null),
+        prod: parseDate(prodField ? it.fields?.[prodField] : null),
+      }))
+  ), [manageItems, uatField, prodField]);
 
   // ── Report mode: events per day + the months to render ─────────────────────
   const calendar = useMemo(() => {
@@ -276,7 +322,7 @@ export default function ReleaseApp({ allowedProjects }) {
     return calFilter === 'all' ? all : all.filter(e => e.kind === calFilter);
   }, [calendar, calFilter]);
 
-  function switchMode(m) { setMode(m); }
+  function switchMode(m) { setMode(m); setQuery(''); }
 
   // ── Edit-mode row helpers ──────────────────────────────────────────────────
   function dateCell(it, which, d, ref) {
@@ -381,31 +427,33 @@ export default function ReleaseApp({ allowedProjects }) {
         <div className="rel-mon-dows">
           {WEEKDAYS.map(w => <div key={w} className="rel-mon-dow">{w}</div>)}
         </div>
-        <div className="rel-mon-grid">
-          {days.map((day, i) => {
-            const key = keyOfDate(day);
-            const evs = day.getMonth() === m ? dayEvents(key) : [];
-            const outside = day.getMonth() !== m;
-            const shown = evs.slice(0, cap);
-            return (
-              <div key={i} className={`rel-mon-cell${outside ? ' outside' : ''}${key === todayKey ? ' today' : ''}`}>
-                <div className="rel-mon-daynum">{day.getDate()}</div>
-                {shown.map((e, j) => (
-                  <a
-                    key={j}
-                    className={`rel-ev rel-ev-${e.kind}`}
-                    href={e.it.url || undefined}
-                    target="_blank" rel="noreferrer"
-                    title={`${e.kind.toUpperCase()} · #${e.it.id}${e.it.jiraKey ? ` · ${e.it.jiraKey}` : ''}\n${e.it.title || ''}`}
-                  >
-                    <span className="rel-ev-id">#{e.it.id}</span>
-                    <span className="rel-ev-title">{e.it.title || `#${e.it.id}`}</span>
-                  </a>
-                ))}
-                {evs.length > shown.length && <div className="rel-mon-more">+{evs.length - shown.length} more</div>}
-              </div>
-            );
-          })}
+        <div className="rel-mon-gridscroll">
+          <div className="rel-mon-grid">
+            {days.map((day, i) => {
+              const key = keyOfDate(day);
+              const evs = day.getMonth() === m ? dayEvents(key) : [];
+              const outside = day.getMonth() !== m;
+              const shown = evs.slice(0, cap);
+              return (
+                <div key={i} className={`rel-mon-cell${outside ? ' outside' : ''}${key === todayKey ? ' today' : ''}`}>
+                  <div className="rel-mon-daynum">{day.getDate()}</div>
+                  {shown.map((e, j) => (
+                    <a
+                      key={j}
+                      className={`rel-ev rel-ev-${e.kind}`}
+                      href={e.it.url || undefined}
+                      target="_blank" rel="noreferrer"
+                      title={`${e.kind.toUpperCase()} · #${e.it.id}${e.it.jiraKey ? ` · ${e.it.jiraKey}` : ''}\n${e.it.title || ''}`}
+                    >
+                      <span className="rel-ev-id">#{e.it.id}</span>
+                      <span className="rel-ev-title">{e.it.title || `#${e.it.id}`}</span>
+                    </a>
+                  ))}
+                  {evs.length > shown.length && <div className="rel-mon-more">+{evs.length - shown.length} more</div>}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -426,8 +474,9 @@ export default function ReleaseApp({ allowedProjects }) {
 
   const ModeSwitch = (
     <div className="rel-modeswitch" role="tablist">
-      <button role="tab" aria-selected={mode === 'edit'}   className={mode === 'edit'   ? 'active' : ''} onClick={() => switchMode('edit')}>Edit</button>
       <button role="tab" aria-selected={mode === 'report'} className={mode === 'report' ? 'active' : ''} onClick={() => switchMode('report')}>Report</button>
+      <button role="tab" aria-selected={mode === 'edit'}   className={mode === 'edit'   ? 'active' : ''} onClick={() => switchMode('edit')}>Edit</button>
+      <button role="tab" aria-selected={mode === 'manage'} className={mode === 'manage' ? 'active' : ''} onClick={() => switchMode('manage')}>Manage</button>
     </div>
   );
 
@@ -455,14 +504,23 @@ export default function ReleaseApp({ allowedProjects }) {
           </div>
           <div className="rel-field rel-field-board">
             <label className="rel-label">Board</label>
-            <select className="select" value={selectedBoard} onChange={e => setSelectedBoard(e.target.value)} disabled={boardsLoading || !boards.length}>
-              <option value="">{boardsLoading ? 'Loading boards…' : '— Select board —'}</option>
-              {boards.map(b => <option key={b.path} value={b.path}>{b.name}</option>)}
-            </select>
+            {mode === 'manage' ? (
+              <select className="select" value={selectedBoard} onChange={e => setSelectedBoard(e.target.value)} disabled={boardsLoading || !boards.length} title="Search all boards, or scope to one">
+                <option value="">{boardsLoading ? 'Loading boards…' : 'All boards'}</option>
+                {boards.map(b => <option key={b.path} value={b.path}>{b.name}</option>)}
+              </select>
+            ) : (
+              <select className="select" value={selectedBoard} onChange={e => setSelectedBoard(e.target.value)} disabled={boardsLoading || !boards.length}>
+                <option value="">{boardsLoading ? 'Loading boards…' : '— Select board —'}</option>
+                {boards.map(b => <option key={b.path} value={b.path}>{b.name}</option>)}
+              </select>
+            )}
           </div>
-          <button className="btn btn-primary rel-load-top" onClick={load} disabled={loading || !selectedBoard}>
-            {loading ? <><span className="spinner" /> …</> : (loaded ? 'Reload' : 'Load')}
-          </button>
+          {mode !== 'manage' && (
+            <button className="btn btn-primary rel-load-top" onClick={load} disabled={loading || !selectedBoard}>
+              {loading ? <><span className="spinner" /> …</> : (loaded ? 'Reload' : 'Load')}
+            </button>
+          )}
 
           <div className="rel-topbar-right">
             {loaded && items.length > 0 && mode === 'report' && (
@@ -477,39 +535,77 @@ export default function ReleaseApp({ allowedProjects }) {
         </div>
         {error && <div className="rel-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-        {/* ── Content: Edit sections or Report calendar ── */}
+        {/* ── Content: Manage search / Edit sections / Report calendar ── */}
         <div className="rel-panel rel-listwrap rel-content">
-          {!loaded && !loading && <div className="rel-empty">Load a board to edit release dates.</div>}
-          {loading && <div className="rel-empty"><span className="spinner spinner-lg" /></div>}
-          {loaded && !loading && items.length === 0 && <div className="rel-empty">No work items on this board.</div>}
-
-          {loaded && !loading && items.length > 0 && (
+          {mode === 'manage' ? (
             <>
-              {mode === 'edit' && (
-                <div className="rel-toolbar">
-                  <input className="input rel-search" placeholder="Search by number or title…" value={query} onChange={e => setQuery(e.target.value)} />
-                  {query && <span className="rel-search-count">{total} / {visibleItems.length}</span>}
-                </div>
-              )}
-
-              {mode === 'edit' ? (
-                query && total === 0 ? (
-                  <div className="rel-empty">Nothing matches “{query}”.</div>
-                ) : (
-                  <>
-                    {section('uat',  'uat',  `UAT — ${uatName}`,   uatRows,  true)}
-                    {section('prod', 'prod', `PROD — ${prodName}`, prodRows, true)}
-                    {section('none', 'none', 'Unmarked',           noneRows, false)}
-                  </>
-                )
+              <div className="rel-manage-searchbox">
+                <svg className="rel-manage-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <input
+                  className="rel-manage-input"
+                  placeholder="Search the whole project — number, title or Jira ID (e.g. 1206, 906)…"
+                  value={manageQuery}
+                  onChange={e => setManageQuery(e.target.value)}
+                  autoFocus
+                />
+                {manageLoading && <span className="spinner rel-manage-spin" />}
+                {!manageLoading && manageQuery.trim().length >= 2 && <span className="rel-manage-count">{manageRows.length}</span>}
+                {manageQuery && <button type="button" className="rel-manage-x" title="Clear search" onClick={() => setManageQuery('')}>✕</button>}
+              </div>
+              {manageError && <div className="rel-error" style={{ marginBottom: 12 }}>{manageError}</div>}
+              {manageQuery.trim().length < 2 ? (
+                <div className="rel-empty">Type at least 2 characters to search every board in the project.</div>
+              ) : manageLoading ? (
+                <div className="rel-empty"><span className="spinner spinner-lg" /></div>
+              ) : manageRows.length === 0 ? (
+                <div className="rel-empty">Nothing matches “{manageQuery.trim()}”.</div>
               ) : (
-                calendar.months.length === 0 ? (
-                  <div className="rel-empty">No release dates set — add some in Edit mode.</div>
-                ) : (
-                  <div className="rel-cal2">
-                    {calendar.months.map(first => monthCard(first))}
-                  </div>
-                )
+                <div className="rel-section-body">{manageRows.map(row)}</div>
+              )}
+            </>
+          ) : (
+            <>
+              {!loaded && !loading && <div className="rel-empty">Load a board to edit release dates.</div>}
+              {loading && <div className="rel-empty"><span className="spinner spinner-lg" /></div>}
+              {loaded && !loading && items.length === 0 && <div className="rel-empty">No work items on this board.</div>}
+
+              {loaded && !loading && items.length > 0 && (
+                <>
+                  {mode === 'edit' && (
+                    <div className="rel-toolbar">
+                      <input
+                        className="input rel-search"
+                        placeholder="Search by number or title…"
+                        value={query}
+                        onChange={e => setQuery(e.target.value)}
+                      />
+                      {query && <span className="rel-search-count">{searchRows.length} / {visibleItems.length}</span>}
+                      {query && <button type="button" className="rel-clear" title="Clear search" onClick={() => setQuery('')}>✕</button>}
+                    </div>
+                  )}
+
+                  {mode === 'edit' ? (
+                    searching && searchRows.length === 0 ? (
+                      <div className="rel-empty">Nothing matches “{query}”.</div>
+                    ) : (
+                      <>
+                        {section('uat',  'uat',  `UAT — ${uatName}`,   uatRows,  true)}
+                        {section('prod', 'prod', `PROD — ${prodName}`, prodRows, true)}
+                        {section('none', 'none', 'Unmarked',           noneRows, false)}
+                      </>
+                    )
+                  ) : (
+                    calendar.months.length === 0 ? (
+                      <div className="rel-empty">No release dates set — add some in Edit mode.</div>
+                    ) : (
+                      <div className="rel-cal2">
+                        {calendar.months.map(first => monthCard(first))}
+                      </div>
+                    )
+                  )}
+                </>
               )}
             </>
           )}
