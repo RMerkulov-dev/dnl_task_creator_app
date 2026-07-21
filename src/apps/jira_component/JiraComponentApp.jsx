@@ -116,6 +116,7 @@ export default function JiraComponentApp() {
   const [components, setComponents] = useState([]);
   const [componentId, setComponentId] = useState('');
   const [compLoading, setCompLoading] = useState(false);
+  const [projectsLoading, setProjectsLoading] = useState(true);
 
   const [text, setText] = useState('');
   const [image, setImage] = useState(null);      // { dataUrl, name }
@@ -129,9 +130,11 @@ export default function JiraComponentApp() {
 
   // Load Jira projects once.
   useEffect(() => {
+    setProjectsLoading(true);
     getJiraProjects(CLOUD_ID)
       .then(list => setProjects(list.map(p => ({ value: p.key, label: p.name, hint: p.key }))))
-      .catch(() => setError('Could not load Jira projects.'));
+      .catch(() => setError('Could not load Jira projects.'))
+      .finally(() => setProjectsLoading(false));
   }, []);
 
   // Load components whenever the project changes.
@@ -294,8 +297,9 @@ export default function JiraComponentApp() {
             items={projects}
             value={projectKey}
             onChange={setProjectKey}
-            placeholder="Select project…"
+            placeholder={projectsLoading ? 'Loading projects…' : 'Select project…'}
             searchPlaceholder="Search projects…"
+            disabled={projectsLoading}
           />
 
           <label className="jcomp-label" style={{ marginTop: 16 }}>Component</label>

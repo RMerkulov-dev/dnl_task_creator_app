@@ -469,11 +469,14 @@ export default function ReportApp({ user, onLogout }) {
   const [updatedTo,   setUpdatedTo]   = useState('');
   const [sortBy,      setSortBy]      = useState('planned'); // 'planned' | 'status'
   const [loading,    setLoading]    = useState(false);
+  const [projectsLoading,   setProjectsLoading]   = useState(true);
+  const [componentsLoading, setComponentsLoading] = useState(false);
   const [error,      setError]      = useState('');
 
   useEffect(() => {
-    if (!CLOUD_ID) return;
-    getJiraProjects(CLOUD_ID).then(setProjects).catch(() => {});
+    if (!CLOUD_ID) { setProjectsLoading(false); return; }
+    setProjectsLoading(true);
+    getJiraProjects(CLOUD_ID).then(setProjects).catch(() => {}).finally(() => setProjectsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -482,7 +485,8 @@ export default function ReportApp({ user, onLogout }) {
     setRows(null);
     setError('');
     if (!projectKey) return;
-    getProjectComponents(CLOUD_ID, projectKey).then(setComponents).catch(() => {});
+    setComponentsLoading(true);
+    getProjectComponents(CLOUD_ID, projectKey).then(setComponents).catch(() => {}).finally(() => setComponentsLoading(false));
   }, [projectKey]);
 
   const load = useCallback(async () => {
@@ -550,8 +554,9 @@ export default function ReportApp({ user, onLogout }) {
               items={projects.map(p => ({ value: p.key, label: p.name, hint: p.key }))}
               value={projectKey}
               onChange={setProjectKey}
-              placeholder="— Select project —"
+              placeholder={projectsLoading ? 'Loading projects…' : '— Select project —'}
               searchPlaceholder="Search projects…"
+              disabled={projectsLoading}
             />
           </div>
           <div className="rp-control">
@@ -563,9 +568,9 @@ export default function ReportApp({ user, onLogout }) {
               ]}
               value={component}
               onChange={setComponent}
-              placeholder="All components"
+              placeholder={componentsLoading ? 'Loading components…' : 'All components'}
               searchPlaceholder="Search components…"
-              disabled={!projectKey || !components.length}
+              disabled={!projectKey || componentsLoading || !components.length}
             />
           </div>
           <div className="rp-control rp-control-date">
