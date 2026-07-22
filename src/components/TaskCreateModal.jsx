@@ -136,6 +136,8 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
   const [components,        setComponents]        = useState([]);
   const [selectedComponent, setSelectedComponent] = useState('');
   const [loadingExtras,     setLoadingExtras]     = useState(false);
+  const [loadingStories,    setLoadingStories]    = useState(false);
+  const [loadingComponents, setLoadingComponents] = useState(false);
   const [extrasErr,         setExtrasErr]         = useState('');
 
   // Effective Jira key: ABS switches ABS/ABSPO at runtime, others use a fixed key.
@@ -199,6 +201,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
   useEffect(() => {
     if (!proj.features.storyIterationFilter || !selectedIteration) return;
     let cancelled = false;
+    setLoadingStories(true);
     getStories(proj.azure.proxyKey, proj.azure.project, selectedIteration)
       .then(async filtered => {
         if (cancelled) return;
@@ -209,8 +212,9 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
           if (!cancelled) setStories(cleanStories(all));
         } catch { if (!cancelled) setStories([]); }
       })
-      .catch(() => {});
-    return () => { cancelled = true; };
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingStories(false); });
+    return () => { cancelled = true; setLoadingStories(false); };
   }, [selectedIteration]);
 
   // ── Load Jira components for the effective project key ────────────────────
@@ -219,14 +223,16 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
       setComponents([]); setSelectedComponent(''); return;
     }
     let cancelled = false;
+    setLoadingComponents(true);
     getProjectComponents(proj.jira.cloudId, effectiveJiraKey)
       .then(list => {
         if (cancelled) return;
         setComponents(list);
         setSelectedComponent(prev => (list.some(c => String(c.id) === prev) ? prev : ''));
       })
-      .catch(() => { if (!cancelled) setComponents([]); });
-    return () => { cancelled = true; };
+      .catch(() => { if (!cancelled) setComponents([]); })
+      .finally(() => { if (!cancelled) setLoadingComponents(false); });
+    return () => { cancelled = true; setLoadingComponents(false); };
   }, [proj.id, effectiveJiraKey]);
 
   // ── Notify parent + close on success ─────────────────────────────────────
@@ -311,13 +317,16 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
                     </select>
                   </div>
                 )}
-                {features.story && stories.length > 0 && (
+                {features.story && (stories.length > 0 || loadingStories) && (
                   <div className="field">
-                    <label className="field-label">Parent Story</label>
-                    <select className="select" value={selectedStory?.id ?? ''}
+                    <label className="field-label">
+                      Parent Story
+                      {loadingStories && <span className="spinner" style={{ width: 12, height: 12, marginLeft: 8, verticalAlign: -2 }} />}
+                    </label>
+                    <select className="select" value={selectedStory?.id ?? ''} disabled={loadingStories}
                       onChange={e => setSelectedStory(stories.find(s => String(s.id) === e.target.value) ?? null)}>
-                      <option value="">— Select story (optional) —</option>
-                      {stories.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
+                      <option value="">{loadingStories ? 'Loading stories…' : '— Select story (optional) —'}</option>
+                      {!loadingStories && stories.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
                     </select>
                   </div>
                 )}
@@ -349,12 +358,16 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
                     </select>
                   </div>
                 )}
-                {features.component && components.length > 0 && (
+                {features.component && (components.length > 0 || loadingComponents) && (
                   <div className="field">
-                    <label className="field-label">Jira Component</label>
-                    <select className="select" value={selectedComponent} onChange={e => setSelectedComponent(e.target.value)}>
-                      <option value="">— No component —</option>
-                      {components.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    <label className="field-label">
+                      Jira Component
+                      {loadingComponents && <span className="spinner" style={{ width: 12, height: 12, marginLeft: 8, verticalAlign: -2 }} />}
+                    </label>
+                    <select className="select" value={selectedComponent} disabled={loadingComponents}
+                      onChange={e => setSelectedComponent(e.target.value)}>
+                      <option value="">{loadingComponents ? 'Loading components…' : '— No component —'}</option>
+                      {!loadingComponents && components.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
                 )}

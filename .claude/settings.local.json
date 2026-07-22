@@ -148,7 +148,15 @@
       "Bash(kill %1)",
       "Bash(pkill -f \"concurrently\")",
       "Bash(python3 check_sidebar.py)",
-      "Bash(python3 verify_cal.py)"
+      "Bash(python3 verify_cal.py)",
+      "Bash(python3 -c \"import playwright; print\\('playwright ok'\\)\")",
+      "Bash(python3 tests/e2e_smoke.py)",
+      "Bash(lsof -nP -iTCP:3002 -sTCP:LISTEN)",
+      "Bash(awk 'NR>1 {print $2}')",
+      "Bash(xargs kill)",
+      "Bash(lsof -nP -iTCP:3000 -iTCP:3001 -iTCP:3002 -sTCP:LISTEN)",
+      "Bash(awk '{print $1, $2, $9}')",
+      "Bash(python3 -u tests/e2e_smoke.py)"
     ]
   }
 }

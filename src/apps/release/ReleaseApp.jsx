@@ -131,6 +131,7 @@ export default function ReleaseApp({ allowedProjects }) {
   const [mode, setMode]           = useState('report');  // 'edit' | 'report'
   const [calFilter, setCalFilter] = useState('all');     // 'all' | 'uat' | 'prod'
   const [focusKey, setFocusKey]   = useState(null);      // 'YYYY-M' of a month opened fullscreen
+  const [editId, setEditId]       = useState(null);      // work-item id opened in the calendar date-edit modal
 
   const [saving, setSaving] = useState(() => new Set());
   const [errs,   setErrs]   = useState({});
@@ -438,16 +439,16 @@ export default function ReleaseApp({ allowedProjects }) {
                 <div key={i} className={`rel-mon-cell${outside ? ' outside' : ''}${key === todayKey ? ' today' : ''}`}>
                   <div className="rel-mon-daynum">{day.getDate()}</div>
                   {shown.map((e, j) => (
-                    <a
+                    <button
                       key={j}
+                      type="button"
                       className={`rel-ev rel-ev-${e.kind}`}
-                      href={e.it.url || undefined}
-                      target="_blank" rel="noreferrer"
-                      title={`${e.kind.toUpperCase()} · #${e.it.id}${e.it.jiraKey ? ` · ${e.it.jiraKey}` : ''}\n${e.it.title || ''}`}
+                      title={`${e.kind.toUpperCase()} · #${e.it.id}${e.it.jiraKey ? ` · ${e.it.jiraKey}` : ''}\n${e.it.title || ''}\nClick to edit release dates`}
+                      onClick={() => setEditId(e.it.id)}
                     >
                       <span className="rel-ev-id">#{e.it.id}</span>
                       <span className="rel-ev-title">{e.it.title || `#${e.it.id}`}</span>
-                    </a>
+                    </button>
                   ))}
                   {evs.length > shown.length && <div className="rel-mon-more">+{evs.length - shown.length} more</div>}
                 </div>
@@ -464,13 +465,24 @@ export default function ReleaseApp({ allowedProjects }) {
     [focusKey, calendar.months],
   );
 
-  // Esc closes the fullscreen month.
+  // The calendar chip's item, re-derived from `items` so optimistic date saves
+  // show up in the modal immediately (and the chip re-buckets on the calendar).
+  const editItem = useMemo(
+    () => (editId != null ? items.find(i => i.id === editId) || null : null),
+    [editId, items],
+  );
+
+  // Esc closes the topmost layer: the date-edit modal first, then the fullscreen month.
   useEffect(() => {
-    if (!focusMonth) return;
-    const onKey = (e) => { if (e.key === 'Escape') setFocusKey(null); };
+    if (!focusMonth && !editItem) return;
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (editItem) setEditId(null);
+      else setFocusKey(null);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [focusMonth]);
+  }, [focusMonth, editItem]);
 
   const ModeSwitch = (
     <div className="rel-modeswitch" role="tablist">
@@ -617,6 +629,35 @@ export default function ReleaseApp({ allowedProjects }) {
         <div className="rel-mon-overlay" onClick={() => setFocusKey(null)}>
           <div className="rel-mon-focus-wrap" onClick={e => e.stopPropagation()}>
             {monthCard(focusMonth, true)}
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {editItem && createPortal(
+        <div className="rel-modal-backdrop" onClick={() => setEditId(null)}>
+          <div className="rel-modal rel-ev-modal" onClick={e => e.stopPropagation()}>
+            <div className="rel-modal-head">
+              <div>
+                <h3 className="rel-modal-title rel-ev-modal-title">
+                  <span className={`rel-type rel-type-${typeTone(editItem.type)}`}>{editItem.type || '—'}</span>
+                  {editItem.url
+                    ? <a className="rel-id" href={editItem.url} target="_blank" rel="noreferrer">#{editItem.id}</a>
+                    : <span className="rel-id">#{editItem.id}</span>}
+                  {editItem.jiraKey && (
+                    <a className="rel-jira" href={`https://dynamicalabs.atlassian.net/browse/${editItem.jiraKey}`} target="_blank" rel="noreferrer" title="Open in Jira">{editItem.jiraKey}</a>
+                  )}
+                </h3>
+                <p className="rel-modal-sub">{editItem.title}</p>
+              </div>
+              <button type="button" className="rel-modal-close" title="Close (Esc)" onClick={() => setEditId(null)}>✕</button>
+            </div>
+            <div className="rel-modal-body rel-ev-modal-body">
+              <div className="rel-row-edit">
+                {dateCell(editItem, 'uat',  parseDate(uatField  ? editItem.fields?.[uatField]  : null), uatField)}
+                {dateCell(editItem, 'prod', parseDate(prodField ? editItem.fields?.[prodField] : null), prodField)}
+              </div>
+            </div>
           </div>
         </div>,
         document.body,

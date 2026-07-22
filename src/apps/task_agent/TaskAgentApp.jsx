@@ -499,10 +499,12 @@ export default function TaskAgentApp({ user, onLogout }) {
 
   // Clone extra fields (status / labels / components / estimates)
   const [availableStatuses,   setAvailableStatuses]   = useState([]);
+  const [loadingStatuses,     setLoadingStatuses]     = useState(false);
   const [selectedStatus,      setSelectedStatus]      = useState('');
   const [sourceStatus,        setSourceStatus]        = useState('');
   const [labelsInput,         setLabelsInput]         = useState('');
   const [availableComponents, setAvailableComponents] = useState([]);
+  const [loadingComponents,   setLoadingComponents]   = useState(false);
   const [selectedComponents,  setSelectedComponents]  = useState([]);
   const [estimateFields,      setEstimateFields]      = useState([]);
 
@@ -617,15 +619,19 @@ export default function TaskAgentApp({ user, onLogout }) {
       const statusName = issue.raw.fields.status?.name ?? '';
       setSourceStatus(statusName);
       setSelectedStatus(statusName);
+      setLoadingStatuses(true);
       loadStatusesForIssueType(CLOUD_ID, issue.projectKey, issue.issueTypeId, issue.key)
         .then(setAvailableStatuses)
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setLoadingStatuses(false));
 
       setLabelsInput((issue.labels ?? []).join(', '));
       setSelectedComponents((issue.raw.fields.components ?? []).map(c => ({ id: c.id, name: c.name })));
+      setLoadingComponents(true);
       getProjectComponents(CLOUD_ID, issue.projectKey)
         .then(setAvailableComponents)
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => setLoadingComponents(false));
     } catch (err) {
       setLoadErr(err.message);
     } finally {
@@ -1037,21 +1043,27 @@ export default function TaskAgentApp({ user, onLogout }) {
                 </div>
               )}
 
-              {source && availableStatuses.length > 0 && (
+              {source && (loadingStatuses || availableStatuses.length > 0) && (
                 <div className="field" style={{ marginTop: 16 }}>
                   <label className="field-label">Status</label>
-                  <select
-                    className="select"
-                    value={selectedStatus}
-                    onChange={e => setSelectedStatus(e.target.value)}
-                  >
-                    {sourceStatus && !availableStatuses.some(s => s.name === sourceStatus) && (
-                      <option value={sourceStatus}>{sourceStatus} (current)</option>
-                    )}
-                    {availableStatuses.map(s => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
-                    ))}
-                  </select>
+                  {loadingStatuses ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 13, height: 40 }}>
+                      <span className="spinner" /> Loading statuses…
+                    </div>
+                  ) : (
+                    <select
+                      className="select"
+                      value={selectedStatus}
+                      onChange={e => setSelectedStatus(e.target.value)}
+                    >
+                      {sourceStatus && !availableStatuses.some(s => s.name === sourceStatus) && (
+                        <option value={sourceStatus}>{sourceStatus} (current)</option>
+                      )}
+                      {availableStatuses.map(s => (
+                        <option key={s.id} value={s.name}>{s.name}</option>
+                      ))}
+                    </select>
+                  )}
                 </div>
               )}
 
@@ -1067,7 +1079,7 @@ export default function TaskAgentApp({ user, onLogout }) {
                 </div>
               )}
 
-              {source && (availableComponents.length > 0 || selectedComponents.length > 0) && (
+              {source && (loadingComponents || availableComponents.length > 0 || selectedComponents.length > 0) && (
                 <div className="field" style={{ marginTop: 16 }}>
                   <label className="field-label">Components</label>
                   {selectedComponents.length > 0 && (
@@ -1088,7 +1100,11 @@ export default function TaskAgentApp({ user, onLogout }) {
                       ))}
                     </div>
                   )}
-                  {availableComponents.some(c => !selectedComponents.some(x => x.id === c.id)) && (
+                  {loadingComponents ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-3)', fontSize: 13, height: 40 }}>
+                      <span className="spinner" /> Loading components…
+                    </div>
+                  ) : availableComponents.some(c => !selectedComponents.some(x => x.id === c.id)) && (
                     <select
                       className="select"
                       value=""

@@ -6466,3 +6466,12 @@ a.rel-id:hover { color: var(--accent-1); text-decoration: underline; }
 .rel-ev-id { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 4px; color: var(--text-2); }
 .rel-ev-title { color: var(--text-1); }
 .rel-mon-more { font-size: 10px; color: var(--text-3); padding: 1px 4px; }
+
+/* Calendar chips are buttons — click opens the date-edit modal. */
+button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inherit; }
+
+/* ── Calendar chip → date-edit modal ── */
+.rel-ev-modal { width: min(560px, 95vw); }
+.rel-ev-modal-title { display: flex; align-items: center; gap: 10px; }
+.rel-ev-modal .rel-modal-sub { font-size: 13px; color: var(--text-2); }
+.rel-ev-modal-body .rel-row-edit { flex-wrap: wrap; row-gap: 12px; }

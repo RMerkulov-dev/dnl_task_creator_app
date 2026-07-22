@@ -137,6 +137,8 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
   const [components,         setComponents]         = useState([]);
   const [selectedComponent,  setSelectedComponent]  = useState('');
   const [loadingExtras,      setLoadingExtras]      = useState(false);
+  const [loadingStories,     setLoadingStories]     = useState(false);
+  const [loadingComponents,  setLoadingComponents]  = useState(false);
   const [extrasErr,          setExtrasErr]          = useState('');
 
   // Effective Jira project key drives which components to load: ABS lets the user
@@ -221,6 +223,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
     if (!proj.features.storyIterationFilter) return;
     if (!selectedIteration) return;
     let cancelled = false;
+    setLoadingStories(true);
     getStories(proj.azure.proxyKey, proj.azure.project, selectedIteration)
       .then(async filtered => {
         if (cancelled) return;
@@ -238,8 +241,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
           if (!cancelled) setStories([]);
         }
       })
-      .catch(() => {});
-    return () => { cancelled = true; };
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoadingStories(false); });
+    return () => { cancelled = true; setLoadingStories(false); };
   }, [selectedIteration]);
 
   // ── Load Jira components for the effective project key ────────────────────
@@ -250,6 +254,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
       return;
     }
     let cancelled = false;
+    setLoadingComponents(true);
     getProjectComponents(proj.jira.cloudId, effectiveJiraKey)
       .then(list => {
         if (cancelled) return;
@@ -257,8 +262,9 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
         // Drop a stale selection that doesn't exist in the new project's components.
         setSelectedComponent(prev => (list.some(c => String(c.id) === prev) ? prev : ''));
       })
-      .catch(() => { if (!cancelled) setComponents([]); });
-    return () => { cancelled = true; };
+      .catch(() => { if (!cancelled) setComponents([]); })
+      .finally(() => { if (!cancelled) setLoadingComponents(false); });
+    return () => { cancelled = true; setLoadingComponents(false); };
   }, [proj.id, effectiveJiraKey]);
 
   // ── Restore saved filters once extras are loaded ──────────────────────────
@@ -728,14 +734,18 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                       )}
 
                       {/* ── NSMG: Parent Story ── */}
-                      {features.story && stories.length > 0 && (
+                      {features.story && (stories.length > 0 || loadingStories) && (
                         <div className="field">
-                          <label className="field-label">Parent Story</label>
+                          <label className="field-label">
+                            Parent Story
+                            {loadingStories && <span className="spinner" style={{ width: 12, height: 12, marginLeft: 8, verticalAlign: -2 }} />}
+                          </label>
                           <select className="select"
                             value={selectedStory?.id ?? ''}
+                            disabled={loadingStories}
                             onChange={e => setSelectedStory(stories.find(s => String(s.id) === e.target.value) ?? null)}>
-                            <option value="">— Select story (optional) —</option>
-                            {stories.map(s => (
+                            <option value="">{loadingStories ? 'Loading stories…' : '— Select story (optional) —'}</option>
+                            {!loadingStories && stories.map(s => (
                               <option key={s.id} value={s.id}>{s.title}</option>
                             ))}
                           </select>
@@ -780,13 +790,17 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                       )}
 
                       {/* ── Jira Component ── */}
-                      {features.component && components.length > 0 && (
+                      {features.component && (components.length > 0 || loadingComponents) && (
                         <div className="field">
-                          <label className="field-label">Jira Component</label>
+                          <label className="field-label">
+                            Jira Component
+                            {loadingComponents && <span className="spinner" style={{ width: 12, height: 12, marginLeft: 8, verticalAlign: -2 }} />}
+                          </label>
                           <select className="select" value={selectedComponent}
+                            disabled={loadingComponents}
                             onChange={e => setSelectedComponent(e.target.value)}>
-                            <option value="">— No component —</option>
-                            {components.map(c => (
+                            <option value="">{loadingComponents ? 'Loading components…' : '— No component —'}</option>
+                            {!loadingComponents && components.map(c => (
                               <option key={c.id} value={c.id}>{c.name}</option>
                             ))}
                           </select>
