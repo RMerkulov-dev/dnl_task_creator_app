@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, useContext, createCo
 import { PROJECT_LIST } from '../../config/projects.js';
 import {
   getAreaPaths, getIterations, getBoardWorkItems,
-  getWorkItemStates, updateWorkItemState,
+  getWorkItemStates, updateWorkItemState, getWorkItemComments,
 } from '../../services/azureDevops.js';
 import {
   getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl,
@@ -21,6 +21,10 @@ const STATUS_TONE = {
 };
 
 const toneFor = (cat) => STATUS_TONE[cat] || 'todo';
+
+// "Closing" Azure states — moving an item here while it still has unread
+// comments triggers the read-first guard.
+const DONE_STATE_RE = /^(done|closed|resolved|completed)$/i;
 
 // Azure DevOps state categories → the same chip colour buckets as Jira.
 const AZURE_STATE_TONE = {
@@ -133,6 +137,64 @@ function collectJiraColumn(rows, jira, jiraChildren, kind) {
   }
   return out.join('\n');
 }
+
+// ─── Azure work-item comments: read-state store ──────────────────────────────
+// Per-comment read state lives in localStorage (no backend) as a set of
+// "itemId:commentId" strings, scoped per signed-in user so different people on
+// the same machine don't share their "read" marks. Frontend-only, survives
+// refresh — a comment is "unread" until its owner explicitly marks it read.
+const READ_KEY_PREFIX = 'su_read_comments_v1';
+const readKey = (user) => `${READ_KEY_PREFIX}:${user || 'anon'}`;
+
+function loadReadSet(user) {
+  try {
+    const raw = localStorage.getItem(readKey(user));
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch { return new Set(); }
+}
+
+function saveReadSet(user, set) {
+  try { localStorage.setItem(readKey(user), JSON.stringify([...set])); } catch { /* noop */ }
+}
+
+const commentTag = (itemId, commentId) => `${itemId}:${commentId}`;
+
+// How many of a work item's comments are already marked read (by counting the
+// "itemId:" prefixed tags in the read set). Lets a card show its unread count
+// without fetching comment bodies — unread = commentCount − readCount.
+function readCountFor(readSet, itemId) {
+  let n = 0;
+  const prefix = `${itemId}:`;
+  for (const tag of readSet) if (tag.startsWith(prefix)) n++;
+  return n;
+}
+
+// The System.CommentCount field Azure stamps on every work item — cheap badge
+// count with no extra request (getBoardWorkItems already pulls the full fields).
+const commentCountOf = (item) => Number(item.fields?.['System.CommentCount']) || 0;
+
+// Azure comment `text` is HTML. Render it as plain text (with line breaks
+// preserved) to avoid injecting untrusted markup into the DOM.
+function htmlToText(html) {
+  if (!html) return '';
+  const withBreaks = String(html)
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/\s*(p|div|li)\s*>/gi, '\n');
+  const el = document.createElement('div');
+  el.innerHTML = withBreaks;
+  return (el.textContent || el.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function fmtCommentDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// Provides comments read-state + the "open comments" callback to the deep-nested
+// Azure cell without prop-drilling through the recursive tree.
+const CommentsCtx = createContext(null);
 
 // Provides the bits an inline StatusChip needs without prop-drilling through the
 // recursive tree: the Jira cloud id and the "status changed" callback.
@@ -432,6 +494,7 @@ function JiraTree({ nodes }) {
 // move server-side, so an illegal transition surfaces as an error in the menu.
 function AzureStateChip({ item }) {
   const ctx = useContext(AzureEditCtx);
+  const commentsCtx = useContext(CommentsCtx);
   const btnRef  = useRef(null);
   const menuRef = useRef(null);
   const [open,    setOpen]    = useState(false);
@@ -440,11 +503,23 @@ function AzureStateChip({ item }) {
   const [saving,  setSaving]  = useState(false);
   const [states,  setStates]  = useState(null);
   const [err,     setErr]     = useState('');
+  const [guardState, setGuardState] = useState(null);   // pending Done-state awaiting confirmation
 
   const editable = !!ctx?.editable;
   const cached   = ctx?.statesByType?.[item.type];
   const cat      = (cached || []).find(s => s.name === item.state)?.category;
   const tone     = AZURE_STATE_TONE[cat] || 'todo';
+
+  // Unread comments on this work item (0 when the comments context is absent).
+  const unread = commentsCtx
+    ? Math.max(0, commentCountOf(item) - readCountFor(commentsCtx.readSet, item.id))
+    : 0;
+
+  // A target state is "closing" when its name reads done/closed/… or its Azure
+  // state category is Completed.
+  const isDoneLike = (stateName) =>
+    DONE_STATE_RE.test((stateName || '').trim()) ||
+    (states || cached || []).find(s => s.name === stateName)?.category === 'Completed';
 
   useAnchoredMenu(open, btnRef, menuRef, setPos);
 
@@ -470,12 +545,23 @@ function AzureStateChip({ item }) {
 
   async function apply(stateName) {
     if (stateName === item.state) { setOpen(false); return; }
+    // Read-first guard: block closing an item that still has unread comments.
+    if (unread > 0 && isDoneLike(stateName)) {
+      setOpen(false);
+      setGuardState(stateName);
+      return;
+    }
+    await doApply(stateName);
+  }
+
+  async function doApply(stateName) {
     setSaving(true);
     setErr('');
     try {
       await updateWorkItemState(ctx.proxyKey, ctx.project, item.id, stateName);
       ctx.onStateChange(item.id, stateName);
       setOpen(false);
+      setGuardState(null);
     } catch (e2) {
       setErr(e2.message || 'Update failed');
     } finally {
@@ -521,7 +607,165 @@ function AzureStateChip({ item }) {
           </div>
         </>
       )}
+
+      {guardState && (
+        <div className="rel-modal-backdrop" onClick={() => setGuardState(null)}>
+          <div className="su-guard-modal" onClick={e => e.stopPropagation()}>
+            <div className="su-guard-icon">🔔</div>
+            <h3 className="su-guard-title">Please read the comments first</h3>
+            <p className="su-guard-text">
+              Work item <strong>#{item.id}</strong> has <strong>{unread}</strong> unread
+              comment{unread === 1 ? '' : 's'}. Review them before moving it to
+              “<strong>{guardState}</strong>” — closing an item with unfinished discussion may miss important feedback.
+            </p>
+            <div className="su-guard-actions">
+              <button className="btn btn-ghost" onClick={() => setGuardState(null)}>Cancel</button>
+              {commentsCtx && (
+                <button
+                  className="btn btn-primary"
+                  onClick={() => { const it = item; setGuardState(null); commentsCtx.onOpen(it); }}
+                >
+                  Read comments
+                </button>
+              )}
+            </div>
+            <button className="su-guard-anyway" onClick={() => doApply(guardState)} disabled={saving}>
+              {saving ? 'Changing…' : `Change to “${guardState}” anyway`}
+            </button>
+          </div>
+        </div>
+      )}
     </span>
+  );
+}
+
+// ─── Comment badge on an Azure work-item card ─────────────────────────────────
+// Shows the comment count from System.CommentCount. When the item has comments
+// the current user hasn't marked read yet, it turns into a 🔔 "new" badge with
+// the unread count. Clicking opens the comments popup.
+function CommentBadgeIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0"
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+function CommentButton({ item }) {
+  const ctx = useContext(CommentsCtx);
+  if (!ctx) return null;
+  const count = commentCountOf(item);
+  if (count <= 0) return null;
+
+  const unread = Math.max(0, count - readCountFor(ctx.readSet, item.id));
+  const hasNew = unread > 0;
+
+  return (
+    <button
+      type="button"
+      className={`su-comment-badge${hasNew ? ' su-comment-new' : ''}`}
+      onClick={(e) => { e.stopPropagation(); ctx.onOpen(item); }}
+      title={hasNew ? `${unread} new comment${unread === 1 ? '' : 's'} (${count} total)` : `${count} comment${count === 1 ? '' : 's'}`}
+    >
+      {hasNew ? <BellIcon /> : <CommentBadgeIcon />}
+      <span className="su-comment-count">{count}</span>
+      {hasNew && <span className="su-comment-newdot">{unread}</span>}
+    </button>
+  );
+}
+
+// ─── Comments popup for a single Azure work item ──────────────────────────────
+// Lazy-fetches the discussion on open. Each comment carries a "read" checkbox;
+// ticking it records the comment id in the per-user read set (disabled once
+// read). "Mark all read" ticks every loaded comment at once.
+function CommentsModal({ item, onClose }) {
+  const ctx = useContext(CommentsCtx);
+  const [comments, setComments] = useState(null);
+  const [loading,  setLoading]  = useState(true);
+  const [err,      setErr]      = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr('');
+    getWorkItemComments(ctx.proxyKey, ctx.project, item.id)
+      .then(list => { if (!cancelled) setComments(list); })
+      .catch(e => { if (!cancelled) setErr(e.message || 'Failed to load comments'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [ctx.proxyKey, ctx.project, item.id]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const unreadCount = comments
+    ? comments.filter(c => !ctx.readSet.has(commentTag(item.id, c.id))).length
+    : 0;
+
+  return (
+    <div className="rel-modal-backdrop" onClick={onClose}>
+      <div className="su-comments-modal" onClick={e => e.stopPropagation()}>
+        <div className="rel-modal-head">
+          <div>
+            <h3 className="rel-modal-title">Comments · #{item.id}</h3>
+            <p className="rel-modal-sub" title={item.title}>{item.title}</p>
+          </div>
+          <div className="rel-modal-tools">
+            {comments?.length > 0 && unreadCount > 0 && (
+              <button
+                className="btn btn-ghost su-comments-markall"
+                onClick={() => ctx.markAllRead(item.id, comments.map(c => c.id))}
+              >
+                Mark all read
+              </button>
+            )}
+            <button className="rel-modal-close" onClick={onClose} aria-label="Close">✕</button>
+          </div>
+        </div>
+
+        <div className="rel-modal-body su-comments-body">
+          {loading && <div className="su-empty"><span className="spinner spinner-lg" /></div>}
+          {err && <p className="su-error">⚠ {err}</p>}
+          {!loading && !err && comments?.length === 0 && (
+            <p className="su-empty-sub">No comments on this work item.</p>
+          )}
+          {!loading && !err && comments?.map(c => {
+            const read = ctx.readSet.has(commentTag(item.id, c.id));
+            return (
+              <div key={c.id} className={`su-comment${read ? ' su-comment-read' : ''}`}>
+                <div className="su-comment-head">
+                  <span className="su-comment-author">{c.author}</span>
+                  <span className="su-comment-date">{fmtCommentDate(c.createdDate)}</span>
+                  <label className={`su-comment-readtoggle${read ? ' checked' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={read}
+                      disabled={read}
+                      onChange={() => ctx.markRead(item.id, c.id)}
+                    />
+                    {read ? 'Read' : 'Mark read'}
+                  </label>
+                </div>
+                <div className="su-comment-text">{htmlToText(c.text) || <span className="su-comment-empty">(no text)</span>}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -542,6 +786,7 @@ function WorkItemRow({ item, jira, jiraChildren, depth }) {
         <span className="su-assignee" title={item.assignedTo || 'Unassigned'} style={{ maxWidth: 140, flexShrink: 0 }}>
           {item.assignedTo || 'Unassigned'}
         </span>
+        <CommentButton item={item} />
         <AzureStateChip item={item} />
       </div>
 
@@ -612,6 +857,44 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
   // Azure state editing: cache valid states per work-item type (per project)
   const [azStatesByType, setAzStatesByType] = useState({});
+
+  // Azure comments: per-user read-state (localStorage) + the open popup target.
+  const [readSet,       setReadSet]       = useState(() => loadReadSet(user));
+  const [openComments,  setOpenComments]  = useState(null);   // work item | null
+  useEffect(() => { setReadSet(loadReadSet(user)); }, [user]);
+
+  const markRead = useCallback((itemId, commentId) => {
+    setReadSet(prev => {
+      const tag = commentTag(itemId, commentId);
+      if (prev.has(tag)) return prev;
+      const next = new Set(prev); next.add(tag);
+      saveReadSet(user, next);
+      return next;
+    });
+  }, [user]);
+
+  const markAllRead = useCallback((itemId, commentIds) => {
+    setReadSet(prev => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of commentIds) {
+        const tag = commentTag(itemId, id);
+        if (!next.has(tag)) { next.add(tag); changed = true; }
+      }
+      if (!changed) return prev;
+      saveReadSet(user, next);
+      return next;
+    });
+  }, [user]);
+
+  const commentsCtx = useMemo(() => ({
+    proxyKey: proj?.azure?.proxyKey,
+    project:  proj?.azure?.project,
+    readSet,
+    onOpen:   setOpenComments,
+    markRead,
+    markAllRead,
+  }), [proj, readSet, markRead, markAllRead]);
 
   // AI validation over the loaded snapshot
   const [aiQuery,     setAiQuery]     = useState('');
@@ -822,6 +1105,50 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     return { total: items.length, linked, missing, unlinked, ready };
   }, [items, jira, isReadyToClose]);
 
+  // Unread comments per item = System.CommentCount − comments already marked read.
+  const itemUnread = useCallback(
+    (it) => Math.max(0, commentCountOf(it) - readCountFor(readSet, it.id)),
+    [readSet],
+  );
+
+  // Comment counters for the sidebar: how many items carry comments at all, and
+  // how many have unread (new) ones for this user.
+  const commentStats = useMemo(() => {
+    let withComments = 0, unread = 0;
+    for (const it of items) {
+      if (commentCountOf(it) <= 0) continue;
+      withComments++;
+      if (itemUnread(it) > 0) unread++;
+    }
+    return { withComments, unread };
+  }, [items, itemUnread]);
+
+  // Bulk "mark everything read as of now": fetch every commented item's comment
+  // ids and record them, so the unread/🔔 count resets and only future comments
+  // count as new. Bounded concurrency keeps it gentle on the proxy.
+  const [markingAll, setMarkingAll] = useState(false);
+  const markAllReadNow = useCallback(async () => {
+    const targets = items.filter(it => commentCountOf(it) > 0);
+    if (!targets.length || markingAll) return;
+    setMarkingAll(true);
+    try {
+      const entries = await mapPool(targets, 5, async (it) => {
+        try {
+          const list = await getWorkItemComments(proj.azure.proxyKey, proj.azure.project, it.id);
+          return [it.id, list.map(c => c.id)];
+        } catch { return [it.id, []]; }
+      });
+      setReadSet(prev => {
+        const next = new Set(prev);
+        for (const [itemId, ids] of entries) for (const cid of ids) next.add(commentTag(itemId, cid));
+        saveReadSet(user, next);
+        return next;
+      });
+    } finally {
+      setMarkingAll(false);
+    }
+  }, [items, proj, user, markingAll]);
+
   // Distinct Azure work-item states present in the loaded set (+ counts), for
   // the status filter dropdown.
   const azureStates = useMemo(() => {
@@ -847,6 +1174,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         if (activeFilter === 'missing'  && !(it.jiraKey && !jira.has(it.jiraKey))) return false;
         if (activeFilter === 'unlinked' && it.jiraKey)                             return false;
         if (activeFilter === 'ready'    && !isReadyToClose(it))                    return false;
+        if (activeFilter === 'unread'   && itemUnread(it) <= 0)                    return false;
       }
       if (!q) return true;
       const j = it.jiraKey ? jira.get(it.jiraKey) : null;
@@ -854,7 +1182,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [items, jira, query, activeFilter, azureStateFilter, aiMatchIds, isReadyToClose]);
+  }, [items, jira, query, activeFilter, azureStateFilter, aiMatchIds, isReadyToClose, itemUnread]);
 
   const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
 
@@ -997,6 +1325,28 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                   <span className="su-stat-num">{stats.unlinked}</span> no link
                 </button>
               )}
+              {commentStats.withComments > 0 && (
+                <button
+                  className={`su-stat su-stat-comments su-stat-btn${activeFilter === 'unread' ? ' active' : ''}${commentStats.unread > 0 ? ' has-unread' : ''}`}
+                  onClick={() => toggleFilter('unread')}
+                  title="Items with unread (new) comments"
+                >
+                  <span className="su-stat-num">{commentStats.unread}</span> new comment{commentStats.unread === 1 ? '' : 's'}
+                  <span className="su-stat-sub">of {commentStats.withComments} with comments</span>
+                </button>
+              )}
+              {commentStats.unread > 0 && (
+                <button
+                  className="su-mark-all-read"
+                  onClick={markAllReadNow}
+                  disabled={markingAll}
+                  title="Mark every current comment as read — new counts start from the next comments"
+                >
+                  {markingAll
+                    ? <><span className="spinner" style={{ width: 12, height: 12 }} /> Marking…</>
+                    : '✓ Mark all comments read'}
+                </button>
+              )}
             </div>
           )}
         </aside>
@@ -1123,6 +1473,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
           {loaded && !loading && filteredItems.length > 0 && (
             <StatusEditCtx.Provider value={editCtx}>
               <AzureEditCtx.Provider value={azEditCtx}>
+              <CommentsCtx.Provider value={commentsCtx}>
                 <div className="su-table">
                   <div className="su-table-head">
                     <span className="su-cell su-head-cell">
@@ -1155,11 +1506,18 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                     <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
                   </div>
                 </div>
+              </CommentsCtx.Provider>
               </AzureEditCtx.Provider>
             </StatusEditCtx.Provider>
           )}
         </section>
       </main>
+
+      {openComments && (
+        <CommentsCtx.Provider value={commentsCtx}>
+          <CommentsModal item={openComments} onClose={() => setOpenComments(null)} />
+        </CommentsCtx.Provider>
+      )}
     </div>
   );
 }

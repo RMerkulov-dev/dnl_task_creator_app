@@ -3961,6 +3961,27 @@ html, body, #root {
 .su-stat-muted { color: var(--text-3); }
 .su-stat-ready .su-stat-num,
 .su-stat-ready { color: var(--accent-1); }
+.su-stat-comments { color: var(--text-2); }
+.su-stat-comments .su-stat-num { color: var(--text-2); }
+.su-stat-comments.has-unread,
+.su-stat-comments.has-unread .su-stat-num { color: #f472b6; }
+.su-stat-sub { display: block; font-size: 11px; color: var(--text-3); margin-top: 2px; }
+
+/* Bulk "mark all comments read" reset button under the sidebar counters. */
+.su-mark-all-read {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px; font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.su-mark-all-read:hover:not(:disabled) { background: var(--bg-card-hover); color: var(--text-1); border-color: var(--text-3); }
+.su-mark-all-read:disabled { opacity: 0.65; cursor: default; }
 
 .su-results {
   flex: 1;
@@ -4284,6 +4305,96 @@ button.su-status {
 .su-status-menu-err { color: #f87171; white-space: normal; }
 .su-status-menu-name { font-weight: 600; }
 .su-status-menu-to { margin-left: auto; color: var(--text-3); font-size: 11px; }
+
+/* ── Azure work-item comment badge + popup ────────────────────────────────── */
+.su-comment-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-2);
+  font-size: 11px; font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+  position: relative;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.su-comment-badge:hover { color: var(--text-1); border-color: var(--text-3); }
+.su-comment-count { font-family: var(--font-mono); }
+.su-comment-badge.su-comment-new {
+  color: var(--accent-1, #06b6d4);
+  border-color: color-mix(in srgb, var(--accent-1, #06b6d4) 55%, transparent);
+  background: color-mix(in srgb, var(--accent-1, #06b6d4) 12%, transparent);
+}
+.su-comment-badge.su-comment-new:hover { border-color: var(--accent-1, #06b6d4); }
+.su-comment-newdot {
+  position: absolute; top: -7px; right: -7px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 999px;
+  background: var(--red, #ef4444); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--bg-card);
+}
+
+.su-comments-modal {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-lg);
+  width: min(640px, 95vw); max-height: 82vh; display: flex; flex-direction: column;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .4);
+}
+.su-comments-markall { font-size: 12px; padding: 5px 12px; }
+.su-comments-body { display: flex; flex-direction: column; gap: 12px; }
+
+.su-comment {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--accent-1, #06b6d4) 6%, transparent);
+}
+.su-comment-read { background: transparent; opacity: .72; }
+.su-comment-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 7px;
+}
+.su-comment-author { font-weight: 650; font-size: 13px; color: var(--text-1); }
+.su-comment-date { font-size: 11px; color: var(--text-3); font-family: var(--font-mono); }
+.su-comment-readtoggle {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; color: var(--text-2);
+  cursor: pointer; user-select: none;
+}
+.su-comment-readtoggle.checked { color: var(--green, #22c55e); cursor: default; }
+.su-comment-readtoggle input { cursor: pointer; accent-color: var(--green, #22c55e); }
+.su-comment-readtoggle.checked input { cursor: default; }
+.su-comment-text {
+  font-size: 13px; line-height: 1.5; color: var(--text-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.su-comment-empty { color: var(--text-3); font-style: italic; }
+
+/* ── Read-first guard when closing an item with unread comments ────────────── */
+.su-guard-modal {
+  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-lg);
+  width: min(420px, 92vw);
+  padding: 24px 22px 18px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+}
+.su-guard-icon { font-size: 30px; line-height: 1; margin-bottom: 10px; }
+.su-guard-title { font-size: 17px; font-weight: 700; margin: 0 0 8px; color: var(--text-1); }
+.su-guard-text { font-size: 13px; line-height: 1.55; color: var(--text-2); margin: 0 0 18px; }
+.su-guard-actions { display: flex; gap: 10px; justify-content: center; }
+.su-guard-actions .btn { min-width: 120px; }
+.su-guard-anyway {
+  display: block; margin: 14px auto 0;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-3); font-size: 12px; text-decoration: underline;
+}
+.su-guard-anyway:hover:not(:disabled) { color: var(--text-2); }
+.su-guard-anyway:disabled { opacity: 0.6; cursor: default; }
 
 /* ── Results toolbar: search + filter pills ───────────────────────────────── */
 .su-toolbar {

@@ -76,6 +76,23 @@ export async function getWorkItemStates(proxyKey, project, type) {
 }
 
 /**
+ * List a work item's comments (discussion), newest first.
+ * The comments endpoint is a preview API; `text` is HTML.
+ * Returns [{ id, text, author, createdDate, modifiedDate }].
+ */
+export async function getWorkItemComments(proxyKey, project, id) {
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workItems/${id}/comments?api-version=7.0-preview.3&$top=200&order=desc`;
+  const data = await parse(await fetch(url), 'getWorkItemComments');
+  return (data.comments || []).map(c => ({
+    id:           c.id,
+    text:         c.text || '',
+    author:       c.createdBy?.displayName || c.modifiedBy?.displayName || 'Unknown',
+    createdDate:  c.createdDate || null,
+    modifiedDate: c.modifiedDate || null,
+  }));
+}
+
+/**
  * Change a work item's System.State. Azure validates the transition server-side
  * and returns an error for disallowed moves, which the caller surfaces.
  */
