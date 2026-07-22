@@ -3381,6 +3381,9 @@ html, body, #root {
   color-scheme: dark;
 }
 
+:root[data-theme="light"] .tf-field input,
+[data-theme="light"] .tf-field input { color-scheme: light; }
+
 .tf-field input:focus { outline: none; border-color: var(--border-focus); }
 
 .tf-load-btn { margin-left: auto; flex-shrink: 0; }

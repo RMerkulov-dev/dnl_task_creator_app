@@ -30,7 +30,7 @@ function getDefaultTitlePrefix(projId, boardName, jiraProj) {
 }
 
 // ─── Rich-text emptiness check ─────────────────────────────────────────────
-// Tiptap leaves "<p></p>" / "<p><br></p>" when the editor is empty.
+// Tipсдtap leaves "<p></p>" / "<p><br></p>" when the editor is empty.
 function isDescriptionEmpty(html) {
   if (!html) return true;
   const text = html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim();
