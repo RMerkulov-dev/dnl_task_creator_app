@@ -135,6 +135,20 @@ function GanttIcon() {
   );
 }
 
+function QuarterlyCallsIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Calendar frame */}
+      <rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
+      <path d="M3 9h18" stroke="currentColor" strokeWidth="1.4"/>
+      <path d="M8 2.5v4M16 2.5v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      {/* Phone handset on the calendar body */}
+      <path d="M9.3 12.6c.6 1.9 2.1 3.4 4 4l1-1c.2-.2.55-.3.85-.2l1.5.5c.4.13.65.5.65.9v.9c0 .55-.45 1-1 .95-4.3-.35-7.75-3.8-8.1-8.1-.04-.55.4-1 .95-1h.9c.4 0 .77.25.9.65l.5 1.5c.1.3.02.65-.2.85l-.95 1z"
+            stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
@@ -146,6 +160,7 @@ const ICON_MAP = {
   'status-updates': StatusUpdatesIcon,
   'report':        ReportIcon,
   'gantt':         GanttIcon,
+  'quarterly-calls': QuarterlyCallsIcon,
 };
 
 function PlatformLogo() {

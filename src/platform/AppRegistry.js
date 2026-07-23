@@ -44,6 +44,14 @@ export const APP_REGISTRY = [
     glow: 'rgba(20, 184, 166, 0.5)',
     beta: true,
   },
+  {
+    id: 'quarterly-calls',
+    name: 'Quarterly Calls',
+    shortName: 'Calls',
+    gradient: 'linear-gradient(135deg, #ec4899 0%, #f97316 100%)',
+    glow: 'rgba(236, 72, 153, 0.5)',
+    allowedEmails: ['roman.merkulov@dynamicalabs.com'],
+  },
 ];
 
 // The "PM" workspace bundles four project-management tools behind a single
@@ -83,4 +91,5 @@ export const APP_COMPONENTS = {
   'status-updates': lazy(() => import('../apps/status_updates/StatusUpdatesApp.jsx')),
   'report':        lazy(() => import('../apps/report/ReportApp.jsx')),
   'gantt':         lazy(() => import('../apps/gantt/GanttApp.jsx')),
+  'quarterly-calls': lazy(() => import('../apps/quarterly_calls/QuarterlyCallsApp.jsx')),
 };

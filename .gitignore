@@ -5,6 +5,7 @@ dist/
 .DS_Store
 *.local
 api/email-agent-feedback.jsonl
+api/data/
 storage/
 CLAUDE.md
 tests/.artifacts/

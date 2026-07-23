@@ -4,6 +4,7 @@ import crypto  from 'node:crypto';
 import fs      from 'node:fs';
 import { FOLLOWUP_SKILLS, listFollowupSkills } from './followupSkills.js';
 import { registerTaskNotifyRoutes } from './taskNotify.js';
+import { registerQuarterlyCallsRoutes, checkQuarterlyCallReminders } from './quarterlyCalls.js';
 
 dotenv.config();
 
@@ -71,7 +72,9 @@ function verifyAuthToken(token) {
   } catch { return null; }
 }
 
-const AUTH_EXEMPT = [/^\/api\/login$/, /^\/api\/fathom\/oauth\//];
+// quarterly-calls/cron is called by Vercel Cron with its own
+// `Authorization: Bearer $CRON_SECRET` header — the route verifies that itself.
+const AUTH_EXEMPT = [/^\/api\/login$/, /^\/api\/fathom\/oauth\//, /^\/api\/quarterly-calls\/cron$/];
 
 app.use('/api', (req, res, next) => {
   const path = (req.originalUrl || '').split('?')[0];
@@ -130,6 +133,9 @@ app.post('/api/login', express.json({ limit: '2kb' }), (req, res) => {
 // ─── Task-created email notifications ────────────────────────────────────────
 // Registered after the auth middleware above, so the route is protected.
 registerTaskNotifyRoutes(app);
+
+// ─── Quarterly Calls (private calendar + reminders) ──────────────────────────
+registerQuarterlyCallsRoutes(app);
 
 // ─── Generic proxy ────────────────────────────────────────────────────────────
 // Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)
@@ -2078,6 +2084,14 @@ if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, () => {
     console.log(`[Server] Running locally on http://localhost:${PORT}`);
   });
+
+  // Quarterly-call reminder sweep: every 30 minutes, but emails only go out
+  // in the 13:00 Kyiv hour (reminderSentAt dedupes the two ticks inside it).
+  // On Vercel this block never runs — Vercel Cron hits /api/quarterly-calls/cron.
+  const sweep = () => checkQuarterlyCallReminders({ atHour: 13 })
+    .catch(err => console.warn('[Quarterly calls] reminder sweep failed:', err.message));
+  setTimeout(sweep, 15_000);
+  setInterval(sweep, 30 * 60_000);
 }
 
 // Обязательно экспортируем app для бессерверной среды Vercel

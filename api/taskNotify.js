@@ -51,7 +51,7 @@ function getTransporter() {
   return transporter;
 }
 
-async function sendEmail({ to, subject, html, text }) {
+export async function sendEmail({ to, subject, html, text }) {
   const mailer = getTransporter();
   if (!mailer) {
     const err = new Error('SMTP is not configured — set SMTP_USER / SMTP_PASS in .env');

@@ -6515,3 +6515,237 @@ button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inh
 .rel-ev-modal-title { display: flex; align-items: center; gap: 10px; }
 .rel-ev-modal .rel-modal-sub { font-size: 13px; color: var(--text-2); }
 .rel-ev-modal-body .rel-row-edit { flex-wrap: wrap; row-gap: 12px; }
+
+/* ═══════════════════════════════════════════════
+   Quarterly Calls (.qcal-*) — private calls calendar
+   ═══════════════════════════════════════════════ */
+.qcal-app {
+  height: 100%; overflow: auto; padding: 20px 24px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+
+.qcal-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.qcal-month-nav { display: flex; align-items: center; gap: 6px; }
+.qcal-nav-btn { font-size: 18px; line-height: 1; padding: 4px 12px; }
+.qcal-month-title { font-size: 18px; font-weight: 700; margin: 0 0 0 10px; white-space: nowrap; }
+
+/* View switcher: Day / Week / Month / 3 Months / Year */
+.qcal-views {
+  display: flex; align-items: center; gap: 2px; padding: 3px;
+  border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-card);
+}
+.qcal-view-btn {
+  padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  border: none; border-radius: var(--r-md); background: transparent; color: var(--text-2);
+  font-family: inherit;
+}
+.qcal-view-btn:hover { color: var(--text-1); background: var(--bg-card-hover); }
+.qcal-view-btn.active { color: var(--accent-ink); background: var(--accent-1); }
+
+.qcal-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.qcal-filter-chip {
+  padding: 4px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--text-2); font-family: inherit;
+}
+.qcal-filter-chip:hover { color: var(--text-1); border-color: var(--border-hi); }
+.qcal-filter-chip.active {
+  color: #0b0b0c;
+  background: var(--qcal-c, var(--accent-1));
+  border-color: var(--qcal-c, var(--accent-1));
+}
+.qcal-chip-add { border-style: dashed; }
+
+.qcal-load-error { color: var(--red); font-size: 13px; }
+
+.qcal-layout { display: flex; gap: 16px; align-items: flex-start; min-height: 0; }
+.qcal-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.qcal-cal {
+  min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--r-xl);
+  background: color-mix(in srgb, var(--text-3) 4%, transparent); overflow: hidden;
+}
+.qcal-cal-caption {
+  padding: 8px 12px; font-size: 13px; font-weight: 650;
+  border-bottom: 1px solid var(--border); background: var(--bg-card);
+}
+.qcal-dows {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  padding: 8px 8px 0;
+}
+.qcal-dow {
+  text-align: center; font-size: 10px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.qcal-grid {
+  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: minmax(96px, auto); gap: 5px; padding: 8px;
+}
+.qcal-cell {
+  display: flex; flex-direction: column; gap: 3px; padding: 4px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+  background: var(--bg-card); min-width: 0;
+}
+.qcal-cell.outside { background: transparent; border-color: transparent; opacity: .55; }
+.qcal-cell.today { border-color: var(--accent-1); box-shadow: inset 0 0 0 1px var(--accent-1); }
+.qcal-cell-head { display: flex; align-items: center; justify-content: space-between; }
+.qcal-daynum { font-size: 11px; font-weight: 600; color: var(--text-3); padding: 0 2px; }
+.qcal-cell.today .qcal-daynum { color: var(--accent-1); }
+.qcal-cell-add {
+  border: none; background: transparent; color: var(--text-3); cursor: pointer;
+  font-size: 13px; line-height: 1; padding: 1px 5px; border-radius: var(--r-sm);
+  opacity: 0; transition: opacity .12s ease; font-family: inherit;
+}
+.qcal-cell:hover .qcal-cell-add { opacity: 1; }
+.qcal-cell-add:hover { color: var(--accent-1); background: var(--bg-card-hover); }
+
+/* Event chip — project colour arrives via inline --qcal-c */
+.qcal-ev {
+  display: block; width: 100%; text-align: left; cursor: pointer; font-family: inherit;
+  font-size: 11px; line-height: 1.3; padding: 3px 6px; border-radius: var(--r-sm);
+  border: 1px solid color-mix(in srgb, var(--qcal-c, var(--text-3)) 45%, transparent);
+  border-left: 3px solid var(--qcal-c, var(--text-3));
+  background: color-mix(in srgb, var(--qcal-c, var(--text-3)) 18%, transparent);
+  color: var(--text-1);
+  white-space: normal; overflow-wrap: anywhere;
+}
+.qcal-ev:hover { filter: brightness(1.15); }
+.qcal-ev-time { font-weight: 700; font-variant-numeric: tabular-nums; margin-right: 4px; color: var(--qcal-c, var(--text-2)); }
+.qcal-ev-completed { opacity: .5; }
+.qcal-ev-cancelled { opacity: .5; }
+.qcal-ev-cancelled .qcal-ev-title,
+.qcal-ev-cancelled .qcal-day-title { text-decoration: line-through; }
+
+/* Week view: one tall row */
+.qcal-grid-week { grid-auto-rows: minmax(280px, auto); }
+
+/* 3-months view: compact grids side by side */
+.qcal-quarter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.qcal-compact .qcal-grid { grid-auto-rows: minmax(58px, auto); gap: 3px; padding: 6px; }
+.qcal-compact .qcal-ev { font-size: 10px; padding: 2px 4px; }
+.qcal-compact .qcal-ev-time { display: none; }
+.qcal-compact .qcal-daynum { font-size: 10px; }
+@media (max-width: 1500px) { .qcal-quarter { grid-template-columns: 1fr; } }
+
+/* Year view: 12 mini-months with dots */
+.qcal-year { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1500px) { .qcal-year { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 900px)  { .qcal-year { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.qcal-mini {
+  border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--bg-card); padding: 10px 10px 8px;
+}
+.qcal-mini-name { font-size: 12.5px; font-weight: 700; margin-bottom: 6px; }
+.qcal-mini-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; }
+.qcal-mini-dow { text-align: center; font-size: 9px; color: var(--text-3); font-weight: 600; padding-bottom: 2px; }
+.qcal-mini-day {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; cursor: pointer; font-family: inherit;
+  font-size: 10.5px; color: var(--text-2); padding: 2px 0; border-radius: var(--r-sm);
+  min-height: 26px;
+}
+.qcal-mini-day:hover { background: var(--bg-card-hover); color: var(--text-1); }
+.qcal-mini-day.outside { visibility: hidden; }
+.qcal-mini-day.today .qcal-mini-num { box-shadow: inset 0 0 0 1px var(--accent-1); color: var(--accent-1); }
+.qcal-mini-num {
+  display: flex; align-items: center; justify-content: center;
+  width: 21px; height: 21px; border-radius: 50%;
+}
+/* A day with calls: the date itself becomes a filled circle in the project colour */
+.qcal-mini-day.has-calls .qcal-mini-num {
+  background: var(--qcal-c, var(--accent-1));
+  color: #0b0b0c; font-weight: 700; box-shadow: none;
+}
+.qcal-mini-day.has-calls:hover .qcal-mini-num { filter: brightness(1.15); }
+.qcal-mini-day.has-calls.today .qcal-mini-num { box-shadow: 0 0 0 2px var(--accent-1); }
+
+/* Day view */
+.qcal-dayview { display: flex; flex-direction: column; gap: 8px; padding: 14px; }
+.qcal-day-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  cursor: pointer; font-family: inherit; padding: 10px 12px; border-radius: var(--r-md);
+  border: 1px solid color-mix(in srgb, var(--qcal-c, var(--text-3)) 40%, transparent);
+  border-left: 4px solid var(--qcal-c, var(--text-3));
+  background: color-mix(in srgb, var(--qcal-c, var(--text-3)) 12%, transparent);
+  color: var(--text-1);
+}
+.qcal-day-row:hover { filter: brightness(1.12); }
+.qcal-day-time {
+  flex: 0 0 52px; font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums;
+  color: var(--qcal-c, var(--text-2));
+}
+.qcal-day-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.qcal-day-title { font-size: 14px; font-weight: 650; }
+.qcal-day-sub { font-size: 12px; color: var(--text-2); }
+
+.qcal-side {
+  flex: 0 0 300px; display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--border); border-radius: var(--r-xl);
+  background: var(--bg-card); padding: 14px;
+  position: sticky; top: 0;
+}
+.qcal-side-title { margin: 0 0 4px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); }
+.qcal-side-empty { margin: 0; font-size: 13px; color: var(--text-3); }
+.qcal-up {
+  display: flex; align-items: flex-start; gap: 8px; width: 100%; text-align: left;
+  border: 1px solid transparent; border-radius: var(--r-md); background: transparent;
+  padding: 6px 8px; cursor: pointer; font-family: inherit;
+}
+.qcal-up:hover { background: var(--bg-card-hover); border-color: var(--border); }
+.qcal-up-dot {
+  flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%; margin-top: 5px;
+  background: var(--qcal-c, var(--text-3));
+}
+.qcal-up-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.qcal-up-title { font-size: 13px; font-weight: 600; color: var(--text-1); }
+.qcal-up-when { font-size: 11.5px; color: var(--text-2); }
+.qcal-up-meta { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.qcal-up-days { font-size: 11px; font-weight: 700; color: var(--accent-1); white-space: nowrap; }
+.qcal-up-mail { font-size: 11px; color: var(--text-3); }
+.qcal-legend-item { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
+.qcal-legend-item .qcal-up-dot { margin-top: 0; }
+.qcal-side-note { margin: 6px 0 0; font-size: 11.5px; color: var(--text-3); line-height: 1.45; }
+
+/* Compact inline add button — sits in the toolbar row like the rest */
+.qcal-add-btn {
+  font-size: 12px; padding: 4px 12px; align-self: center;
+  border: 1px dashed var(--border); border-radius: 999px;
+}
+.qcal-add-btn:hover { border-color: var(--accent-1); color: var(--accent-1); }
+
+/* ── Add/edit modal (reuses .rel-modal shell) ── */
+.qcal-modal { width: min(640px, 95vw); }
+
+/* ── Projects modal ── */
+.qcal-proj-modal { width: min(480px, 95vw); }
+.qcal-proj-form { display: flex; flex-direction: column; gap: 12px; }
+.qcal-swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.qcal-swatch {
+  width: 22px; height: 22px; border-radius: 50%; cursor: pointer;
+  border: 2px solid transparent; padding: 0;
+}
+.qcal-swatch.active { border-color: var(--text-1); box-shadow: 0 0 0 2px var(--bg-card); }
+.qcal-proj-list { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.qcal-proj-row { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-radius: var(--r-md); }
+.qcal-proj-row:hover { background: var(--bg-card-hover); }
+.qcal-proj-row .qcal-up-dot { margin-top: 0; }
+.qcal-proj-name { flex: 1 1 auto; font-size: 13.5px; font-weight: 600; color: var(--text-1); }
+.qcal-proj-count { font-size: 11.5px; color: var(--text-3); }
+.qcal-proj-del {
+  border: none; background: transparent; color: var(--text-3); cursor: pointer;
+  font-size: 12px; padding: 2px 6px; border-radius: var(--r-sm); font-family: inherit;
+}
+.qcal-proj-del:hover:not(:disabled) { color: var(--red); background: var(--bg-card-hover); }
+.qcal-proj-del:disabled { opacity: .35; cursor: not-allowed; }
+.qcal-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.qcal-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.qcal-field > span { font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+.qcal-field-wide { grid-column: 1 / -1; }
+.qcal-notes { resize: vertical; min-height: 60px; }
+.qcal-form-error { grid-column: 1 / -1; color: var(--red); font-size: 13px; }
+.qcal-form-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+
+@media (max-width: 1100px) {
+  .qcal-layout { flex-direction: column; }
+  .qcal-side { flex: none; width: 100%; position: static; }
+}

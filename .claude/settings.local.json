@@ -164,7 +164,10 @@
       "Bash(break)",
       "Bash(python3 *)",
       "Bash(pkill -f \"task_creator_app.*vite\")",
-      "Bash(pkill -f \"npm run dev\")"
+      "Bash(pkill -f \"npm run dev\")",
+      "Bash(PORT=3999 node api/index.js)",
+      "Bash(npm ls *)",
+      "Bash(node --check api/quarterlyCalls.js)"
     ]
   }
 }
