@@ -98,9 +98,12 @@ function CallModal({ initial, projects, onSave, onDelete, onClose, saving }) {
             <h3 className="rel-modal-title">{isEdit ? 'Edit call' : 'New call'}</h3>
             {isEdit && (
               <p className="rel-modal-sub">
-                {initial.reminderSentAt
-                  ? `Reminder emailed ${new Date(initial.reminderSentAt).toLocaleDateString('en-GB')}`
-                  : 'Reminder will be emailed a week before the call (13:00 Kyiv)'}
+                {[
+                  initial.reminderSentAt && `week reminder ${new Date(initial.reminderSentAt).toLocaleDateString('en-GB')}`,
+                  initial.reminder2SentAt && `2-day reminder ${new Date(initial.reminder2SentAt).toLocaleDateString('en-GB')}`,
+                ].filter(Boolean).join(', ')
+                  .replace(/^./, s => `Emailed: ${s}`)
+                  || 'Reminders will be emailed a week and 2 days before the call (13:00 Kyiv)'}
               </p>
             )}
           </div>
@@ -336,7 +339,7 @@ function DayView({ iso, today, byDate, colorOf, projectLabel, onOpen, onAdd }) {
               {call.status !== 'scheduled' ? ` · ${call.status}` : ''}
             </span>
           </span>
-          {call.reminderSentAt && <span className="qcal-up-mail" title="Reminder emailed">✉</span>}
+          {(call.reminderSentAt || call.reminder2SentAt) && <span className="qcal-up-mail" title="Reminder emailed">✉</span>}
         </button>
       ))}
       <div>
@@ -627,7 +630,12 @@ export default function QuarterlyCallsApp() {
                 </span>
                 <span className="qcal-up-meta">
                   <span className="qcal-up-days">{d === 0 ? 'today' : `in ${d}d`}</span>
-                  {call.reminderSentAt && <span className="qcal-up-mail" title="Reminder emailed">✉</span>}
+                  {(call.reminderSentAt || call.reminder2SentAt) && (
+                    <span className="qcal-up-mail"
+                          title={`Emailed: ${[call.reminderSentAt && 'week reminder', call.reminder2SentAt && '2-day reminder'].filter(Boolean).join(', ')}`}>
+                      ✉{call.reminderSentAt && call.reminder2SentAt ? '²' : ''}
+                    </span>
+                  )}
                 </span>
               </button>
             );
@@ -639,7 +647,7 @@ export default function QuarterlyCallsApp() {
               </span>
             ))}
           </p>
-          <p className="qcal-side-note">An email reminder is sent one week before each scheduled call, at 13:00 Kyiv.</p>
+          <p className="qcal-side-note">Email reminders are sent one week and 2 days before each scheduled call, at 13:00 Kyiv.</p>
         </aside>
       </div>
 

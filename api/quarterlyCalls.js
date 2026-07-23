@@ -69,7 +69,8 @@ const SEED_CALLS = [
   { id: 'seed-2026-20', project: 'NSMG',        title: 'NSMG Catch-Up with Cara',                      date: '2026-12-16', time: '18:00', status: 'scheduled', participants: 'Cara' },
 ].map(c => ({
   participants: '', summaryLink: '', miroLink: '', notes: '',
-  reminderSentAt: null, createdAt: '2026-07-23T00:00:00.000Z', updatedAt: '2026-07-23T00:00:00.000Z',
+  reminderSentAt: null, reminder2SentAt: null,
+  createdAt: '2026-07-23T00:00:00.000Z', updatedAt: '2026-07-23T00:00:00.000Z',
   ...c,
 }));
 
@@ -278,31 +279,36 @@ function reminderRecipients() {
   return fromEnv.length ? fromEnv : QC_ALLOWED;
 }
 
-// Send one reminder per call when it is 7 days away or closer (the ≤ catches
-// calls whose exact 7-day mark passed while the server was down).
-// Reminders go out at 13:00 Kyiv: scheduled triggers pass { atHour: 13 } and
-// are no-ops outside that hour; a manual sweep (no atHour) sends immediately.
+// Two reminders per call, each sent once: a week ahead (marked in
+// reminderSentAt, fires while 2 < days ≤ 7 so a missed exact 7-day mark still
+// catches up) and 2 days ahead (reminder2SentAt, fires while 0 < days ≤ 2 —
+// and it alone covers calls created closer than 3 days out, so the same day
+// never gets both emails). Reminders go out at 13:00 Kyiv: scheduled triggers
+// pass { atHour: 13 } and are no-ops outside that hour; a manual sweep
+// (no atHour) sends immediately.
 export async function checkQuarterlyCallReminders({ atHour = null } = {}) {
   if (atHour !== null && kyivHour() !== atHour) {
     return { due: 0, sent: 0, skipped: `outside ${atHour}:00 Kyiv window` };
   }
   const db = await load();
-  const due = db.calls.filter(c => {
-    if (c.status !== 'scheduled' || c.reminderSentAt) return false;
-    const d = daysUntil(c.date);
-    return d > 0 && d <= 7;
-  });
+  const due = [];
+  for (const call of db.calls) {
+    if (call.status !== 'scheduled') continue;
+    const d = daysUntil(call.date);
+    if (d > 2 && d <= 7 && !call.reminderSentAt)  due.push({ call, d, mark: 'reminderSentAt' });
+    else if (d > 0 && d <= 2 && !call.reminder2SentAt) due.push({ call, d, mark: 'reminder2SentAt' });
+  }
   let sent = 0;
-  for (const call of due) {
+  for (const { call, d, mark } of due) {
     const projectName = db.projects.find(p => p.id === call.project)?.label || call.project;
     try {
-      await sendEmail({ to: reminderRecipients(), ...buildReminderEmail(call, daysUntil(call.date), projectName) });
-      call.reminderSentAt = new Date().toISOString();
-      call.updatedAt = call.reminderSentAt;
+      await sendEmail({ to: reminderRecipients(), ...buildReminderEmail(call, d, projectName) });
+      call[mark] = new Date().toISOString();
+      call.updatedAt = call[mark];
       sent++;
-      console.log(`[Quarterly calls] reminder sent: "${call.title}" on ${call.date}`);
+      console.log(`[Quarterly calls] ${mark === 'reminderSentAt' ? 'week' : '2-day'} reminder sent: "${call.title}" on ${call.date}`);
     } catch (err) {
-      // Not configured / transient SMTP failure — leave reminderSentAt unset
+      // Not configured / transient SMTP failure — leave the mark unset
       // so the next check retries.
       console.warn(`[Quarterly calls] reminder failed for "${call.title}":`, err.message);
       if (err.notConfigured) break;
@@ -383,7 +389,7 @@ export function registerQuarterlyCallsRoutes(app) {
     const { call, error } = sanitize(req.body ?? {}, db);
     if (error) return res.status(400).json({ error });
     const now = new Date().toISOString();
-    const record = { id: crypto.randomUUID(), ...call, reminderSentAt: null, createdAt: now, updatedAt: now };
+    const record = { id: crypto.randomUUID(), ...call, reminderSentAt: null, reminder2SentAt: null, createdAt: now, updatedAt: now };
     db.calls.push(record);
     const persisted = await save();
     res.json({ call: record, persisted });
@@ -396,9 +402,11 @@ export function registerQuarterlyCallsRoutes(app) {
     const existing = db.calls[idx];
     const { call, error } = sanitize(req.body ?? {}, db, existing);
     if (error) return res.status(400).json({ error });
-    // A moved date makes the old reminder stale — re-arm it.
-    const reminderSentAt = call.date !== existing.date ? null : existing.reminderSentAt;
-    db.calls[idx] = { ...existing, ...call, reminderSentAt, updatedAt: new Date().toISOString() };
+    // A moved date makes the old reminders stale — re-arm both.
+    const moved = call.date !== existing.date;
+    const reminderSentAt  = moved ? null : existing.reminderSentAt;
+    const reminder2SentAt = moved ? null : existing.reminder2SentAt;
+    db.calls[idx] = { ...existing, ...call, reminderSentAt, reminder2SentAt, updatedAt: new Date().toISOString() };
     const persisted = await save();
     res.json({ call: db.calls[idx], persisted });
   });
