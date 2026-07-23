@@ -4438,6 +4438,46 @@ button.su-status {
   white-space: nowrap;
 }
 
+.su-children-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Toolbar "Export" button — same look as the column Copy buttons, sized to
+   sit next to the state-filter select. */
+.su-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.su-export-btn:hover { background: var(--bg-card-hover); color: var(--text-1); border-color: var(--border-hi); }
+.su-export-btn.copied { border-color: var(--green); color: var(--green); background: rgba(16,185,129,0.08); }
+
+.su-export-hint {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-3);
+  margin-top: 1px;
+}
+
 /* ── AI validation panel ── */
 .su-ai { margin-bottom: 18px; }
 .su-ai-bar {

@@ -321,9 +321,11 @@ export async function getIssueKeysByAzureIds(cloudId, projectKeys, clientRequest
     ? `project in (${keys.map(k => `"${k}"`).join(',')}) AND `
     : '';
 
-  // Chunk the id list to keep each JQL query well under Jira's length limit.
-  for (let i = 0; i < ids.length; i += 50) {
-    const chunk = ids.slice(i, i + 50);
+  // Chunk the id list to keep each JQL query well under Jira's length limit;
+  // the chunks are independent, so run them concurrently.
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+  await Promise.all(chunks.map(async (chunk) => {
     const jql = `${projectClause}cf[${fieldId}] in (${chunk.join(',')})`;
     const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
       method: 'POST',
@@ -335,7 +337,7 @@ export async function getIssueKeysByAzureIds(cloudId, projectKeys, clientRequest
       const azureId = issue.fields?.[clientRequestIdField];
       if (azureId != null) out.set(String(azureId), issue.key);
     }
-  }
+  }));
   return out;
 }
 
@@ -445,9 +447,11 @@ export async function getIssuesStatusByKeys(cloudId, keys) {
   if (!unique.length) return out;
 
   const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority'];
-  // JQL `key in (...)` — chunk to keep the query string well under Jira's limit.
-  for (let i = 0; i < unique.length; i += 50) {
-    const chunk = unique.slice(i, i + 50);
+  // JQL `key in (...)` — chunk to keep the query string well under Jira's
+  // limit; the chunks are independent, so run them concurrently.
+  const chunks = [];
+  for (let i = 0; i < unique.length; i += 50) chunks.push(unique.slice(i, i + 50));
+  await Promise.all(chunks.map(async (chunk) => {
     const jql = `key in (${chunk.join(',')})`;
     const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
       method: 'POST',
@@ -467,7 +471,7 @@ export async function getIssuesStatusByKeys(cloudId, keys) {
         priority:       f.priority?.name ?? '',
       });
     }
-  }
+  }));
   return out;
 }
 
@@ -864,5 +868,92 @@ export async function getChildIssuesTree(cloudId, parentKey, maxDepth = 5, _visi
       : [];
     out.push({ ...child, children: grandchildren });
   }
+  return out;
+}
+
+/**
+ * Descendant trees for MANY parents at once — same node shape as
+ * getChildIssuesTree, returned as Map<parentKey, node[]>. Walks the hierarchy
+ * level by level with bulk `parent in (...)` / `"Epic Link" in (...)` searches
+ * (2 paginated queries per 50 parents per level) instead of 2 queries per tree
+ * node, which makes a whole board load in a handful of round trips.
+ * Children attach via the returned `parent` field (Jira Cloud populates it for
+ * both subtasks and epic children); an issue whose parent isn't in the current
+ * level is ignored, and a `visited` set guards against link cycles.
+ */
+export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5) {
+  const roots = [...new Set((parentKeys || []).filter(Boolean))];
+  const out = new Map(roots.map(k => [k, []]));
+  if (!roots.length) return out;
+
+  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority', 'parent', 'created'];
+  const clauses = [
+    list => `parent in (${list})`,
+    list => `"Epic Link" in (${list})`,   // legacy fallback; may not exist → ignored
+  ];
+
+  // All children of the given parent keys: one paginated search per chunk×clause,
+  // all in parallel. A failing clause variant is skipped, mirroring
+  // getChildIssuesStatus.
+  async function searchLevel(keys) {
+    const found = [];
+    const chunks = [];
+    for (let i = 0; i < keys.length; i += 50) chunks.push(keys.slice(i, i + 50));
+    await Promise.all(chunks.flatMap(chunk => clauses.map(async (clause) => {
+      const jql = `${clause(chunk.join(','))} ORDER BY created ASC`;
+      try {
+        let nextPageToken;
+        do {
+          const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jql, maxResults: 100, fields, nextPageToken }),
+          });
+          const data = await parseJira(res, 'getChildIssuesTreesBulk');
+          found.push(...(data.issues ?? []));
+          nextPageToken = data.nextPageToken;
+        } while (nextPageToken);
+      } catch { /* ignore failing JQL variant */ }
+    })));
+    return found;
+  }
+
+  const visited = new Set(roots);
+  const nodeByKey = new Map();
+  let level = roots;
+  for (let depth = 0; depth < maxDepth && level.length; depth++) {
+    const levelSet = new Set(level);
+    const issues = await searchLevel(level);
+    const next = [];
+    for (const issue of issues) {
+      if (visited.has(issue.key)) continue;
+      const parentKey = issue.fields?.parent?.key;
+      if (!parentKey || !levelSet.has(parentKey)) continue;
+      visited.add(issue.key);
+      const f = issue.fields ?? {};
+      const node = {
+        key:            issue.key,
+        summary:        f.summary ?? '',
+        status:         f.status?.name ?? '',
+        statusCategory: f.status?.statusCategory?.key ?? '',
+        assignee:       f.assignee?.displayName ?? null,
+        type:           f.issuetype?.name ?? '',
+        priority:       f.priority?.name ?? '',
+        created:        f.created ?? '',
+        children:       [],
+      };
+      nodeByKey.set(issue.key, node);
+      (out.get(parentKey) ?? nodeByKey.get(parentKey).children).push(node);
+      next.push(issue.key);
+    }
+    level = next;
+  }
+
+  // Chunk/clause queries resolve in arbitrary order — restore per-parent
+  // created-ASC sibling order (what the per-node version returned).
+  const byCreated = (a, b) => String(a.created).localeCompare(String(b.created));
+  for (const list of out.values()) list.sort(byCreated);
+  for (const node of nodeByKey.values()) node.children.sort(byCreated);
+
   return out;
 }

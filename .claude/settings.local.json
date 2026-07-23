@@ -160,7 +160,11 @@
       "Bash(node --check api/taskNotify.js)",
       "Bash(node -e \"import\\('nodemailer'\\).then\\(m=>console.log\\('nodemailer ok', !!m.default.createTransport\\)\\)\")",
       "Bash(grep -v google-app-passwords-blocked /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md)",
-      "Bash(mv /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md.tmp /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md)"
+      "Bash(mv /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md.tmp /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md)",
+      "Bash(break)",
+      "Bash(python3 *)",
+      "Bash(pkill -f \"task_creator_app.*vite\")",
+      "Bash(pkill -f \"npm run dev\")"
     ]
   }
 }

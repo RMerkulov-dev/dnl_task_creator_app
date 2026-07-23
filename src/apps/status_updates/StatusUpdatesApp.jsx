@@ -5,7 +5,7 @@ import {
   getWorkItemStates, updateWorkItemState, getWorkItemComments,
 } from '../../services/azureDevops.js';
 import {
-  getIssuesStatusByKeys, getChildIssuesTree, getJiraUrl,
+  getIssuesStatusByKeys, getChildIssuesTreesBulk, getJiraUrl,
   getIssueKeysByAzureIds, getTransitions, transitionIssue,
 } from '../../services/jira.js';
 
@@ -136,6 +136,108 @@ function collectJiraColumn(rows, jira, jiraChildren, kind) {
     }
   }
   return out.join('\n');
+}
+
+// ─── Export the visible (filtered) view as a flat table ───────────────────────
+// One row per Jira line, with its Azure work item's columns repeated so the
+// sheet stays filterable/pivotable. Rows follow the on-screen tree order.
+const EXPORT_COLUMNS = [
+  'Azure ID', 'Azure Link', 'Azure Type', 'Azure Title', 'Azure State', 'Azure Assignee', 'Comments',
+  'Jira Key', 'Jira Link', 'Jira Type', 'Jira Summary', 'Jira Status', 'Jira Assignee',
+];
+
+function buildExportRows(roots, childrenOf, jira, jiraChildren) {
+  const rows = [];
+  const walkJira = (azure, nodes) => {
+    for (const n of nodes || []) {
+      rows.push({ ...azure, jiraKey: n.key, jiraUrl: getJiraUrl(n.key), jiraType: n.type || '',
+        jiraSummary: n.summary || '', jiraStatus: n.status || '', jiraAssignee: n.assignee || '' });
+      walkJira(azure, n.children);
+    }
+  };
+  const pushItem = (it) => {
+    const azure = {
+      azureId: it.id, azureUrl: it.url || '', azureType: it.type || '', azureTitle: it.title || '',
+      azureState: it.state || '', azureAssignee: it.assignedTo || '', comments: commentCountOf(it) || 0,
+    };
+    const j = it.jiraKey ? jira.get(it.jiraKey) : null;
+    if (!it.jiraKey) {
+      rows.push({ ...azure, jiraKey: '', jiraUrl: '', jiraType: '', jiraSummary: '', jiraStatus: 'No Jira link', jiraAssignee: '' });
+    } else if (!j) {
+      rows.push({ ...azure, jiraKey: it.jiraKey, jiraUrl: getJiraUrl(it.jiraKey), jiraType: '', jiraSummary: '', jiraStatus: 'Not found in Jira', jiraAssignee: '' });
+    } else {
+      rows.push({ ...azure, jiraKey: j.key, jiraUrl: getJiraUrl(j.key), jiraType: j.type || '',
+        jiraSummary: j.summary || '', jiraStatus: j.status || '', jiraAssignee: j.assignee || '' });
+      walkJira(azure, jiraChildren.get(j.key));
+    }
+    for (const child of childrenOf.get(it.id) || []) pushItem(child);
+  };
+  roots.forEach(pushItem);
+  return rows;
+}
+
+const exportCells = (r) => [
+  r.azureId, r.azureUrl, r.azureType, r.azureTitle, r.azureState, r.azureAssignee, r.comments,
+  r.jiraKey, r.jiraUrl, r.jiraType, r.jiraSummary, r.jiraStatus, r.jiraAssignee,
+];
+
+// A leading = or @ would make Excel treat the cell as a formula — neutralise it.
+function csvCell(v) {
+  let s = String(v ?? '');
+  if (/^[=@]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function exportCsv(rows) {
+  const lines = [EXPORT_COLUMNS, ...rows.map(exportCells)]
+    .map(r => r.map(csvCell).join(','));
+  return '﻿' + lines.join('\r\n');   // BOM so Excel reads UTF-8 (cyrillic titles)
+}
+
+function exportTsv(rows) {
+  const flat = v => String(v ?? '').replace(/[\t\n\r]+/g, ' ');
+  return [EXPORT_COLUMNS, ...rows.map(exportCells)]
+    .map(r => r.map(flat).join('\t')).join('\n');
+}
+
+// HTML table for the clipboard: pasting into Excel / Google Sheets keeps the
+// Azure #id and Jira key cells as clickable hyperlinks.
+function exportHtmlTable(rows) {
+  const esc = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const link = (url, text) => (url ? `<a href="${esc(url)}">${esc(text)}</a>` : esc(text));
+  const head = ['Azure ID', 'Azure Type', 'Azure Title', 'Azure State', 'Azure Assignee', 'Comments',
+    'Jira Key', 'Jira Type', 'Jira Summary', 'Jira Status', 'Jira Assignee'];
+  const body = rows.map(r => `<tr><td>${[
+    link(r.azureUrl, `#${r.azureId}`), esc(r.azureType), esc(r.azureTitle), esc(r.azureState),
+    esc(r.azureAssignee), esc(r.comments),
+    link(r.jiraUrl, r.jiraKey), esc(r.jiraType), esc(r.jiraSummary), esc(r.jiraStatus), esc(r.jiraAssignee),
+  ].join('</td><td>')}</td></tr>`).join('');
+  return `<table><thead><tr><th>${head.join('</th><th>')}</th></tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function downloadFile(name, mime, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// Copy rich HTML (clickable links) with a plain-text TSV fallback. If the rich
+// write fails (Safari quirks, permissions), fall back to plain TSV rather than
+// silently leaving the clipboard's PREVIOUS content in place.
+async function copyRichTable(html, text) {
+  if (navigator.clipboard?.write && window.ClipboardItem) {
+    try {
+      await navigator.clipboard.write([new window.ClipboardItem({
+        'text/html':  new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })]);
+      return;
+    } catch { /* fall through to plain text */ }
+  }
+  await navigator.clipboard.writeText(text);
 }
 
 // ─── Azure work-item comments: read-state store ──────────────────────────────
@@ -323,6 +425,75 @@ function CopyMenu({ title, count, options }) {
             {options.map(opt => (
               <button key={opt.key} type="button" className="su-copycol-item" onClick={() => pick(opt)}>
                 {opt.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"
+        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// Toolbar "Export" dropdown — dumps the CURRENT view (filtered or not, in the
+// on-screen tree order). `options` = [{ key, label, hint, run, done }]:
+// run() returns the exported row count, done(n) builds the feedback label —
+// showing the exact count so a filtered export is visibly filtered.
+function ExportMenu({ count, total, options }) {
+  const [open, setOpen] = useState(false);
+  const [done, setDone] = useState('');
+  const [pos,  setPos]  = useState(null);
+  const btnRef  = useRef(null);
+  const menuRef = useRef(null);
+
+  useAnchoredMenu(open, btnRef, menuRef, setPos);
+
+  function toggle() {
+    if (open) { setOpen(false); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.bottom + 4, left: r.left });
+    setOpen(true);
+  }
+
+  async function pick(opt) {
+    let msg;
+    try { msg = opt.done(await opt.run()); } catch { msg = '⚠ Failed'; }
+    setOpen(false);
+    setDone(msg);
+    setTimeout(() => setDone(''), 2500);
+  }
+
+  return (
+    <span className="su-copycol">
+      <button
+        ref={btnRef}
+        type="button"
+        className={`su-export-btn${done ? ' copied' : ''}`}
+        onClick={toggle}
+        title="Export the visible rows as a table"
+      >
+        <DownloadIcon />
+        {done || 'Export'}
+      </button>
+      {open && (
+        <>
+          <div className="su-status-backdrop" onClick={() => setOpen(false)} />
+          <div ref={menuRef} className="su-copycol-menu" style={pos ? { top: pos.top, left: pos.left } : undefined}>
+            <div className="su-copycol-head">
+              {count === total ? `${count} work items` : `${count} of ${total} work items (filtered view)`} — export as:
+            </div>
+            {options.map(opt => (
+              <button key={opt.key} type="button" className="su-copycol-item" onClick={() => pick(opt)}>
+                {opt.label}
+                {opt.hint && <span className="su-export-hint">{opt.hint}</span>}
               </button>
             ))}
           </div>
@@ -847,8 +1018,12 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const [jira,         setJira]         = useState(new Map());
   const [jiraChildren, setJiraChildren] = useState(new Map());
   const [loading,      setLoading]      = useState(false);
+  const [childrenLoading, setChildrenLoading] = useState(false);
   const [error,        setError]        = useState('');
   const [loaded,       setLoaded]       = useState(false);
+  // Monotonic load id — a stale load (older Refresh / previous project) checks
+  // it before touching state so it can't clobber a newer load's results.
+  const loadSeq = useRef(0);
 
   // Search + filter
   const [query,        setQuery]        = useState('');
@@ -910,6 +1085,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
   // ── Load boards (area paths) and/or sprints (iterations) on project change ──
   useEffect(() => {
+    loadSeq.current++;               // invalidate any in-flight load
     setBoards([]);
     setSelectedBoard('');
     setIterations([]);
@@ -918,6 +1094,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     setJira(new Map());
     setJiraChildren(new Map());
     setLoaded(false);
+    setLoading(false);
+    setChildrenLoading(false);
     setError('');
     setQuery('');
     setActiveFilter('all');
@@ -954,7 +1132,9 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
   const load = useCallback(async () => {
     if (!proj) return;
     if (hasBoards && !selectedBoard) { setError('Select a board first.'); return; }
+    const seq = ++loadSeq.current;
     setLoading(true);
+    setChildrenLoading(false);
     setError('');
     // A fresh dataset invalidates any prior AI answer/matches and stale filters.
     setAiAnswer(''); setAiError(''); setAiMatchIds(null); setAzureStateFilter('');
@@ -988,21 +1168,31 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
       const keys = linked.map(i => i.jiraKey).filter(Boolean);
       const jiraMap = await getIssuesStatusByKeys(proj.jira.cloudId, keys);
+      if (seq !== loadSeq.current) return;
 
-      // For each resolved request, pull all of its Jira children (status + assignee).
-      const requestKeys = [...new Set(keys)].filter(k => jiraMap.has(k));
-      const childEntries = await mapPool(requestKeys, 5, async (k) => [
-        k, await getChildIssuesTree(proj.jira.cloudId, k),
-      ]);
-
+      // Phase 1 — show the table as soon as the requests' own statuses arrive.
       setItems(linked);
       setJira(jiraMap);
-      setJiraChildren(new Map(childEntries));
+      setJiraChildren(new Map());
       setLoaded(true);
-    } catch (e) {
-      setError(e.message || 'Failed to load.');
-    } finally {
       setLoading(false);
+
+      // Phase 2 — every request's Jira descendant tree in one bulk, level-by-
+      // level fetch (a handful of round trips instead of two per tree node).
+      const requestKeys = [...new Set(keys)].filter(k => jiraMap.has(k));
+      if (requestKeys.length) {
+        setChildrenLoading(true);
+        try {
+          const trees = await getChildIssuesTreesBulk(proj.jira.cloudId, requestKeys);
+          if (seq === loadSeq.current) setJiraChildren(trees);
+        } finally {
+          if (seq === loadSeq.current) setChildrenLoading(false);
+        }
+      }
+    } catch (e) {
+      if (seq === loadSeq.current) setError(e.message || 'Failed to load.');
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [proj, hasBoards, selectedBoard, hasSprints, selectedSprint]);
 
@@ -1188,6 +1378,41 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
   const isFiltering = !!query.trim() || activeFilter !== 'all' || !!azureStateFilter || !!aiMatchIds;
   const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
+
+  // ── Export the current view (filtered or full) as a flat table ─────────────
+  const exportBaseName = useCallback(() => {
+    const board = hasBoards && selectedBoard ? selectedBoard.split(/[\\/]/).pop() : proj?.id || 'status';
+    const date = new Date().toISOString().slice(0, 10);
+    return `status_${board.replace(/[^\wЀ-ӿ-]+/g, '_')}_${date}`;
+  }, [hasBoards, selectedBoard, proj]);
+
+  const exportOptions = useMemo(() => {
+    const rows = () => buildExportRows(roots, childrenOf, jira, jiraChildren);
+    // A filtered export announces itself in the file name too.
+    const filteredSuffix = filteredItems.length !== items.length
+      ? `_filtered_${filteredItems.length}-of-${items.length}`
+      : '';
+    return [
+      {
+        key: 'csv', label: 'Download CSV', hint: 'link columns for Azure / Jira',
+        done: n => `Saved ${n} rows ✓`,
+        run: () => {
+          const r = rows();
+          downloadFile(`${exportBaseName()}${filteredSuffix}.csv`, 'text/csv;charset=utf-8', exportCsv(r));
+          return r.length;
+        },
+      },
+      {
+        key: 'table', label: 'Copy table', hint: 'paste into Excel / Sheets — ids stay clickable',
+        done: n => `Copied ${n} rows ✓`,
+        run: async () => {
+          const r = rows();
+          await copyRichTable(exportHtmlTable(r), exportTsv(r));
+          return r.length;
+        },
+      },
+    ];
+  }, [roots, childrenOf, jira, jiraChildren, exportBaseName, filteredItems.length, items.length]);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed(prev => {
@@ -1395,6 +1620,12 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                     <option key={s} value={s}>{s} ({n})</option>
                   ))}
                 </select>
+              )}
+              <ExportMenu count={filteredItems.length} total={items.length} options={exportOptions} />
+              {childrenLoading && (
+                <span className="su-children-loading" title="The table is ready — epic/task trees are still loading">
+                  <span className="spinner" style={{ width: 12, height: 12 }} /> Loading Jira sub-items…
+                </span>
               )}
               {isFiltering && (
                 <span className="su-result-count">{filteredItems.length} / {items.length}</span>
