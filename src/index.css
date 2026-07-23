@@ -6615,6 +6615,11 @@ button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inh
 .qcal-ev-cancelled { opacity: .5; }
 .qcal-ev-cancelled .qcal-ev-title,
 .qcal-ev-cancelled .qcal-day-title { text-decoration: line-through; }
+/* Past calls (date before today) — clearly inactive in every view */
+.qcal-ev-past { opacity: .35; filter: saturate(.55); }
+.qcal-ev-past:hover { opacity: .7; }
+.qcal-mini-day.has-calls.past .qcal-mini-num { opacity: .35; filter: saturate(.55); }
+.qcal-mini-day.has-calls.past:hover .qcal-mini-num { opacity: .7; }
 
 /* Week view: one tall row */
 .qcal-grid-week { grid-auto-rows: minmax(280px, auto); }

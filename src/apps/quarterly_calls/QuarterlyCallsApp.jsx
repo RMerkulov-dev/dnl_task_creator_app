@@ -248,9 +248,9 @@ function ProjectModal({ projects, callCounts, onCreate, onDeleteProject, onClose
   );
 }
 
-function EventChip({ call, colorOf, onOpen }) {
+function EventChip({ call, colorOf, onOpen, past }) {
   return (
-    <button className={`qcal-ev qcal-ev-${call.status}`}
+    <button className={`qcal-ev qcal-ev-${call.status}${past ? ' qcal-ev-past' : ''}`}
             style={{ '--qcal-c': colorOf(call.project) }}
             onClick={() => onOpen(call)}
             title={`${call.title}${call.time ? ` — ${call.time} Kyiv` : ''}`}>
@@ -268,7 +268,7 @@ function DayCell({ cell, today, byDate, colorOf, onOpen, onAdd }) {
         <span className="qcal-daynum">{cell.day}</span>
       </div>
       {(byDate.get(cell.iso) || []).map(call => (
-        <EventChip key={call.id} call={call} colorOf={colorOf} onOpen={onOpen} />
+        <EventChip key={call.id} call={call} colorOf={colorOf} onOpen={onOpen} past={cell.iso < today} />
       ))}
     </div>
   );
@@ -303,7 +303,7 @@ function MiniMonth({ y, m, today, byDate, colorOf, onPickDay }) {
           const dayCalls = cell.outside ? [] : (byDate.get(cell.iso) || []);
           return (
             <button key={cell.iso}
-                    className={`qcal-mini-day${cell.outside ? ' outside' : ''}${cell.iso === today ? ' today' : ''}${dayCalls.length ? ' has-calls' : ''}`}
+                    className={`qcal-mini-day${cell.outside ? ' outside' : ''}${cell.iso === today ? ' today' : ''}${dayCalls.length ? ' has-calls' : ''}${cell.iso < today ? ' past' : ''}`}
                     style={dayCalls.length ? { '--qcal-c': colorOf(dayCalls[0].project) } : undefined}
                     onClick={() => onPickDay(cell.iso)}
                     title={dayCalls.map(c => c.title).join('\n') || undefined}>
@@ -324,7 +324,7 @@ function DayView({ iso, today, byDate, colorOf, projectLabel, onOpen, onAdd }) {
         <p className="qcal-side-empty">No calls on {formatIso(iso)}.</p>
       )}
       {list.map(call => (
-        <button key={call.id} className={`qcal-day-row qcal-ev-${call.status}`}
+        <button key={call.id} className={`qcal-day-row qcal-ev-${call.status}${iso < today ? ' qcal-ev-past' : ''}`}
                 style={{ '--qcal-c': colorOf(call.project) }}
                 onClick={() => onOpen(call)}>
           <span className="qcal-day-time">{call.time || '—'}</span>
