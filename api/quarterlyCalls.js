@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { put, list, del } from '@vercel/blob';
+import { put, get } from '@vercel/blob';
 import { sendEmail } from './taskNotify.js';
 
 // ─── Quarterly Calls ──────────────────────────────────────────────────────────
@@ -14,9 +14,10 @@ import { sendEmail } from './taskNotify.js';
 //
 // Storage (two backends, picked automatically):
 //   • Vercel Blob — when BLOB_READ_WRITE_TOKEN is set (auto-injected once a
-//     Blob store is attached to the Vercel project). One JSON snapshot under
-//     quarterly-calls/ with a random-suffix URL; every save writes a new
-//     snapshot and prunes the previous ones. Survives deploys/cold starts.
+//     Blob store is attached to the Vercel project; the store must be created
+//     as PRIVATE with the "add a read-write token env var" box checked).
+//     One JSON document at a fixed pathname, readable only with the token.
+//     Survives deploys/cold starts.
 //   • Local file api/data/quarterly-calls.json (gitignored) — dev fallback,
 //     also kept as a best-effort mirror when Blob is active.
 // First load with an empty store seeds from the 2026 schedule spreadsheet.
@@ -73,7 +74,7 @@ const SEED_CALLS = [
 }));
 
 // ─── Storage layer ────────────────────────────────────────────────────────────
-const BLOB_PREFIX = 'quarterly-calls/';
+const BLOB_PATH = 'quarterly-calls/db.json';
 const useBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
 // In-memory working copy (authoritative within one warm instance).
@@ -114,22 +115,20 @@ function saveLocal() {
 }
 
 async function blobLoad() {
-  const { blobs } = await list({ prefix: BLOB_PREFIX });
-  if (!blobs.length) return null;
-  const newest = [...blobs].sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))[0];
-  const res = await fetch(newest.url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`blob fetch failed: HTTP ${res.status}`);
-  return normalize(await res.json());
+  // Private blob: readable only through the SDK with the read-write token.
+  const res = await get(BLOB_PATH, { access: 'private', useCache: false });
+  if (!res || !res.stream) return null; // not found — fresh store
+  const text = await new Response(res.stream).text();
+  return normalize(JSON.parse(text));
 }
 
 async function blobSave() {
-  const { blobs } = await list({ prefix: BLOB_PREFIX });
-  await put(`${BLOB_PREFIX}db.json`, JSON.stringify(cache, null, 2), {
-    access: 'public',            // Blob URLs are unguessable random; old ones are pruned below
+  await put(BLOB_PATH, JSON.stringify(cache, null, 2), {
+    access: 'private',
     contentType: 'application/json',
-    addRandomSuffix: true,
+    addRandomSuffix: false,
+    allowOverwrite: true,
   });
-  if (blobs.length) await del(blobs.map(b => b.url)).catch(() => {});
 }
 
 async function load() {

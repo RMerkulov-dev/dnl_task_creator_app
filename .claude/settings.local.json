@@ -167,7 +167,8 @@
       "Bash(pkill -f \"npm run dev\")",
       "Bash(PORT=3999 node api/index.js)",
       "Bash(npm ls *)",
-      "Bash(node --check api/quarterlyCalls.js)"
+      "Bash(node --check api/quarterlyCalls.js)",
+      "Bash(vercel ls *)"
     ]
   }
 }
