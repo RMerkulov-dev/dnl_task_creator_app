@@ -156,7 +156,11 @@
       "Bash(xargs kill)",
       "Bash(lsof -nP -iTCP:3000 -iTCP:3001 -iTCP:3002 -sTCP:LISTEN)",
       "Bash(awk '{print $1, $2, $9}')",
-      "Bash(python3 -u tests/e2e_smoke.py)"
+      "Bash(python3 -u tests/e2e_smoke.py)",
+      "Bash(node --check api/taskNotify.js)",
+      "Bash(node -e \"import\\('nodemailer'\\).then\\(m=>console.log\\('nodemailer ok', !!m.default.createTransport\\)\\)\")",
+      "Bash(grep -v google-app-passwords-blocked /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md)",
+      "Bash(mv /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md.tmp /Users/romario/.claude/projects/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/memory/MEMORY.md)"
     ]
   }
 }

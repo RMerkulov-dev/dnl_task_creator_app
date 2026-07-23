@@ -3,6 +3,7 @@ import dotenv  from 'dotenv';
 import crypto  from 'node:crypto';
 import fs      from 'node:fs';
 import { FOLLOWUP_SKILLS, listFollowupSkills } from './followupSkills.js';
+import { registerTaskNotifyRoutes } from './taskNotify.js';
 
 dotenv.config();
 
@@ -125,6 +126,10 @@ app.post('/api/login', express.json({ limit: '2kb' }), (req, res) => {
   loginFailures.delete(ip);
   res.json({ token: signAuthToken(email), email, expiresAt: Date.now() + AUTH_TOKEN_TTL_MS });
 });
+
+// ─── Task-created email notifications ────────────────────────────────────────
+// Registered after the auth middleware above, so the route is protected.
+registerTaskNotifyRoutes(app);
 
 // ─── Generic proxy ────────────────────────────────────────────────────────────
 // Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)

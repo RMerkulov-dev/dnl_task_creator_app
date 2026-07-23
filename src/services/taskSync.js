@@ -98,6 +98,30 @@ export function getEditStepCount(project, jiraKey) {
   return 3;                                           // Azure + Jira create + link-back
 }
 
+// ─── Email notification ───────────────────────────────────────────────────────
+// Fire-and-forget: a failed notification must never break task creation.
+// Recipients are resolved server-side per project (api/taskNotify.js).
+function notifyTaskCreated(project, title, result) {
+  fetch('/api/notify/task-created', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      projectId:   project.id,
+      projectName: project.label,
+      title,
+      epicId:  result.epicId,
+      epicUrl: result.epicUrl,
+      jiraKey: result.jiraKey,
+      jiraUrl: result.jiraUrl,
+    }),
+  }).then(async res => {
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      console.warn('[notifyTaskCreated]', body.error || `HTTP ${res.status}`);
+    }
+  }).catch(err => console.warn('[notifyTaskCreated]', err.message));
+}
+
 // ─── CREATE ───────────────────────────────────────────────────────────────────
 /**
  * @param {object} project  - from projects.js
@@ -160,7 +184,11 @@ export async function createTask(project, title, description, extras = {}, onSte
   onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
 
   // If no Jira configured for this project — we're done
-  if (!jira) return { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
+  if (!jira) {
+    const result = { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
+    notifyTaskCreated(project, title, result);
+    return result;
+  }
 
   // ── Step 1: Jira issue ───────────────────────────────────────────────────
   onStep(1, 'pending');
@@ -188,7 +216,11 @@ export async function createTask(project, title, description, extras = {}, onSte
 
   onStep(1, 'done', null, { jiraKey, jiraUrl });
 
-  if (!azure.jiraIdField) return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+  if (!azure.jiraIdField) {
+    const result = { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+    notifyTaskCreated(project, title, result);
+    return result;
+  }
 
   // ── Step 2: Link back — set Jira key on the Azure work item ─────────────
   onStep(2, 'pending');
@@ -200,7 +232,9 @@ export async function createTask(project, title, description, extras = {}, onSte
   }
   onStep(2, 'done');
 
-  return { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+  const result = { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
+  notifyTaskCreated(project, title, result);
+  return result;
 }
 
 // ─── FETCH FOR EDIT ───────────────────────────────────────────────────────────
