@@ -208,7 +208,7 @@ function buildReminderEmail(call, days, projectName) {
   const project = projectName || call.project;
   const when = formatCallDate(call);
   const inDays = days === 7 ? 'in one week' : `in ${days} day${days === 1 ? '' : 's'}`;
-  const subject = `[${project}] Call ${inDays}: ${call.title} — ${when}`;
+  const subject = `QUARTERLY CALL Reminder - [${project}] ${call.title} — ${when}`;
 
   const row = (label, value) => value ? `
     <tr>
