@@ -22,34 +22,78 @@ const AZURE_ID_RE = /^\d+$/;
 
 // ─── Searchable select (same look as the Report / Task Agent project picker) ──
 
-export function SearchSelect({ items, value, onChange, placeholder, searchPlaceholder = 'Search…', disabled = false }) {
+// `multiple: true` turns it into a Jira-style multi-select: `value` is an array
+// of values, the closed state renders removable chips, and the open list keeps
+// itself open while items are toggled (✓ marks the selected ones).
+export function SearchSelect({ items, value, onChange, placeholder, searchPlaceholder = 'Search…', disabled = false, multiple = false }) {
   const [isOpen, setIsOpen] = useState(false);
   const [query,  setQuery]  = useState('');
 
-  const selected = items.find(i => i.value === value) ?? null;
+  const values   = multiple ? (Array.isArray(value) ? value : []) : [];
+  const selected = multiple
+    ? items.filter(i => values.includes(i.value))
+    : (items.find(i => i.value === value) ?? null);
   const q = query.trim().toLowerCase();
   const filtered = q
     ? items.filter(i => `${i.label} ${i.hint ?? ''}`.toLowerCase().includes(q))
     : items;
 
-  function select(v) { onChange(v); setIsOpen(false); setQuery(''); }
+  function select(v) {
+    if (multiple) {
+      onChange(values.includes(v) ? values.filter(x => x !== v) : [...values, v]);
+      setQuery('');
+      return;                       // stay open so several can be picked in a row
+    }
+    onChange(v); setIsOpen(false); setQuery('');
+  }
   function close()    { setIsOpen(false); setQuery(''); }
 
   return (
     <div className="project-picker">
       {!isOpen ? (
-        <button
-          type="button"
-          className="project-picker-current"
-          onClick={() => setIsOpen(true)}
-          disabled={disabled}
-          style={disabled ? { opacity: .5, cursor: 'not-allowed' } : undefined}
-        >
-          {selected
-            ? <span>{selected.label}{selected.hint ? <span style={{ color: 'var(--text-3)' }}> ({selected.hint})</span> : null}</span>
-            : <span style={{ color: 'var(--text-3)' }}>{placeholder}</span>}
-          <span className="project-picker-chevron">▾</span>
-        </button>
+        multiple ? (
+          <div
+            className="project-picker-current jcomp-multi"
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            onClick={() => !disabled && setIsOpen(true)}
+            onKeyDown={e => { if (!disabled && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setIsOpen(true); } }}
+            style={disabled ? { opacity: .5, cursor: 'not-allowed' } : undefined}
+          >
+            {selected.length
+              ? (
+                <span className="jcomp-chips">
+                  {selected.map(i => (
+                    <span key={i.value} className="jcomp-chip">
+                      {i.label}
+                      <button
+                        type="button"
+                        className="jcomp-chip-x"
+                        aria-label={`Remove ${i.label}`}
+                        disabled={disabled}
+                        onClick={e => { e.stopPropagation(); onChange(values.filter(x => x !== i.value)); }}
+                      >×</button>
+                    </span>
+                  ))}
+                </span>
+              )
+              : <span style={{ color: 'var(--text-3)' }}>{placeholder}</span>}
+            <span className="project-picker-chevron">▾</span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="project-picker-current"
+            onClick={() => setIsOpen(true)}
+            disabled={disabled}
+            style={disabled ? { opacity: .5, cursor: 'not-allowed' } : undefined}
+          >
+            {selected
+              ? <span>{selected.label}{selected.hint ? <span style={{ color: 'var(--text-3)' }}> ({selected.hint})</span> : null}</span>
+              : <span style={{ color: 'var(--text-3)' }}>{placeholder}</span>}
+            <span className="project-picker-chevron">▾</span>
+          </button>
+        )
       ) : (
         <div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -65,20 +109,29 @@ export function SearchSelect({ items, value, onChange, placeholder, searchPlaceh
               }}
               style={{ flex: 1 }}
             />
-            <button type="button" className="btn btn-ghost" onClick={close} style={{ flexShrink: 0 }}>Cancel</button>
+            <button type="button" className="btn btn-ghost" onClick={close} style={{ flexShrink: 0 }}>
+              {multiple ? 'Done' : 'Cancel'}
+            </button>
           </div>
           <ul className="project-picker-results">
             {filtered.length === 0 && (
               <li style={{ padding: '9px 14px', fontSize: 13, color: 'var(--text-3)' }}>Nothing found</li>
             )}
-            {filtered.map(i => (
-              <li key={i.value}>
-                <button type="button" className="project-picker-result" onClick={() => select(i.value)}>
-                  <span>{i.label}</span>
-                  {i.hint && <span className="project-picker-key">{i.hint}</span>}
-                </button>
-              </li>
-            ))}
+            {filtered.map(i => {
+              const isSel = multiple && values.includes(i.value);
+              return (
+                <li key={i.value}>
+                  <button
+                    type="button"
+                    className={`project-picker-result${isSel ? ' jcomp-multi-sel' : ''}`}
+                    onClick={() => select(i.value)}
+                  >
+                    <span>{multiple && <span className="jcomp-multi-tick">{isSel ? '✓' : ''}</span>}{i.label}</span>
+                    {i.hint && <span className="project-picker-key">{i.hint}</span>}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -114,7 +167,7 @@ export default function JiraComponentApp() {
   const [projects, setProjects]     = useState([]);
   const [projectKey, setProjectKey] = useState('');
   const [components, setComponents] = useState([]);
-  const [componentId, setComponentId] = useState('');
+  const [componentIds, setComponentIds] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState(true);
 
@@ -139,7 +192,7 @@ export default function JiraComponentApp() {
 
   // Load components whenever the project changes.
   useEffect(() => {
-    setComponents([]); setComponentId('');
+    setComponents([]); setComponentIds([]);
     if (!projectKey) return;
     setCompLoading(true);
     getProjectComponents(CLOUD_ID, projectKey)
@@ -149,7 +202,7 @@ export default function JiraComponentApp() {
   }, [projectKey]);
 
   const tokens = useMemo(() => parseTokens(text), [text]);
-  const componentName = components.find(c => c.value === componentId)?.label ?? '';
+  const componentNames = components.filter(c => componentIds.includes(c.value)).map(c => c.label);
 
   // Overall progress across every target (request + epics) for the progress bar.
   const progress = useMemo(() => {
@@ -210,7 +263,7 @@ export default function JiraComponentApp() {
   async function run() {
     setError('');
     if (!projectKey)   { setError('Select a Jira project first.'); return; }
-    if (!componentId)  { setError('Select a component first.'); return; }
+    if (!componentIds.length) { setError('Select at least one component first.'); return; }
     if (!tokens.length){ setError('Paste some Jira keys / Azure ids, or extract them from a screenshot.'); return; }
 
     setRunning(true);
@@ -265,7 +318,7 @@ export default function JiraComponentApp() {
       let anyError = false;
       for (const t of targets) {
         patchTarget(i, t.key, { state: 'working' });
-        const r = await addIssueComponent(CLOUD_ID, t.key, componentId);
+        const r = await addIssueComponent(CLOUD_ID, t.key, componentIds);
         if (r.ok) patchTarget(i, t.key, { state: 'done' });
         else { anyError = true; patchTarget(i, t.key, { state: 'error', error: r.error || 'Failed' }); }
       }
@@ -284,7 +337,7 @@ export default function JiraComponentApp() {
       <div className="jcomp-head">
         <h2 className="jcomp-title">Component</h2>
         <p className="jcomp-sub">
-          Set a Jira component on a batch of requests and their child epics — paste Jira keys
+          Set one or more Jira components on a batch of requests and their child epics — paste Jira keys
           / Azure DevOps ids, or drop a screenshot of the cards.
         </p>
       </div>
@@ -302,12 +355,15 @@ export default function JiraComponentApp() {
             disabled={projectsLoading}
           />
 
-          <label className="jcomp-label" style={{ marginTop: 16 }}>Component</label>
+          <label className="jcomp-label" style={{ marginTop: 16 }}>
+            Components {componentIds.length > 0 && <span className="jcomp-muted">({componentIds.length} selected)</span>}
+          </label>
           <SearchSelect
+            multiple
             items={components}
-            value={componentId}
-            onChange={setComponentId}
-            placeholder={compLoading ? 'Loading…' : (projectKey ? 'Select component…' : 'Pick a project first')}
+            value={componentIds}
+            onChange={setComponentIds}
+            placeholder={compLoading ? 'Loading…' : (projectKey ? 'Select components…' : 'Pick a project first')}
             searchPlaceholder="Search components…"
             disabled={!projectKey || compLoading}
           />
@@ -364,11 +420,13 @@ export default function JiraComponentApp() {
               type="button"
               className={`btn btn-primary jcomp-run${running ? ' is-running' : ''}`}
               onClick={run}
-              disabled={running || !projectKey || !componentId || !tokens.length}
+              disabled={running || !projectKey || !componentIds.length || !tokens.length}
             >
               {running
                 ? <><span className="spinner" /> Applying…</>
-                : `Apply${componentName ? ` "${componentName}"` : ''} to ${tokens.length} item${tokens.length === 1 ? '' : 's'}`}
+                : `Apply ${componentNames.length > 1
+                    ? `${componentNames.length} components`
+                    : (componentNames[0] ? `"${componentNames[0]}"` : '')} to ${tokens.length} item${tokens.length === 1 ? '' : 's'}`.replace(/\s+/g, ' ')}
             </button>
           </div>
 

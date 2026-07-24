@@ -35,7 +35,7 @@ export default function ComponentApplyModal({ issues, onClose }) {
 
   const [projectKey,  setProjectKey]  = useState(projectKeys[0] || '');
   const [components,  setComponents]  = useState([]);
-  const [componentId, setComponentId] = useState('');
+  const [componentIds, setComponentIds] = useState([]);
   const [compLoading, setCompLoading] = useState(false);
   const [withEpics,   setWithEpics]   = useState(true);
   const [rows,        setRows]        = useState(null);   // null until Apply pressed
@@ -44,11 +44,11 @@ export default function ComponentApplyModal({ issues, onClose }) {
 
   const targetIssues  = byProject.get(projectKey) ?? [];
   const skippedCount  = issues.length - targetIssues.length;
-  const componentName = components.find(c => c.value === componentId)?.label ?? '';
+  const componentNames = components.filter(c => componentIds.includes(c.value)).map(c => c.label);
 
   // Load the component catalogue whenever the target project changes.
   useEffect(() => {
-    setComponents([]); setComponentId('');
+    setComponents([]); setComponentIds([]);
     if (!projectKey) return;
     let cancelled = false;
     setCompLoading(true);
@@ -70,7 +70,7 @@ export default function ComponentApplyModal({ issues, onClose }) {
   }
 
   async function run() {
-    if (!componentId) { setError('Select a component first.'); return; }
+    if (!componentIds.length) { setError('Select at least one component first.'); return; }
     setError('');
     setRunning(true);
 
@@ -103,7 +103,7 @@ export default function ComponentApplyModal({ issues, onClose }) {
       let anyError = false;
       for (const t of targets) {
         patchTarget(idx, t.key, { state: 'working' });
-        const r = await addIssueComponent(CLOUD_ID, t.key, componentId);
+        const r = await addIssueComponent(CLOUD_ID, t.key, componentIds);
         if (r.ok) patchTarget(idx, t.key, { state: 'done' });
         else { anyError = true; patchTarget(idx, t.key, { state: 'error', error: r.error || 'Failed' }); }
       }
@@ -134,7 +134,7 @@ export default function ComponentApplyModal({ issues, onClose }) {
           <button className="tcm-close" onClick={() => !running && onClose?.()} title="Close" aria-label="Close">✕</button>
         </div>
         <p className="ba-comp-sub">
-          Applies a Jira component to {targetIssues.length} issue{targetIssues.length === 1 ? '' : 's'} from the
+          Applies one or more Jira components to {targetIssues.length} issue{targetIssues.length === 1 ? '' : 's'} from the
           search result{withEpics ? ' and their child Epics' : ''}. Existing components are kept (append, never overwrite).
         </p>
 
@@ -165,12 +165,16 @@ export default function ComponentApplyModal({ issues, onClose }) {
         )}
 
         <div className="ba-comp-field">
-          <label className="ba-comp-label">Component in {projectKey || '—'}</label>
+          <label className="ba-comp-label">
+            Components in {projectKey || '—'}
+            {componentIds.length > 0 && <span style={{ color: 'var(--text-3)' }}> ({componentIds.length} selected)</span>}
+          </label>
           <SearchSelect
+            multiple
             items={components}
-            value={componentId}
-            onChange={setComponentId}
-            placeholder={compLoading ? 'Loading components…' : 'Select component…'}
+            value={componentIds}
+            onChange={setComponentIds}
+            placeholder={compLoading ? 'Loading components…' : 'Select components…'}
             searchPlaceholder="Search components…"
             disabled={compLoading || running || !!rows}
           />
@@ -225,8 +229,10 @@ export default function ComponentApplyModal({ issues, onClose }) {
             {progress?.finished ? 'Close' : 'Cancel'}
           </button>
           {!rows && (
-            <button className="btn btn-primary" onClick={run} disabled={running || !componentId || !targetIssues.length}>
-              {`Apply${componentName ? ` "${componentName}"` : ''} to ${targetIssues.length} issue${targetIssues.length === 1 ? '' : 's'}`}
+            <button className="btn btn-primary" onClick={run} disabled={running || !componentIds.length || !targetIssues.length}>
+              {`Apply ${componentNames.length > 1
+                ? `${componentNames.length} components`
+                : (componentNames[0] ? `"${componentNames[0]}"` : '')} to ${targetIssues.length} issue${targetIssues.length === 1 ? '' : 's'}`.replace(/\s+/g, ' ')}
             </button>
           )}
         </div>

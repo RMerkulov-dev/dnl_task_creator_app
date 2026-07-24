@@ -613,14 +613,16 @@ export async function getProjectComponents(cloudId, projectKey) {
 // on it. Uses the ADF `update` verb (`add`) instead of overwriting the whole
 // `components` field, so a request that already has other components keeps them.
 // Never throws — returns { ok } or { ok:false, error } so a batch keeps going.
-export async function addIssueComponent(cloudId, issueKey, componentId) {
+export async function addIssueComponent(cloudId, issueKey, componentIds) {
+  const ids = (Array.isArray(componentIds) ? componentIds : [componentIds]).filter(Boolean);
+  if (!ids.length) return { ok: false, error: 'No component selected' };
   const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}`;
   let res;
   try {
     res = await fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ update: { components: [{ add: { id: String(componentId) } }] } }),
+      body: JSON.stringify({ update: { components: ids.map(id => ({ add: { id: String(id) } })) } }),
     });
   } catch (err) {
     return { ok: false, error: err.message };
