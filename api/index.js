@@ -5,6 +5,7 @@ import fs      from 'node:fs';
 import { FOLLOWUP_SKILLS, listFollowupSkills, DEEP_DIVE_INSTRUCTIONS } from './followupSkills.js';
 import { registerTaskNotifyRoutes } from './taskNotify.js';
 import { registerQuarterlyCallsRoutes, checkQuarterlyCallReminders } from './quarterlyCalls.js';
+import { registerChecklistRoutes, checkChecklistReminders } from './checklist.js';
 
 dotenv.config();
 
@@ -72,9 +73,9 @@ function verifyAuthToken(token) {
   } catch { return null; }
 }
 
-// quarterly-calls/cron is called by Vercel Cron with its own
-// `Authorization: Bearer $CRON_SECRET` header — the route verifies that itself.
-const AUTH_EXEMPT = [/^\/api\/login$/, /^\/api\/fathom\/oauth\//, /^\/api\/quarterly-calls\/cron$/];
+// quarterly-calls/cron and checklist/cron are called by Vercel Cron with its
+// own `Authorization: Bearer $CRON_SECRET` header — the routes verify that themselves.
+const AUTH_EXEMPT = [/^\/api\/login$/, /^\/api\/fathom\/oauth\//, /^\/api\/quarterly-calls\/cron$/, /^\/api\/checklist\/cron$/];
 
 app.use('/api', (req, res, next) => {
   const path = (req.originalUrl || '').split('?')[0];
@@ -136,6 +137,9 @@ registerTaskNotifyRoutes(app);
 
 // ─── Quarterly Calls (private calendar + reminders) ──────────────────────────
 registerQuarterlyCallsRoutes(app);
+
+// ─── Checklist (per-user weekly TODO plan + daily digest emails) ─────────────
+registerChecklistRoutes(app);
 
 // ─── Generic proxy ────────────────────────────────────────────────────────────
 // Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)
@@ -2294,6 +2298,14 @@ if (process.env.NODE_ENV !== 'production') {
     .catch(err => console.warn('[Quarterly calls] reminder sweep failed:', err.message));
   setTimeout(sweep, 15_000);
   setInterval(sweep, 30 * 60_000);
+
+  // Checklist digest sweep: every 15 minutes, but emails only go out in the
+  // 11:00 Kyiv hour (sentLog.lastDate dedupes the ticks inside it).
+  // On Vercel this block never runs — Vercel Cron hits /api/checklist/cron.
+  const checklistSweep = () => checkChecklistReminders({ atHour: 11 })
+    .catch(err => console.warn('[Checklist] digest sweep failed:', err.message));
+  setTimeout(checklistSweep, 20_000);
+  setInterval(checklistSweep, 15 * 60_000);
 }
 
 // Обязательно экспортируем app для бессерверной среды Vercel

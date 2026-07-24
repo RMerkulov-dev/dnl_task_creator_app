@@ -170,7 +170,8 @@
       "Bash(node --check api/quarterlyCalls.js)",
       "Bash(vercel ls *)",
       "Bash(NODE_PATH=__TRACKED_VAR__/node_modules node -e ' *)",
-      "Bash(PORT=3199 timeout 8 node -e ' *)"
+      "Bash(PORT=3199 timeout 8 node -e ' *)",
+      "Bash(node --check api/checklist.js)"
     ]
   }
 }

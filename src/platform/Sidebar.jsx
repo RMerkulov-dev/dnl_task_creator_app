@@ -149,6 +149,21 @@ function QuarterlyCallsIcon() {
   );
 }
 
+function ChecklistIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Clipboard frame */}
+      <rect x="4" y="4" width="16" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
+      <rect x="8.5" y="2" width="7" height="4" rx="1.3" stroke="currentColor" strokeWidth="1.4"/>
+      {/* Check + line rows */}
+      <path d="M7.3 10.4l1.3 1.3 2.2-2.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M13.2 10.6h3.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+      <path d="M7.3 15.4l1.3 1.3 2.2-2.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M13.2 15.6h3.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   'pm':            PmIcon,
   'task-creator':  TaskCreatorIcon,
@@ -161,6 +176,7 @@ const ICON_MAP = {
   'report':        ReportIcon,
   'gantt':         GanttIcon,
   'quarterly-calls': QuarterlyCallsIcon,
+  'checklist':     ChecklistIcon,
 };
 
 function PlatformLogo() {

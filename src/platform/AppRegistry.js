@@ -45,6 +45,13 @@ export const APP_REGISTRY = [
     beta: true,
   },
   {
+    id: 'checklist',
+    name: 'Checklist',
+    shortName: 'Checklist',
+    gradient: 'linear-gradient(135deg, #22c55e 0%, #14b8a6 100%)',
+    glow: 'rgba(34, 197, 94, 0.5)',
+  },
+  {
     id: 'quarterly-calls',
     name: 'Quarterly Calls',
     shortName: 'Calls',
@@ -94,4 +101,5 @@ export const APP_COMPONENTS = {
   'report':        lazy(() => import('../apps/report/ReportApp.jsx')),
   'gantt':         lazy(() => import('../apps/gantt/GanttApp.jsx')),
   'quarterly-calls': lazy(() => import('../apps/quarterly_calls/QuarterlyCallsApp.jsx')),
+  'checklist':     lazy(() => import('../apps/checklist/ChecklistApp.jsx')),
 };
