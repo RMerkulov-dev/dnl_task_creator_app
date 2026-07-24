@@ -2167,10 +2167,10 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 56px);
-  max-width: 800px;
+  max-width: 1280px;
   margin: 0 auto;
   width: 100%;
-  padding: 0 16px;
+  padding: 0 24px;
   box-sizing: border-box;
 }
 
@@ -2247,6 +2247,13 @@ html, body, #root {
 /* Plan-card bubbles need more breathing room than a regular chat reply. */
 .ba-msg-with-plan {
   max-width: min(720px, 100%);
+  width: 100%;
+}
+
+/* Bubbles that carry an issues table stretch to the full chat width so every
+   column stays visible without horizontal clipping. */
+.ba-msg-wide {
+  max-width: 100%;
   width: 100%;
 }
 
@@ -6000,6 +6007,147 @@ button.su-status {
   margin-top: 24px;
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* ─── BA agent: suggestions, table selection, component modal ───────────── */
+
+.ba-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 20px;
+  max-width: 560px;
+}
+
+.ba-suggest-chip {
+  padding: 7px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, transform 0.15s;
+}
+
+.ba-suggest-chip:hover {
+  border-color: var(--accent-1);
+  color: var(--text-1);
+  transform: translateY(-1px);
+}
+
+.ba-issues-selcount { color: var(--accent-1); text-transform: none; }
+
+.ba-issues-check {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-1);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.ba-issues-table th.ba-check-cell,
+.ba-issues-table td.ba-check-cell {
+  width: 28px;
+  padding-right: 0;
+}
+
+.ba-chip-todo     { background: rgba(148, 163, 184, 0.14); color: var(--text-2); }
+.ba-chip-progress { background: rgba(59, 130, 246, 0.16);  color: #60a5fa; }
+.ba-chip-done     { background: rgba(34, 197, 94, 0.16);   color: var(--green); }
+
+.ba-issues-comps { max-width: 220px; }
+
+.ba-issues-comps .ba-chip-comp {
+  background: rgba(168, 85, 247, 0.14);
+  color: #c084fc;
+  margin: 0 4px 4px 0;
+  white-space: normal;
+}
+
+.ba-pri-high { color: var(--red); font-weight: 600; }
+.ba-pri-med  { color: var(--yellow); }
+.ba-pri-low  { color: var(--text-3); }
+
+.ba-comp-btn {
+  border-color: color-mix(in srgb, var(--accent-1) 55%, var(--border));
+  color: var(--accent-1);
+}
+
+.ba-comp-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-1) 14%, transparent);
+}
+
+.ba-comp-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ba-comp-modal {
+  width: min(600px, 94vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 22px;
+}
+
+.ba-comp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ba-comp-title { margin: 0; font-size: 16px; font-weight: 700; }
+
+.ba-comp-sub {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+
+.ba-comp-field { margin-bottom: 12px; }
+
+.ba-comp-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.ba-comp-projects { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.ba-comp-skip { margin: 8px 0; font-size: 12px; color: var(--yellow); }
+
+.ba-comp-epics {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-1);
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.ba-comp-rows { margin-top: 14px; }
+
+.ba-comp-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.ba-comp-progress {
+  margin-right: auto;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── PDF export (print) ── */

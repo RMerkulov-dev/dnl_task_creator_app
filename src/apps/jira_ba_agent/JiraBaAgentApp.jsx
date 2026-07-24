@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
 import AgentClarification from '../../components/AgentClarification.jsx';
 import AgentPlan from '../../components/AgentPlan.jsx';
+import ComponentApplyModal from './ComponentApplyModal.jsx';
 
 const LOGO     = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 const CLOUD_ID = PROJECT_LIST.find(p => p.jira)?.jira.cloudId ?? '';
@@ -148,25 +149,67 @@ function CheckIcon() {
   );
 }
 
+function componentsLabel(i) {
+  return Array.isArray(i.components) && i.components.length ? i.components.join(', ') : '';
+}
+
 function issuesToMarkdown(issues) {
-  const header = '| Key | Summary | Status | Assignee | Priority | Type |\n|---|---|---|---|---|---|';
+  const header = '| Key | Summary | Status | Assignee | Priority | Type | Component |\n|---|---|---|---|---|---|---|';
   const rows = issues.map(i =>
-    `| [${i.key}](${JIRA_BASE}${i.key}) | ${(i.summary ?? '').replace(/\|/g, '\\|')} | ${i.status ?? ''} | ${i.assignee ?? ''} | ${i.priority ?? ''} | ${i.type ?? ''} |`
+    `| [${i.key}](${JIRA_BASE}${i.key}) | ${(i.summary ?? '').replace(/\|/g, '\\|')} | ${i.status ?? ''} | ${i.assignee ?? ''} | ${i.priority ?? ''} | ${i.type ?? ''} | ${componentsLabel(i).replace(/\|/g, '\\|')} |`
   );
   return [header, ...rows].join('\n');
 }
 
 function issuesToTSV(issues) {
-  const header = ['Key', 'Summary', 'Status', 'Assignee', 'Priority', 'Type'].join('\t');
+  const header = ['Key', 'Summary', 'Status', 'Assignee', 'Priority', 'Type', 'Component'].join('\t');
   const rows = issues.map(i => [
-    i.key, i.summary ?? '', i.status ?? '', i.assignee ?? '', i.priority ?? '', i.type ?? ''
+    i.key, i.summary ?? '', i.status ?? '', i.assignee ?? '', i.priority ?? '', i.type ?? '', componentsLabel(i)
   ].map(c => String(c).replace(/\t/g, ' ').replace(/\n/g, ' ')).join('\t'));
   return [header, ...rows].join('\n');
+}
+
+// Status → colour tone. Prefers Jira's statusCategory (returned by the
+// backend); falls back to a name heuristic for older messages without it.
+function statusTone(i) {
+  const cat = (i.statusCategory || '').toLowerCase();
+  if (cat === 'done') return 'done';
+  if (cat === 'indeterminate') return 'progress';
+  if (cat === 'new') return 'todo';
+  const s = (i.status || '').toLowerCase();
+  if (/done|closed|resolved|cancel|complete/.test(s)) return 'done';
+  if (/progress|review|test|develop|uat/.test(s))     return 'progress';
+  return 'todo';
+}
+
+function priorityClass(p) {
+  const s = (p || '').toLowerCase();
+  if (s === 'highest' || s === 'high') return 'ba-pri-high';
+  if (s === 'medium')                  return 'ba-pri-med';
+  if (s === 'low' || s === 'lowest')   return 'ba-pri-low';
+  return '';
 }
 
 function IssuesTable({ issues }) {
   const [copiedAll,  setCopiedAll]  = useState(false);
   const [copiedKey,  setCopiedKey]  = useState(null);
+  // Selection feeds the "Set component" bulk action; everything starts checked.
+  const [deselected, setDeselected] = useState(() => new Set());
+  const [compModal,  setCompModal]  = useState(false);
+
+  const selected = useMemo(() => issues.filter(i => !deselected.has(i.key)), [issues, deselected]);
+  const allChecked = deselected.size === 0;
+
+  function toggleKey(key) {
+    setDeselected(prev => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key); else n.add(key);
+      return n;
+    });
+  }
+  function toggleAll() {
+    setDeselected(allChecked ? new Set(issues.map(i => i.key)) : new Set());
+  }
 
   async function copyAll(format) {
     const text = format === 'tsv' ? issuesToTSV(issues) : issuesToMarkdown(issues);
@@ -188,7 +231,10 @@ function IssuesTable({ issues }) {
   return (
     <div className="ba-issues-card">
       <div className="ba-issues-header">
-        <span className="ba-issues-count">{issues.length} issue{issues.length !== 1 ? 's' : ''}</span>
+        <span className="ba-issues-count">
+          {issues.length} issue{issues.length !== 1 ? 's' : ''}
+          {selected.length !== issues.length && <span className="ba-issues-selcount"> · {selected.length} selected</span>}
+        </span>
         <div className="ba-issues-actions">
           <button className="ba-issues-copy-btn" onClick={() => copyAll('md')} title="Copy as Markdown table">
             {copiedAll === 'md' ? <CheckIcon /> : <CopyIcon />}
@@ -198,23 +244,49 @@ function IssuesTable({ issues }) {
             {copiedAll === 'tsv' ? <CheckIcon /> : <CopyIcon />}
             <span>{copiedAll === 'tsv' ? 'Copied' : 'TSV'}</span>
           </button>
+          <button
+            className="ba-issues-copy-btn ba-comp-btn"
+            onClick={() => setCompModal(true)}
+            disabled={!selected.length}
+            title="Set a Jira component on the selected issues (and their child Epics)"
+          >
+            <span>Set component{selected.length ? ` (${selected.length})` : ''}</span>
+          </button>
         </div>
       </div>
       <div className="ba-issues-scroll">
         <table className="ba-issues-table">
           <thead>
             <tr>
+              <th className="ba-check-cell">
+                <input
+                  type="checkbox"
+                  className="ba-issues-check"
+                  checked={allChecked}
+                  onChange={toggleAll}
+                  title={allChecked ? 'Deselect all' : 'Select all'}
+                />
+              </th>
               <th>Key</th>
               <th>Summary</th>
               <th>Status</th>
               <th>Assignee</th>
               <th>Priority</th>
               <th>Type</th>
+              <th>Component</th>
             </tr>
           </thead>
           <tbody>
             {issues.map(i => (
               <tr key={i.key}>
+                <td className="ba-check-cell">
+                  <input
+                    type="checkbox"
+                    className="ba-issues-check"
+                    checked={!deselected.has(i.key)}
+                    onChange={() => toggleKey(i.key)}
+                  />
+                </td>
                 <td>
                   <button
                     className="ba-issues-key"
@@ -227,15 +299,24 @@ function IssuesTable({ issues }) {
                   <a className="ba-issues-key-link" href={`${JIRA_BASE}${i.key}`} target="_blank" rel="noreferrer" title="Open in Jira">↗</a>
                 </td>
                 <td className="ba-issues-summary">{i.summary}</td>
-                <td><span className="ba-issues-chip">{i.status || '—'}</span></td>
+                <td><span className={`ba-issues-chip ba-chip-${statusTone(i)}`}>{i.status || '—'}</span></td>
                 <td>{i.assignee || '—'}</td>
-                <td>{i.priority || '—'}</td>
+                <td className={priorityClass(i.priority)}>{i.priority || '—'}</td>
                 <td>{i.type || '—'}</td>
+                <td className="ba-issues-comps">
+                  {Array.isArray(i.components) && i.components.length
+                    ? i.components.map(c => <span key={c} className="ba-issues-chip ba-chip-comp">{c}</span>)
+                    : '—'}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {compModal && (
+        <ComponentApplyModal issues={selected} onClose={() => setCompModal(false)} />
+      )}
     </div>
   );
 }
@@ -253,7 +334,7 @@ function ChatMessage({ msg, isLast, onClarificationAnswer, onApprovePlan, onCanc
     // so the user can still see what was done before the error.
     const issues = collectIssues(msg.toolResults);
     return (
-      <div className="ba-msg ba-msg-error">
+      <div className={`ba-msg ba-msg-error${issues.length >= 2 ? ' ba-msg-wide' : ''}`}>
         <ToolPills toolResults={msg.toolResults} />
         {issues.length >= 2 && <IssuesTable issues={issues} />}
         <p className="ba-msg-text">⚠ {msg.content || 'Unknown error'}</p>
@@ -277,7 +358,7 @@ function ChatMessage({ msg, isLast, onClarificationAnswer, onApprovePlan, onCanc
   const issues = collectIssues(msg.toolResults);
   const showTable = issues.length >= 2;
   return (
-    <div className="ba-msg ba-msg-assistant">
+    <div className={`ba-msg ba-msg-assistant${showTable ? ' ba-msg-wide' : ''}`}>
       <ToolPills toolResults={msg.toolResults} />
       {showTable && <IssuesTable issues={issues} />}
       <AssistantText text={msg.content} />
@@ -292,13 +373,40 @@ function ChatMessage({ msg, isLast, onClarificationAnswer, onApprovePlan, onCanc
   );
 }
 
-function ThinkingBubble() {
+// Elapsed-time thinking bubble (same pattern as the Fathom agent) so long
+// planner/executor runs don't look frozen.
+function ThinkingBubble({ startedAt }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    if (!startedAt) return;
+    const id = setInterval(() => setSecs(Math.floor((Date.now() - startedAt) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [startedAt]);
+
+  const hint =
+    secs < 3  ? 'Thinking…' :
+    secs < 8  ? 'Querying Jira…' :
+    secs < 20 ? 'Running JQL searches…' :
+                'Still working — broad search, hang tight…';
+
   return (
-    <div className="ba-msg ba-msg-assistant ba-thinking">
-      <span className="ba-dot" /><span className="ba-dot" /><span className="ba-dot" />
+    <div className="ba-msg ba-msg-assistant ba-thinking-rich">
+      <div className="ba-thinking-row">
+        <span className="ba-dot" /><span className="ba-dot" /><span className="ba-dot" />
+        <span className="ba-thinking-hint">{hint}</span>
+        <span className="ba-thinking-timer">{secs}s</span>
+      </div>
     </div>
   );
 }
+
+// Clickable examples for the empty state — each sends itself as a message.
+const SUGGESTIONS = [
+  'My tasks in the current NSMG sprint',
+  'Open ABS bugs created in the last 14 days',
+  'Find requests about the commission module',
+  'Status of the Seminar Registration feature',
+];
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
@@ -310,11 +418,12 @@ export default function JiraBaAgentApp({ user, onLogout }) {
   const [transcribing, setTranscribing] = useState(false);
   const [error,        setError]        = useState('');
 
-  const bottomRef   = useRef(null);
-  const textareaRef = useRef(null);
-  const mrRef       = useRef(null);
-  const chunksRef   = useRef([]);
-  const audioCtxRef = useRef(null);
+  const bottomRef    = useRef(null);
+  const textareaRef  = useRef(null);
+  const mrRef        = useRef(null);
+  const chunksRef    = useRef([]);
+  const audioCtxRef  = useRef(null);
+  const loadStartRef = useRef(null);
 
   // Auto-scroll. Scroll the message list itself rather than scrollIntoView —
   // that walks every scrollable ancestor and drags the whole shell up with it.
@@ -355,6 +464,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
   }
 
   async function sendToBackend(message, prevMessages, opts = {}) {
+    loadStartRef.current = Date.now();
     setLoading(true);
     try {
       const history = toHistoryPayload(prevMessages);
@@ -507,9 +617,16 @@ export default function JiraBaAgentApp({ user, onLogout }) {
             <div className="ba-empty">
               <p className="ba-empty-title">Hi! I'm Jira BA Agent.</p>
               <p className="ba-empty-sub">
-                Ask about issues, sprints, epics — by text or voice.<br/>
-                For example: <em>"Which issues are assigned to Dima in the current NSMG sprint?"</em>
+                Ask about issues, sprints, epics — by text or voice. Found issues can be
+                bulk-assigned a component right from the results table.
               </p>
+              <div className="ba-suggest">
+                {SUGGESTIONS.map(s => (
+                  <button key={s} type="button" className="ba-suggest-chip" onClick={() => send(s)}>
+                    {s}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {messages.map((msg, i) => (
@@ -522,7 +639,7 @@ export default function JiraBaAgentApp({ user, onLogout }) {
               onCancelPlan={cancelPlan}
             />
           ))}
-          {loading && <ThinkingBubble />}
+          {loading && <ThinkingBubble startedAt={loadStartRef.current} />}
           <div ref={bottomRef} />
         </div>
 

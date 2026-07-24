@@ -235,11 +235,12 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
     return () => { cancelled = true; setLoadingComponents(false); };
   }, [proj.id, effectiveJiraKey]);
 
-  // ── Notify parent + close on success ─────────────────────────────────────
+  // ── Notify parent on success. The modal is NOT auto-closed: SyncModal stays
+  // open showing the success panel (links + Azure/Jira status chips, same as
+  // the Task Creator dashboard); closing it closes the create form too.
   useEffect(() => {
     if (!result) return;
     onCreated?.(result);
-    onClose?.();
   }, [result]); // eslint-disable-line
 
   const updateStep = useCallback((i, status, error = null, data = null) => {
@@ -406,7 +407,12 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
           mode="create"
           project={proj}
           steps={steps}
-          onClose={() => { setShowSync(false); setSteps([]); }}
+          result={result}
+          onClose={() => {
+            setShowSync(false);
+            setSteps([]);
+            if (result) onClose?.();   // success acknowledged — close the form too
+          }}
         />
       )}
     </div>

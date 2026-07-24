@@ -22,7 +22,7 @@ const AZURE_ID_RE = /^\d+$/;
 
 // ─── Searchable select (same look as the Report / Task Agent project picker) ──
 
-function SearchSelect({ items, value, onChange, placeholder, searchPlaceholder = 'Search…', disabled = false }) {
+export function SearchSelect({ items, value, onChange, placeholder, searchPlaceholder = 'Search…', disabled = false }) {
   const [isOpen, setIsOpen] = useState(false);
   const [query,  setQuery]  = useState('');
 

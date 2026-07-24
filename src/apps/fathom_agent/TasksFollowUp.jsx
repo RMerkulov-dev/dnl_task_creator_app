@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
-import ToastContainer from '../../components/Toast.jsx';
 
 // ─── Skill output parser ──────────────────────────────────────────────────────
 // Turns the strict "Tasks Follow-Up" markdown into structured task objects so we
@@ -132,10 +131,10 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
   const [result,   setResult]   = useState('');
   const [runError, setRunError] = useState('');
   const [copied,   setCopied]   = useState(false);
+  const [exported, setExported] = useState(false);
 
   const [taskModal, setTaskModal] = useState(null);  // { task } being created
   const [created,   setCreated]   = useState({});    // { [taskKey]: { jiraKey, jiraUrl, epicUrl } }
-  const [toasts,    setToasts]    = useState([]);    // created-item link toasts
 
   // Load the skill catalogue once.
   useEffect(() => {
@@ -279,6 +278,34 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch { /* clipboard blocked */ }
+  }
+
+  const parsedResult = useMemo(() => parseSkillOutput(result), [result]);
+
+  // Copy the parsed task list in an approval-friendly format: rich HTML table
+  // (keeps formatting + clickable Fathom links when pasted into email/Slack)
+  // with a plain-text fallback. The BA replies with the task numbers to create.
+  async function exportTasks() {
+    const { text, html } = buildApprovalExport(parsedResult, selectedCall);
+    try {
+      if (navigator.clipboard?.write && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html':  new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+        })]);
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
+      setExported(true);
+      setTimeout(() => setExported(false), 1500);
+    } catch {
+      // A failed rich write must not leave stale clipboard content behind.
+      try {
+        await navigator.clipboard.writeText(text);
+        setExported(true);
+        setTimeout(() => setExported(false), 1500);
+      } catch { /* clipboard blocked */ }
+    }
   }
 
   return (
@@ -466,6 +493,11 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
             {result && (
               <button className="btn btn-ghost" onClick={copyResult}>{copied ? 'Copied ✓' : 'Copy'}</button>
             )}
+            {parsedResult.hasStructure && (
+              <button className="btn btn-ghost" onClick={exportTasks} title="Copy the task list for approval — the reply tells you which task numbers to create">
+                {exported ? 'Copied ✓' : 'Export tasks'}
+              </button>
+            )}
           </div>
           <div className="tf-col-body">
             {runError && <p className="ba-input-error">⚠ {runError}</p>}
@@ -475,7 +507,7 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
               <RunningHint />
             ) : result ? (
               <ResultView
-                parsed={parseSkillOutput(result)}
+                parsed={parsedResult}
                 rawResult={result}
                 created={created}
                 onCreate={task => setTaskModal({ task })}
@@ -497,14 +529,9 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
           initialTitle={taskModal.task.title}
           initialDescription={buildTaskDescription(taskModal.task, selectedCall)}
           onClose={() => setTaskModal(null)}
-          onCreated={res => {
-            setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }));
-            setToasts(prev => [...prev, { id: Date.now(), ...res }]);
-          }}
+          onCreated={res => setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }))}
         />
       )}
-
-      <ToastContainer toasts={toasts} onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))} />
     </div>
   );
 }
@@ -550,6 +577,62 @@ export function buildTaskDescription(task, call) {
   if (link)          meta.push(`Fathom: ${link}`);
   if (meta.length) parts.push(meta.join('\n'));
   return parts.join('\n\n');
+}
+
+// ─── Approval export ──────────────────────────────────────────────────────────
+// Renders the parsed tasks as a numbered list the user can paste into
+// email/Slack for sign-off; the reviewer (BA) replies with the numbers of the
+// tasks to create. Returns { text, html }: html is a table so hyperlinks and
+// structure survive pasting into rich editors; text is the fallback.
+export function buildApprovalExport(parsed, call) {
+  const when  = call?.date ? prettyDate(call.date) : '';
+  const title = `${call?.title || 'Untitled meeting'}${when ? ` — ${when}` : ''}`;
+  const ask   = 'Please reply with the numbers of the tasks to create (e.g. "1, 3").';
+
+  const lines = ['TASKS FOR APPROVAL', `Call: ${title}`];
+  if (call?.url) lines.push(call.url);
+  lines.push('');
+  for (const t of parsed.tasks) {
+    lines.push(`#${t.n}. ${t.title || '(no title)'}${t.priority ? ` [${t.priority}]` : ''}`);
+    if (t.who) lines.push(`Who: ${t.who}`);
+    if (t.description) lines.push(t.description);
+    const link = resolveFathomLink(t, call);
+    if (link) lines.push(`Fathom: ${link}`);
+    lines.push('');
+  }
+  lines.push(ask);
+  const text = lines.join('\n');
+
+  const esc = s => String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const br  = s => esc(s).replace(/\n/g, '<br>');
+  const rows = parsed.tasks.map(t => {
+    const link = resolveFathomLink(t, call);
+    return `<tr>
+<td style="padding:6px 10px;border:1px solid #ccc;text-align:center;white-space:nowrap"><b>#${esc(t.n)}</b></td>
+<td style="padding:6px 10px;border:1px solid #ccc"><b>${esc(t.title || '(no title)')}</b></td>
+<td style="padding:6px 10px;border:1px solid #ccc;white-space:nowrap">${esc(t.priority || '')}</td>
+<td style="padding:6px 10px;border:1px solid #ccc;white-space:nowrap">${esc(t.who || '')}</td>
+<td style="padding:6px 10px;border:1px solid #ccc">${br(t.description || '')}</td>
+<td style="padding:6px 10px;border:1px solid #ccc">${link ? `<a href="${esc(link)}">Fathom ↗</a>` : ''}</td>
+</tr>`;
+  }).join('\n');
+  const html =
+    `<p><b>Tasks for approval</b><br>Call: ${call?.url ? `<a href="${esc(call.url)}">${esc(title)}</a>` : esc(title)}</p>
+<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px">
+<thead><tr>
+<th style="padding:6px 10px;border:1px solid #ccc">#</th>
+<th style="padding:6px 10px;border:1px solid #ccc;text-align:left">Task</th>
+<th style="padding:6px 10px;border:1px solid #ccc">Priority</th>
+<th style="padding:6px 10px;border:1px solid #ccc">Who</th>
+<th style="padding:6px 10px;border:1px solid #ccc;text-align:left">Description</th>
+<th style="padding:6px 10px;border:1px solid #ccc">Link</th>
+</tr></thead>
+<tbody>${rows}</tbody>
+</table>
+<p>${esc(ask)}</p>`;
+
+  return { text, html };
 }
 
 // ─── Result view: one block per task + Create Task ────────────────────────────

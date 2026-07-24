@@ -200,6 +200,11 @@ function humaniseFetchError(err) {
 const OPENROUTER_URL      = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_PLANNER  = process.env.OPENROUTER_PLANNER_MODEL  || 'deepseek/deepseek-v4-pro';
 const OPENROUTER_EXECUTOR = process.env.OPENROUTER_EXECUTOR_MODEL || 'deepseek/deepseek-v4-flash';
+// BA-agent-specific overrides: the BA loop leans hardest on precise tool
+// calling (JQL) and instruction following, so its models can be swapped
+// independently of every other executor-powered feature.
+const OPENROUTER_BA_MODEL         = process.env.OPENROUTER_BA_MODEL         || OPENROUTER_EXECUTOR;
+const OPENROUTER_BA_PLANNER_MODEL = process.env.OPENROUTER_BA_PLANNER_MODEL || OPENROUTER_PLANNER;
 const OPENROUTER_REFERER  = process.env.OPENROUTER_REFERER        || 'https://task-creator.dynamicalabs.com';
 const OPENROUTER_TITLE    = 'Dynamica Task Creator';
 
@@ -213,6 +218,11 @@ function openRouterHeaders(apiKey) {
 }
 
 async function callOpenRouter(apiKey, body) {
+  // Route to the fastest provider for the model — OpenRouter's default routing
+  // is price-sorted, which regularly lands on providers 1.5–2× slower. Every
+  // call here sits in an interactive UI flow, so latency wins over price; a
+  // caller can still pass its own `provider` to override.
+  if (!body.provider) body = { ...body, provider: { sort: 'throughput' } };
   // Chat completions have no server-side side effects, so retrying a failed
   // POST is safe; reasoning models can take a while, hence the long timeout.
   const upstream = await fetchWithRetry(OPENROUTER_URL, {
@@ -248,7 +258,7 @@ function summariseTools(tools) {
 //   - "plan":    a numbered execution plan the user can approve or revise
 //   - "clarify": the planner needs the user to choose between options first
 //   - "direct":  trivial request, no confirmation needed; executor runs immediately
-async function buildPlan(apiKey, { domain, systemPrompt, tools, history, message }) {
+async function buildPlan(apiKey, { domain, systemPrompt, tools, history, message, model }) {
   const plannerSystem =
     `You are a planning model for a ${domain} agent. The plan you produce is SHOWN TO THE USER for approval before any work runs. ` +
     'It must read like a clear, friendly summary of what you intend to do — not like a technical script.\n\n' +
@@ -276,7 +286,7 @@ async function buildPlan(apiKey, { domain, systemPrompt, tools, history, message
     `=== CAPABILITIES YOU HAVE (for your reference; describe them in plain English in the plan, never by name) ===\n${tools && tools.length ? summariseTools(tools) : '(no tools — produce a writing plan: outline format, tone, structure)'}`;
 
   const data = await callOpenRouter(apiKey, {
-    model:           OPENROUTER_PLANNER,
+    model:           model || OPENROUTER_PLANNER,
     messages: [
       { role: 'system', content: plannerSystem },
       ...history.slice(-10),
@@ -551,7 +561,7 @@ const JIRA_TOOLS = [
         type: 'object',
         properties: {
           jql:        { type: 'string',  description: 'JQL query, e.g. "project = NSMG AND sprint in openSprints()"' },
-          maxResults: { type: 'integer', description: 'Max results to return (default 20, max 50)' },
+          maxResults: { type: 'integer', description: 'Max results to return (default 25, max 100). Use a high value when the user wants a full list for bulk actions.' },
         },
         required: ['jql'],
       },
@@ -615,6 +625,31 @@ const JIRA_TOOLS = [
   },
 ];
 
+// ── Deterministic issuetype guard ────────────────────────────────────────────
+// Prompt rule (I) tells the model to map type words ("реквесты" → Request) to
+// an issuetype filter, but weaker executor models regularly forget it. When the
+// user's message names exactly ONE issue type, every search_jira JQL that
+// lacks an issuetype clause gets the filter injected server-side.
+function detectRequestedIssueType(text) {
+  const t = String(text || '').toLowerCase();
+  const hits = [];
+  // NB: \b is ASCII-only in JS regexes — Cyrillic words need explicit
+  // "not preceded by a letter" lookbehinds instead.
+  if (/(?<![а-яё])реквест|request/i.test(t))          hits.push('Request');
+  if (/(?<![а-яё])эпик|\bepics?\b/i.test(t))          hits.push('Epic');
+  if (/(?<![а-яё])баг|\bbugs?\b/i.test(t))            hits.push('Bug');
+  if (/(?<![а-яё])стори|\bstor(y|ies)\b/i.test(t))    hits.push('Story');
+  return hits.length === 1 ? hits[0] : null;   // ambiguous / none → leave JQL alone
+}
+
+function enforceIssueType(jql, type) {
+  const q = String(jql || '').trim();
+  if (!type || !q || /issuetype\s*(=|!=|\bin\b|\bnot\s+in\b)/i.test(q)) return jql;
+  const m = q.match(/\border\s+by\b/i);
+  if (m) return `(${q.slice(0, m.index).trim()}) AND issuetype = "${type}" ${q.slice(m.index)}`;
+  return `(${q}) AND issuetype = "${type}"`;
+}
+
 async function executeJiraTool(name, args, cloudId) {
   const base      = `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3`;
   const agileBase = `https://api.atlassian.com/ex/jira/${cloudId}/rest/agile/1.0`;
@@ -622,7 +657,7 @@ async function executeJiraTool(name, args, cloudId) {
 
   switch (name) {
     case 'search_jira': {
-      const max = Math.min(args.maxResults || 20, 50);
+      const max = Math.min(args.maxResults || 25, 100);
       // POST, but read-only (JQL search) — safe to retry.
       const res = await fetchWithRetry(`${base}/search/jql`, {
         method: 'POST',
@@ -630,7 +665,7 @@ async function executeJiraTool(name, args, cloudId) {
         body: JSON.stringify({
           jql:        args.jql,
           maxResults: max,
-          fields:     ['summary', 'status', 'assignee', 'priority', 'issuetype', 'parent', 'labels'],
+          fields:     ['summary', 'status', 'assignee', 'priority', 'issuetype', 'parent', 'labels', 'components'],
         }),
       }, { retryNonIdempotent: true });
       const data = await res.json();
@@ -640,13 +675,15 @@ async function executeJiraTool(name, args, cloudId) {
         returned: issues.length,
         isLast:   data.isLast ?? true,
         issues:   issues.map(i => ({
-          key:      i.key,
-          summary:  i.fields.summary,
-          status:   i.fields.status?.name,
-          type:     i.fields.issuetype?.name,
-          assignee: i.fields.assignee?.displayName ?? 'Unassigned',
-          priority: i.fields.priority?.name,
-          parent:   i.fields.parent?.key ?? null,
+          key:            i.key,
+          summary:        i.fields.summary,
+          status:         i.fields.status?.name,
+          statusCategory: i.fields.status?.statusCategory?.key ?? null,   // new | indeterminate | done
+          type:           i.fields.issuetype?.name,
+          assignee:       i.fields.assignee?.displayName ?? 'Unassigned',
+          priority:       i.fields.priority?.name,
+          components:     (i.fields.components ?? []).map(c => c.name),
+          parent:         i.fields.parent?.key ?? null,
         })),
       };
     }
@@ -662,12 +699,14 @@ async function executeJiraTool(name, args, cloudId) {
         return (node.content ?? []).map(adfText).join('');
       }
       return {
-        key:         data.key,
-        summary:     f.summary,
-        status:      f.status?.name,
-        type:        f.issuetype?.name,
+        key:            data.key,
+        summary:        f.summary,
+        status:         f.status?.name,
+        statusCategory: f.status?.statusCategory?.key ?? null,
+        type:           f.issuetype?.name,
         assignee:    f.assignee?.displayName ?? 'Unassigned',
         priority:    f.priority?.name,
+        components:  (f.components ?? []).map(c => c.name),
         labels:      f.labels ?? [],
         parent:      f.parent ? { key: f.parent.key, summary: f.parent.fields?.summary } : null,
         description: adfText(f.description).substring(0, 800),
@@ -751,12 +790,20 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
     '(C) For date filters use absolute JQL like `created >= "2026-04-29"` or relative `created >= -14d`. ' +
     '(D) When search_jira returns 0, you MUST retry at least once with a broadened query before reporting "none found": drop the project filter, switch to `text ~ "..."`, try `labels = "..."` or `component = "..."`, or use OR across alternate spellings. Only after a broadened retry also returns 0 may you tell the user nothing was found. ' +
     '(E) If you are unsure what project a feature belongs to, call list_projects first. ' +
+    '(F) Status filters: "open" / "not closed" / "актуальные" → `statusCategory != Done`; "done" / "closed" → `statusCategory = Done`; use exact `status = "..."` only when the user names a specific status. ' +
+    '(G) When the user asks for recent/latest items, add `ORDER BY updated DESC` (or `created DESC` for "newly created"). ' +
+    '(H) When the user wants a FULL list (for review or a bulk action like assigning a component), pass maxResults: 100 and mention in the reply if the result was cut off (isLast: false). ' +
+    '(I) Issue-type words map to an `issuetype` filter — ALWAYS apply it when the user names a type: "реквесты"/"requests"/"запросы" → `issuetype = Request`; "эпики"/"epics" → `issuetype = Epic`; "баги"/"bugs" → `issuetype = Bug`; "таски"/"tasks" → `issuetype = Task`; "сторя"/"stories" → `issuetype = Story`. E.g. "найди все реквесты про X" → `issuetype = Request AND text ~ "X"`. If the type filter errors (type not in that project), retry without it and say so. ' +
     'Respond in the same language the user writes in (Russian, Ukrainian, or English). ' +
     'Output rules: ' +
-    '(1) When search_jira or multiple get_issue calls return 2 or more issues, the UI auto-renders them as a structured table — do NOT repeat each issue\'s fields in prose. Just give a one-line intro ("Here are 12 matching issues:") and add a brief insight/aggregate if useful (e.g. "8 of them are In Progress, all assigned to Dima"). ' +
+    '(1) When search_jira or multiple get_issue calls return 2 or more issues, the UI auto-renders them as a structured table (key, summary, status, assignee, priority, type, components) — NEVER output a markdown table or a per-issue list of them in your reply text. Give a one-line intro ("Here are 12 matching issues:") plus a brief insight/aggregate if useful (e.g. "8 of them are In Progress, all assigned to Dima"). ' +
     '(2) For a single issue, you may describe it in detail. ' +
     '(3) Use bullets only for items that are NOT issues (e.g. sprints, projects). ' +
+    '(4) You cannot set Jira components yourself, but the issues table in the UI has a "Set component" button that bulk-applies a component to the selected issues and their child Epics. When the user asks to set/assign a component to some issues, FIND those issues with search_jira, then tell the user to review the table and press "Set component". ' +
     userCtx;
+
+  // Explicit single issue type in the user's message → enforced on every JQL.
+  const forcedType = detectRequestedIssueType(message);
 
   const toolResults = [];
 
@@ -772,6 +819,7 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
         tools:        JIRA_TOOLS,
         history,
         message,
+        model:        OPENROUTER_BA_PLANNER_MODEL,
       });
 
       if (planResult.mode === 'clarify' && planResult.question && planResult.options.length >= 2) {
@@ -810,7 +858,7 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
 
     for (let i = 0; i < 6; i++) {
       const data = await callOpenRouter(apiKey, {
-        model:       OPENROUTER_EXECUTOR,
+        model:       OPENROUTER_BA_MODEL,
         messages:    msgs,
         tools:       JIRA_TOOLS,
         tool_choice: 'auto',
@@ -844,6 +892,11 @@ app.post('/api/ba-agent', express.json({ limit: '50kb' }), async (req, res) => {
         let result;
         try {
           const args = JSON.parse(tc.function.arguments);
+          // The user explicitly asked for one issue type — make sure every
+          // search actually filters by it, whatever the model produced.
+          if (tc.function.name === 'search_jira' && forcedType) {
+            args.jql = enforceIssueType(args.jql, forcedType);
+          }
           result = await executeJiraTool(tc.function.name, args, cloudId);
           toolResults.push({ name: tc.function.name, args, result });
         } catch (err) {
@@ -966,11 +1019,53 @@ async function mcpInitSession(token) {
     capabilities:    {},
     clientInfo:      { name: 'dnl-task-creator', version: '1.0' },
   });
-  // Spec requires the client to send notifications/initialized after init.
-  // Failure here shouldn't kill the request — some servers tolerate skipping it.
-  try { await mcpRequest(token, 'notifications/initialized', {}, { sessionId, isNotification: true }); }
-  catch (e) { console.warn('[Fathom MCP] initialized notification failed:', e.message); }
+  // Spec requires the client to send notifications/initialized after init, but
+  // nothing we send next depends on it — fire-and-forget instead of paying a
+  // sequential round-trip. Failure shouldn't kill the request either way.
+  mcpRequest(token, 'notifications/initialized', {}, { sessionId, isNotification: true })
+    .catch(e => console.warn('[Fathom MCP] initialized notification failed:', e.message));
   return { sessionId, serverInfo: result };
+}
+
+// ── Per-token MCP session cache ──────────────────────────────────────────────
+// Fathom MCP sessions are reusable across requests, so re-initializing on
+// every API call just adds a round-trip before any real work. Entries are
+// dropped on MCP-level failures (see withFathomSession) so a session that
+// expired server-side heals on the next attempt.
+const FATHOM_SESSION_CACHE = new Map();     // token → { sessionId, ts }
+const FATHOM_SESSION_TTL   = 10 * 60_000;
+
+async function getFathomSession(token) {
+  const hit = FATHOM_SESSION_CACHE.get(token);
+  if (hit && Date.now() - hit.ts < FATHOM_SESSION_TTL) {
+    return { sessionId: hit.sessionId, cached: true };
+  }
+  const { sessionId } = await mcpInitSession(token);
+  if (sessionId) FATHOM_SESSION_CACHE.set(token, { sessionId, ts: Date.now() });
+  return { sessionId, cached: false };
+}
+
+function dropFathomSession(token) {
+  FATHOM_SESSION_CACHE.delete(token);
+}
+
+// Run a read-only MCP step with a (possibly cached) session. If the step fails
+// and the session came from the cache, it may simply have expired server-side:
+// re-initialize once and re-run. Steps must be idempotent — all Fathom MCP
+// tools are read-only, so re-running is safe.
+async function withFathomSession(token, step) {
+  const first = await getFathomSession(token);
+  try {
+    return await step(first.sessionId);
+  } catch (err) {
+    if (err.reconnect || !first.cached) {
+      dropFathomSession(token);
+      throw err;
+    }
+    dropFathomSession(token);
+    const fresh = await getFathomSession(token);
+    return step(fresh.sessionId);
+  }
 }
 
 async function mcpListTools(token, sessionId) {
@@ -1548,12 +1643,16 @@ app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, re
 
   const toolResults = [];
   try {
-    const { sessionId } = await mcpInitSession(fathomToken);
-    const tools = await ensureFathomTools(fathomToken, sessionId);
-
-    // ── Fast path: direct MCP listing call, no LLM. ──
-    const listTool = findFathomRawTool('list');
-    if (listTool) {
+    // ── Fast path: direct MCP listing call, no LLM (cached session, one retry). ──
+    // Walks the whole range and returns the sorted meetings, or null when the
+    // listing tool is missing or yielded nothing. Read-only → safe to re-run.
+    let sessionId = null;
+    let listTool  = null;
+    const listAllBatches = async (sid) => {
+      sessionId = sid;
+      await ensureFathomTools(fathomToken, sid);
+      listTool = findFathomRawTool('list');
+      if (!listTool) return null;
       const props = listTool.inputSchema?.properties || {};
       const lo = Date.parse(createdAfter), hi = Date.parse(createdBefore);
 
@@ -1569,57 +1668,61 @@ app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, re
       // internally up to max_pages; to reach further back we walk the window: after a
       // batch, re-query ending just before the oldest call we've seen and repeat until
       // the batch reaches the range start or stops yielding new meetings. Dedupe by id.
-      try {
-        const byId = new Map();          // id/url → normalized meeting (dedupe)
-        let before = createdBefore;
-        let ok = false;
-        // Hard safety cap so a misbehaving cursor can never loop forever.
-        for (let batch = 0; batch < 40; batch++) {
-          const args = {};
-          if ('created_after'  in props) args.created_after  = createdAfter;
-          if ('created_before' in props) args.created_before = before;
-          if ('max_pages'      in props) args.max_pages      = maxPages;
-          if (!isTeam && userEmail && 'recorded_by' in props) args.recorded_by = [userEmail];
+      const byId = new Map();          // id/url → normalized meeting (dedupe)
+      let before = createdBefore;
+      let ok = false;
+      // Hard safety cap so a misbehaving cursor can never loop forever.
+      for (let batch = 0; batch < 40; batch++) {
+        const args = {};
+        if ('created_after'  in props) args.created_after  = createdAfter;
+        if ('created_before' in props) args.created_before = before;
+        if ('max_pages'      in props) args.max_pages      = maxPages;
+        if (!isTeam && userEmail && 'recorded_by' in props) args.recorded_by = [userEmail];
 
-          const raw = await mcpCallTool(fathomToken, sessionId, listTool.name, args);
-          const { text, summary } = summariseMcpResult(listTool.name, raw);
-          toolResults.push({ name: listTool.name, args, result: summary });
-          ok = true;
+        const raw = await mcpCallTool(fathomToken, sid, listTool.name, args);
+        const { text, summary } = summariseMcpResult(listTool.name, raw);
+        toolResults.push({ name: listTool.name, args, result: summary });
+        ok = true;
 
-          const arr = (meetingsFromMcp(raw) || parseMeetingsText(text) || []).map(normalizeMeeting);
-          let added = 0, oldest = Infinity;
-          for (const m of arr) {
-            if (!(m.id || m.url)) continue;
-            const t = m.date ? Date.parse(m.date) : NaN;
-            if (!isNaN(t)) {
-              if (t < lo || t > hi) continue;   // outside the requested range
-              if (t < oldest) oldest = t;
-            }
-            const key = m.id || m.url;
-            if (!byId.has(key)) { byId.set(key, m); added++; }
+        const arr = (meetingsFromMcp(raw) || parseMeetingsText(text) || []).map(normalizeMeeting);
+        let added = 0, oldest = Infinity;
+        for (const m of arr) {
+          if (!(m.id || m.url)) continue;
+          const t = m.date ? Date.parse(m.date) : NaN;
+          if (!isNaN(t)) {
+            if (t < lo || t > hi) continue;   // outside the requested range
+            if (t < oldest) oldest = t;
           }
-
-          // Stop when: nothing new came back, or the batch already reached the
-          // range start, or the window can't shrink any further.
-          if (added === 0 || oldest === Infinity || oldest <= lo) break;
-          // End the next window AT the oldest we've seen (inclusive) so a call sharing
-          // that exact second is never skipped; the 1-call overlap is deduped by id.
-          const nextBefore = new Date(oldest).toISOString();
-          if (nextBefore === before) break;
-          before = nextBefore;
+          const key = m.id || m.url;
+          if (!byId.has(key)) { byId.set(key, m); added++; }
         }
 
-        if (ok) {
-          const clean = [...byId.values()]
-            .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
-          return res.json({ meetings: clean, toolResults });
-        }
-      } catch (err) {
-        if (err.reconnect) throw err;
-        toolResults.push({ name: listTool.name, error: err.message });
-        // fall through to the LLM fallback only if the tool call itself failed
+        // Stop when: nothing new came back, or the batch already reached the
+        // range start, or the window can't shrink any further.
+        if (added === 0 || oldest === Infinity || oldest <= lo) break;
+        // End the next window AT the oldest we've seen (inclusive) so a call sharing
+        // that exact second is never skipped; the 1-call overlap is deduped by id.
+        const nextBefore = new Date(oldest).toISOString();
+        if (nextBefore === before) break;
+        before = nextBefore;
       }
+
+      if (!ok) return null;
+      return [...byId.values()]
+        .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
+    };
+
+    try {
+      const clean = await withFathomSession(fathomToken, listAllBatches);
+      if (clean) return res.json({ meetings: clean, toolResults });
+    } catch (err) {
+      if (err.reconnect) throw err;
+      toolResults.push({ name: listTool?.name || 'list', error: err.message });
+      // fall through to the LLM fallback only if the tool call itself failed
     }
+
+    if (!sessionId) ({ sessionId } = await getFathomSession(fathomToken));
+    const tools = await ensureFathomTools(fathomToken, sessionId);
 
     // ── Fallback: let the model drive the tools (slower, resilient). ──
     const scopeCtx = isTeam
@@ -1668,30 +1771,34 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
 
   const toolResults = [];
   try {
-    const { sessionId } = await mcpInitSession(fathomToken);
-    const tools = await ensureFathomTools(fathomToken, sessionId);
-
-    // ── Fast path: pull the transcript directly. ──
+    // ── Fast path: pull the transcript directly (cached session, one retry). ──
     let transcript = '';
-    const tTool = findFathomRawTool('transcript');
-    if (tTool) {
-      const props = tTool.inputSchema?.properties || {};
-      const args = {};
-      if ('recording_id' in props) {
-        const n = Number(recordingId);
-        args.recording_id = (Number.isFinite(n) && props.recording_id?.type === 'integer') ? n
-          : Number.isFinite(n) ? n : String(recordingId);
-      }
-      if ('url' in props && callUrl) args.url = callUrl;
-      try {
-        const raw = await mcpCallTool(fathomToken, sessionId, tTool.name, args);
+    let sessionId  = null;
+    let tToolName  = '';
+    try {
+      transcript = await withFathomSession(fathomToken, async (sid) => {
+        sessionId = sid;
+        await ensureFathomTools(fathomToken, sid);
+        const tTool = findFathomRawTool('transcript');
+        if (!tTool) return '';
+        tToolName = tTool.name;
+        const props = tTool.inputSchema?.properties || {};
+        const args = {};
+        if ('recording_id' in props) {
+          const n = Number(recordingId);
+          args.recording_id = (Number.isFinite(n) && props.recording_id?.type === 'integer') ? n
+            : Number.isFinite(n) ? n : String(recordingId);
+        }
+        if ('url' in props && callUrl) args.url = callUrl;
+        const raw = await mcpCallTool(fathomToken, sid, tTool.name, args);
         const { text, summary } = summariseMcpResult(tTool.name, raw);
         toolResults.push({ name: tTool.name, args, result: summary });
-        if (text && text !== '(no content)' && text !== '(empty)') transcript = text;
-      } catch (err) {
-        if (err.reconnect) throw err;
-        toolResults.push({ name: tTool.name, error: err.message });
-      }
+        return (text && text !== '(no content)' && text !== '(empty)') ? text : '';
+      });
+    } catch (err) {
+      if (err.reconnect) throw err;
+      toolResults.push({ name: tToolName || 'transcript', error: err.message });
+      // transcript stays empty → the agentic fallback below takes over
     }
 
     if (transcript) {
@@ -1738,6 +1845,8 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
     }
 
     // ── Fallback: agentic loop drives the tools itself. ──
+    if (!sessionId) ({ sessionId } = await getFathomSession(fathomToken));
+    const tools = await ensureFathomTools(fathomToken, sessionId);
     const systemPrompt =
       'You are processing a single Fathom call for the Tasks Follow-up tool. ' +
       'STEP 1: Use the available tools to retrieve the FULL transcript of the specified call (use the meeting identifier from the user). ' +

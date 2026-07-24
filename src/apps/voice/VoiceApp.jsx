@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
-import ToastContainer from '../../components/Toast.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -183,7 +182,6 @@ export default function VoiceApp({ user, allowedProjects }) {
   const [translated,  setTranslated]  = useState(false);  // current transcript is an EN translation
   const [taskModal,   setTaskModal]   = useState(null);   // { title, description } being created
   const [taskResult,  setTaskResult]  = useState(null);   // { jiraKey, jiraUrl, epicUrl } after create
-  const [toasts,      setToasts]      = useState([]);
 
   const mrRef       = useRef(null);
   const chunksRef   = useRef([]);
@@ -484,14 +482,9 @@ export default function VoiceApp({ user, allowedProjects }) {
           initialTitle={taskModal.title}
           initialDescription={taskModal.description}
           onClose={() => setTaskModal(null)}
-          onCreated={res => {
-            setTaskResult(res);
-            setToasts(prev => [...prev, { id: Date.now(), ...res }]);
-          }}
+          onCreated={res => setTaskResult(res)}
         />
       )}
-
-      <ToastContainer toasts={toasts} onDismiss={id => setToasts(prev => prev.filter(t => t.id !== id))} />
     </div>
   );
 }
