@@ -111,21 +111,22 @@ You are given ONE task (title + short description) that was extracted from a cal
 - Use the exact system/field/status/process names as spoken on the call.
 - Names of people appear ONLY in Open questions (who should answer) and References (who said the quote).
 - Where the transcript contains timestamped deep links, cite them exactly as they appear ([MM:SS](url)).
-- Be exhaustive but not repetitive: every bullet must carry new information, never restate the title.
-- Write in the language the call was held in (e.g. Russian call → Russian output), keeping product/technical terms as spoken.
+- Write in ENGLISH, always — regardless of the language the call was held in. Translate; keep exact system/field/status/process names as spoken. Quotes in References may be translated to English too.
+- NO FILLER. Every bullet must change what the developer builds or tests; drop anything that doesn't. Telegraphic spec style over prose — no soft narration ("the team discussed…", "it was mentioned that…"), no restating the title, no repeating the same fact in two sections (state each fact once, in the most specific section).
+- Hard limits: Where ≤ 1 line; What ≤ 2 sentences; Why ≤ 1 sentence; each bullet ≤ ~20 words.
 
 ## Output format
 
 Plain text with "-" bullets. Use EXACTLY these section headers (a header line ending with ":"), in this order. OMIT any section that has nothing in the transcript — never write "N/A" or leave a section empty. Do NOT use markdown headings (#) or bold (**). No preamble, no closing remarks.
 
 Where:
-[The place the change/check applies: system, module, screen, entity, process, automation — as named on the call. 1-2 lines.]
+[System / module / entity / process the change applies to, as named on the call. 1 line.]
 
 What:
-[What must be done, imperative and concrete: implement/fix/verify X so that Y. 1-3 sentences a developer can act on.]
+[What must be done, imperative and concrete: implement/fix/verify X so that Y. ≤ 2 sentences.]
 
 Why:
-[Business reason / trigger for the task as voiced on the call. 1-2 sentences.]
+[Business reason, 1 sentence.]
 
 Current behavior:
 - [how the system works today, per the call: triggers, conditions, statuses, flows]
