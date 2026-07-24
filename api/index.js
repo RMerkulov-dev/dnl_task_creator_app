@@ -5,7 +5,11 @@ import fs      from 'node:fs';
 import { FOLLOWUP_SKILLS, listFollowupSkills, DEEP_DIVE_INSTRUCTIONS } from './followupSkills.js';
 import { registerTaskNotifyRoutes } from './taskNotify.js';
 import { registerQuarterlyCallsRoutes, checkQuarterlyCallReminders } from './quarterlyCalls.js';
-import { registerChecklistRoutes, checkChecklistReminders } from './checklist.js';
+// NOTE: the module must NOT be named api/checklist.js — on Vercel every file
+// in api/ becomes its own serverless function and filesystem routes take
+// precedence over the vercel.json rewrite, so GET /api/checklist would hit
+// that file (no default export → 500) instead of this Express app.
+import { registerChecklistRoutes, checkChecklistReminders } from './checklistRoutes.js';
 
 dotenv.config();
 

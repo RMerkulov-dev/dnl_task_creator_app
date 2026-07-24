@@ -57,7 +57,8 @@ export const APP_REGISTRY = [
     shortName: 'Calls',
     gradient: 'linear-gradient(135deg, #ec4899 0%, #f97316 100%)',
     glow: 'rgba(236, 72, 153, 0.5)',
-    allowedEmails: ['roman.merkulov@dynamicalabs.com'],
+    // Visible to everyone; editing is restricted server-side (QC_ALLOWED in
+    // api/quarterlyCalls.js) and the UI goes view-only for other users.
   },
 ];
 

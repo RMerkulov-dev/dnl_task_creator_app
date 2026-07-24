@@ -7345,6 +7345,19 @@ button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inh
 }
 .qcal-add-btn:hover { border-color: var(--accent-1); color: var(--accent-1); }
 
+/* Read-only marker for non-owner users (edit rights are server-side). */
+.qcal-readonly-tag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  align-self: center;
+}
+
 /* ── Add/edit modal (reuses .rel-modal shell) ── */
 .qcal-modal { width: min(640px, 95vw); }
 

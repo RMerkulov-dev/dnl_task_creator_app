@@ -7,10 +7,11 @@ import { put, get } from '@vercel/blob';
 import { sendEmail } from './taskNotify.js';
 
 // ─── Quarterly Calls ──────────────────────────────────────────────────────────
-// Private calendar of management calls with customers (ABS / NSMG / NSMG Marker).
-// Only QC_ALLOWED users can reach the routes — the sidebar entry is hidden for
-// everyone else, and the server re-checks here so the API can't be called
-// directly by other logged-in users.
+// Calendar of management calls with customers (ABS / NSMG / NSMG Marker).
+// READ is open to every logged-in user (view-only calendar); WRITE (calls,
+// projects, manual reminder sweep) is restricted to QC_ALLOWED — the UI hides
+// the edit affordances for everyone else (GET returns `canEdit`), and the
+// server re-checks here so the API can't be written to by other users.
 //
 // Storage (two backends, picked automatically):
 //   • Vercel Blob — when BLOB_READ_WRITE_TOKEN is set (auto-injected once a
@@ -346,15 +347,18 @@ function sanitize(body, db, existing = {}) {
 }
 
 export function registerQuarterlyCallsRoutes(app) {
+  const canEdit = req => QC_ALLOWED.includes(String(req.authEmail || '').toLowerCase());
+  // Write guard: everyone logged in may READ the calendar; only QC_ALLOWED
+  // may create/update/delete or trigger reminder sends.
   const guard = (req, res, next) => {
-    if (QC_ALLOWED.includes(String(req.authEmail || '').toLowerCase())) return next();
-    res.status(403).json({ error: 'Quarterly Calls is not available for this account.' });
+    if (canEdit(req)) return next();
+    res.status(403).json({ error: 'Quarterly Calls is read-only for this account.' });
   };
   const json = express.json({ limit: '50kb' });
 
-  app.get('/api/quarterly-calls', guard, async (req, res) => {
+  app.get('/api/quarterly-calls', async (req, res) => {
     const db = await load();
-    res.json({ calls: db.calls, projects: db.projects, today: kyivToday(), storage: backend });
+    res.json({ calls: db.calls, projects: db.projects, today: kyivToday(), storage: backend, canEdit: canEdit(req) });
   });
 
   // ── Project registry ──

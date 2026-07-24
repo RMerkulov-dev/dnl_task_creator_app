@@ -171,7 +171,17 @@
       "Bash(vercel ls *)",
       "Bash(NODE_PATH=__TRACKED_VAR__/node_modules node -e ' *)",
       "Bash(PORT=3199 timeout 8 node -e ' *)",
-      "Bash(node --check api/checklist.js)"
+      "Bash(node --check api/checklist.js)",
+      "Bash(pkill -f vite)",
+      "Bash(node -e \"const b=require\\('@vercel/blob/package.json'\\); console.log\\('blob version', b.version\\); const m=require\\('@vercel/blob'\\); console.log\\('has get:', typeof m.get\\)\")",
+      "Bash(node --input-type=module -e \"import * as b from '@vercel/blob'; console.log\\('has get:', typeof b.get\\); console.log\\(Object.keys\\(b\\).join\\(', '\\)\\)\")",
+      "Bash(awk -F= '/BLOB_READ_WRITE_TOKEN/ {print NR\": key=\"$1\" value_len=\"length\\($2\\)}' .env)",
+      "Bash(node --check /tmp/chk_committed.mjs)",
+      "Bash(node --check /tmp/idx_committed.mjs)",
+      "Bash(node -e \"console.log\\('express', require\\('express/package.json'\\).version\\)\")",
+      "Bash(git mv *)",
+      "Bash(node --check api/checklistRoutes.js)",
+      "Bash(sed -i '' 's|`src/apps/checklist/ChecklistApp.jsx`, `api/checklist.js`|`src/apps/checklist/ChecklistApp.jsx`, `api/checklistRoutes.js`|; s|per-user server-side \\(api/checklist.js\\)|per-user server-side \\(api/checklistRoutes.js\\)|' CLAUDE.md)"
     ]
   }
 }

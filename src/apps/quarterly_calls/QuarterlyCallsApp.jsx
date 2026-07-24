@@ -72,7 +72,7 @@ function useEscape(onClose) {
   }, [onClose]);
 }
 
-function CallModal({ initial, projects, onSave, onDelete, onClose, saving }) {
+function CallModal({ initial, projects, onSave, onDelete, onClose, saving, readOnly = false }) {
   const isEdit = Boolean(initial.id);
   const [form, setForm] = useState({
     ...EMPTY_FORM, project: projects[0]?.id || '', ...initial,
@@ -95,7 +95,7 @@ function CallModal({ initial, projects, onSave, onDelete, onClose, saving }) {
       <div className="rel-modal qcal-modal">
         <div className="rel-modal-head">
           <div>
-            <h3 className="rel-modal-title">{isEdit ? 'Edit call' : 'New call'}</h3>
+            <h3 className="rel-modal-title">{readOnly ? 'Call details' : (isEdit ? 'Edit call' : 'New call')}</h3>
             {isEdit && (
               <p className="rel-modal-sub">
                 {[
@@ -115,17 +115,17 @@ function CallModal({ initial, projects, onSave, onDelete, onClose, saving }) {
           <label className="qcal-field qcal-field-wide">
             <span>Title</span>
             <input className="input" value={form.title} onChange={e => set('title', e.target.value)}
-                   placeholder="e.g. ABS. Quarterly Call" autoFocus />
+                   placeholder="e.g. ABS. Quarterly Call" autoFocus={!readOnly} disabled={readOnly} />
           </label>
           <label className="qcal-field">
             <span>Project</span>
-            <select className="select" value={form.project} onChange={e => set('project', e.target.value)}>
+            <select className="select" value={form.project} onChange={e => set('project', e.target.value)} disabled={readOnly}>
               {projects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </label>
           <label className="qcal-field">
             <span>Status</span>
-            <select className="select" value={form.status} onChange={e => set('status', e.target.value)}>
+            <select className="select" value={form.status} onChange={e => set('status', e.target.value)} disabled={readOnly}>
               <option value="scheduled">Scheduled</option>
               <option value="completed">Completed</option>
               <option value="cancelled">Cancelled</option>
@@ -133,45 +133,55 @@ function CallModal({ initial, projects, onSave, onDelete, onClose, saving }) {
           </label>
           <label className="qcal-field">
             <span>Date</span>
-            <input className="input" type="date" value={form.date} onChange={e => set('date', e.target.value)} />
+            <input className="input" type="date" value={form.date} onChange={e => set('date', e.target.value)} disabled={readOnly} />
           </label>
           <label className="qcal-field">
             <span>Time (Kyiv)</span>
-            <input className="input" type="time" value={form.time} onChange={e => set('time', e.target.value)} />
+            <input className="input" type="time" value={form.time} onChange={e => set('time', e.target.value)} disabled={readOnly} />
           </label>
           <label className="qcal-field qcal-field-wide">
             <span>Participants</span>
             <input className="input" value={form.participants} onChange={e => set('participants', e.target.value)}
-                   placeholder="Who is on the call" />
+                   placeholder="Who is on the call" disabled={readOnly} />
           </label>
           <label className="qcal-field qcal-field-wide">
-            <span>Miro / arrangements link</span>
+            <span>Miro / arrangements link{readOnly && form.miroLink && (
+              <> · <a className="ba-issue-link" href={form.miroLink} target="_blank" rel="noreferrer">open ↗</a></>
+            )}</span>
             <input className="input" value={form.miroLink} onChange={e => set('miroLink', e.target.value)}
-                   placeholder="https://miro.com/…" />
+                   placeholder="https://miro.com/…" disabled={readOnly} />
           </label>
           <label className="qcal-field qcal-field-wide">
-            <span>Call summary link</span>
+            <span>Call summary link{readOnly && form.summaryLink && (
+              <> · <a className="ba-issue-link" href={form.summaryLink} target="_blank" rel="noreferrer">open ↗</a></>
+            )}</span>
             <input className="input" value={form.summaryLink} onChange={e => set('summaryLink', e.target.value)}
-                   placeholder="https://fathom.video/…" />
+                   placeholder="https://fathom.video/…" disabled={readOnly} />
           </label>
           <label className="qcal-field qcal-field-wide">
             <span>Notes</span>
             <textarea className="input qcal-notes" rows={3} value={form.notes}
-                      onChange={e => set('notes', e.target.value)} />
+                      onChange={e => set('notes', e.target.value)} disabled={readOnly} />
           </label>
 
           {error && <div className="qcal-form-error">{error}</div>}
 
           <div className="qcal-form-actions">
-            {isEdit && (
+            {!readOnly && isEdit && (
               <button type="button" className="btn btn-danger" disabled={saving}
                       onClick={() => onDelete(initial.id)}>Delete</button>
             )}
             <div style={{ flex: 1 }} />
-            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : (isEdit ? 'Save' : 'Add call')}
-            </button>
+            {readOnly ? (
+              <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
+            ) : (
+              <>
+                <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancel</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? 'Saving…' : (isEdit ? 'Save' : 'Add call')}
+                </button>
+              </>
+            )}
           </div>
         </form>
       </div>
@@ -267,7 +277,7 @@ function DayCell({ cell, today, byDate, colorOf, onOpen, onAdd }) {
   return (
     <div className={`qcal-cell${cell.outside ? ' outside' : ''}${cell.iso === today ? ' today' : ''}`}>
       <div className="qcal-cell-head">
-        <button className="qcal-cell-add" title="Add call on this day" onClick={() => onAdd(cell.iso)}>+</button>
+        {onAdd && <button className="qcal-cell-add" title="Add call on this day" onClick={() => onAdd(cell.iso)}>+</button>}
         <span className="qcal-daynum">{cell.day}</span>
       </div>
       {(byDate.get(cell.iso) || []).map(call => (
@@ -342,9 +352,11 @@ function DayView({ iso, today, byDate, colorOf, projectLabel, onOpen, onAdd }) {
           {(call.reminderSentAt || call.reminder2SentAt) && <span className="qcal-up-mail" title="Reminder emailed">✉</span>}
         </button>
       ))}
-      <div>
-        <button className="btn btn-ghost qcal-add-btn" onClick={() => onAdd(iso)}>+ Add call on this day</button>
-      </div>
+      {onAdd && (
+        <div>
+          <button className="btn btn-ghost qcal-add-btn" onClick={() => onAdd(iso)}>+ Add call on this day</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -363,6 +375,7 @@ export default function QuarterlyCallsApp() {
   const [modal, setModal] = useState(null);        // call form values | null
   const [projModal, setProjModal] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);   // server-decided (QC_ALLOWED); others view-only
 
   const projectById = useMemo(() => Object.fromEntries(projects.map(p => [p.id, p])), [projects]);
   const colorOf = useCallback(id => projectById[id]?.color || 'var(--text-3)', [projectById]);
@@ -374,6 +387,7 @@ export default function QuarterlyCallsApp() {
     const data = await res.json();
     setCalls(data.calls || []);
     setProjects(data.projects || []);
+    setCanEdit(Boolean(data.canEdit));
     if (data.today) { setToday(data.today); setAnchor(a => a === initialToday ? data.today : a); }
   }, [initialToday]);
 
@@ -461,8 +475,10 @@ export default function QuarterlyCallsApp() {
     });
   }, [anchor]);
 
-  const openAdd = iso => setModal({ date: iso });
+  const openAdd = iso => { if (canEdit) setModal({ date: iso }); };
   const openCall = call => setModal(call);
+  // Cell/day "add" affordances render only when the handler is present.
+  const addHandler = canEdit ? openAdd : null;
   const pickDay = iso => { setAnchor(iso); setView('day'); };
 
   const api = async (url, options) => {
@@ -556,11 +572,15 @@ export default function QuarterlyCallsApp() {
                     style={{ '--qcal-c': p.color }}
                     onClick={() => setFilter(p.id)}>{p.label}</button>
           ))}
-          <button className="qcal-filter-chip qcal-chip-add" title="Add / manage projects"
-                  onClick={() => setProjModal(true)}>+ Project</button>
+          {canEdit && (
+            <button className="qcal-filter-chip qcal-chip-add" title="Add / manage projects"
+                    onClick={() => setProjModal(true)}>+ Project</button>
+          )}
         </div>
         <div style={{ flex: 1 }} />
-        <button className="btn btn-ghost qcal-add-btn" onClick={() => openAdd(today)}>+ Add call</button>
+        {canEdit
+          ? <button className="btn btn-ghost qcal-add-btn" onClick={() => openAdd(today)}>+ Add call</button>
+          : <span className="qcal-readonly-tag" title="Only the calendar owner can edit">view only</span>}
       </div>
 
       {loadError && <div className="qcal-load-error">Failed to load calls: {loadError}</div>}
@@ -569,7 +589,7 @@ export default function QuarterlyCallsApp() {
         <div className="qcal-main">
           {view === 'day' && (
             <DayView iso={anchor} today={today} byDate={byDate} colorOf={colorOf}
-                     projectLabel={labelOf} onOpen={openCall} onAdd={openAdd} />
+                     projectLabel={labelOf} onOpen={openCall} onAdd={addHandler} />
           )}
 
           {view === 'week' && (
@@ -578,7 +598,7 @@ export default function QuarterlyCallsApp() {
               <div className="qcal-grid qcal-grid-week">
                 {weekCells.map(cell => (
                   <DayCell key={cell.iso} cell={cell} today={today} byDate={byDate}
-                           colorOf={colorOf} onOpen={openCall} onAdd={openAdd} />
+                           colorOf={colorOf} onOpen={openCall} onAdd={addHandler} />
                 ))}
               </div>
             </div>
@@ -586,7 +606,7 @@ export default function QuarterlyCallsApp() {
 
           {view === 'month' && (
             <MonthGrid y={aY} m={aM} today={today} byDate={byDate}
-                       colorOf={colorOf} onOpen={openCall} onAdd={openAdd} />
+                       colorOf={colorOf} onOpen={openCall} onAdd={addHandler} />
           )}
 
           {view === 'quarter' && (
@@ -597,7 +617,7 @@ export default function QuarterlyCallsApp() {
                   <MonthGrid key={off} y={d.getUTCFullYear()} m={d.getUTCMonth()}
                              caption={`${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`}
                              compact today={today} byDate={byDate}
-                             colorOf={colorOf} onOpen={openCall} onAdd={openAdd} />
+                             colorOf={colorOf} onOpen={openCall} onAdd={addHandler} />
                 );
               })}
             </div>
@@ -656,6 +676,7 @@ export default function QuarterlyCallsApp() {
           initial={modal}
           projects={projects}
           saving={saving}
+          readOnly={!canEdit}
           onSave={saveCall}
           onDelete={deleteCall}
           onClose={() => setModal(null)}
