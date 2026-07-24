@@ -2,7 +2,7 @@ import express from 'express';
 import dotenv  from 'dotenv';
 import crypto  from 'node:crypto';
 import fs      from 'node:fs';
-import { FOLLOWUP_SKILLS, listFollowupSkills } from './followupSkills.js';
+import { FOLLOWUP_SKILLS, listFollowupSkills, DEEP_DIVE_INSTRUCTIONS } from './followupSkills.js';
 import { registerTaskNotifyRoutes } from './taskNotify.js';
 import { registerQuarterlyCallsRoutes, checkQuarterlyCallReminders } from './quarterlyCalls.js';
 
@@ -1756,6 +1756,97 @@ app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, re
 //
 // Fast path: fetch the transcript directly over MCP, then a SINGLE LLM call
 // applies the skill. The agentic loop is kept only as a fallback.
+// ── Transcript fetch shared by skill-run and task-deep-dive ──────────────────
+// Pulls one call's transcript via the cached-session fast path and caches the
+// text per (token, recording), so per-task deep dives right after a skill run
+// skip the MCP round-trip entirely. Returns { transcript, sessionId }:
+// transcript is '' when the tool is missing or returned nothing; fetch errors
+// are recorded on toolResults (reconnect errors are re-thrown).
+const FATHOM_TRANSCRIPT_CACHE = new Map();  // `${token}::${recordingId}` → { text, ts }
+const FATHOM_TRANSCRIPT_TTL   = 10 * 60_000;
+const FATHOM_TRANSCRIPT_MAX   = 20;         // transcripts are large — keep few
+
+function cacheFathomTranscript(key, text) {
+  const now = Date.now();
+  for (const [k, v] of FATHOM_TRANSCRIPT_CACHE) {
+    if (now - v.ts > FATHOM_TRANSCRIPT_TTL) FATHOM_TRANSCRIPT_CACHE.delete(k);
+  }
+  while (FATHOM_TRANSCRIPT_CACHE.size >= FATHOM_TRANSCRIPT_MAX) {
+    FATHOM_TRANSCRIPT_CACHE.delete(FATHOM_TRANSCRIPT_CACHE.keys().next().value);
+  }
+  FATHOM_TRANSCRIPT_CACHE.set(key, { text, ts: now });
+}
+
+async function fetchFathomTranscript(fathomToken, recordingId, callUrl, toolResults) {
+  const cacheKey = `${fathomToken}::${recordingId}`;
+  const hit = FATHOM_TRANSCRIPT_CACHE.get(cacheKey);
+  if (hit && Date.now() - hit.ts < FATHOM_TRANSCRIPT_TTL) {
+    toolResults.push({ name: 'transcript', result: '(from cache)' });
+    return { transcript: hit.text, sessionId: null };
+  }
+
+  let transcript = '';
+  let sessionId  = null;
+  let tToolName  = '';
+  try {
+    transcript = await withFathomSession(fathomToken, async (sid) => {
+      sessionId = sid;
+      await ensureFathomTools(fathomToken, sid);
+      const tTool = findFathomRawTool('transcript');
+      if (!tTool) return '';
+      tToolName = tTool.name;
+      const props = tTool.inputSchema?.properties || {};
+      const args = {};
+      if ('recording_id' in props) {
+        const n = Number(recordingId);
+        args.recording_id = (Number.isFinite(n) && props.recording_id?.type === 'integer') ? n
+          : Number.isFinite(n) ? n : String(recordingId);
+      }
+      if ('url' in props && callUrl) args.url = callUrl;
+      const raw = await mcpCallTool(fathomToken, sid, tTool.name, args);
+      const { text, summary } = summariseMcpResult(tTool.name, raw);
+      toolResults.push({ name: tTool.name, args, result: summary });
+      return (text && text !== '(no content)' && text !== '(empty)') ? text : '';
+    });
+  } catch (err) {
+    if (err.reconnect) throw err;
+    toolResults.push({ name: tToolName || 'transcript', error: err.message });
+    // transcript stays empty → callers fall back / report
+  }
+  if (transcript) cacheFathomTranscript(cacheKey, transcript);
+  return { transcript, sessionId };
+}
+
+// One OpenRouter call over a full transcript. Only if the model literally
+// can't fit the input, retry once on a safe-size slice rather than failing.
+async function runSkillOverTranscript(apiKey, { systemPrompt, userPrefix, transcript, maxTokens = 4000 }) {
+  const run = async (body, note = '') => {
+    const data = await callOpenRouter(apiKey, {
+      model:       OPENROUTER_EXECUTOR,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user',   content: `${userPrefix}\n\n=== TRANSCRIPT${note} ===\n${body}` },
+      ],
+      temperature: 0.2,
+      max_tokens:  maxTokens,
+      // Structured extraction, not deep reasoning — keep internal reasoning
+      // minimal so it answers fast instead of "thinking" for tens of seconds.
+      reasoning:   { effort: 'low' },
+    });
+    return extractReply(data.choices?.[0]?.message);
+  };
+  try {
+    // Always send the FULL transcript, however large.
+    return await run(transcript);
+  } catch (err) {
+    if (/context|maximum.*token|too many tokens|token limit|length/i.test(err.message || '')) {
+      const SAFE = 280_000;
+      return run(`${transcript.slice(0, SAFE)}\n…[transcript truncated to fit the model]…`, ' (truncated to fit)');
+    }
+    throw err;
+  }
+}
+
 app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, res) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
@@ -1771,35 +1862,10 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
 
   const toolResults = [];
   try {
-    // ── Fast path: pull the transcript directly (cached session, one retry). ──
-    let transcript = '';
-    let sessionId  = null;
-    let tToolName  = '';
-    try {
-      transcript = await withFathomSession(fathomToken, async (sid) => {
-        sessionId = sid;
-        await ensureFathomTools(fathomToken, sid);
-        const tTool = findFathomRawTool('transcript');
-        if (!tTool) return '';
-        tToolName = tTool.name;
-        const props = tTool.inputSchema?.properties || {};
-        const args = {};
-        if ('recording_id' in props) {
-          const n = Number(recordingId);
-          args.recording_id = (Number.isFinite(n) && props.recording_id?.type === 'integer') ? n
-            : Number.isFinite(n) ? n : String(recordingId);
-        }
-        if ('url' in props && callUrl) args.url = callUrl;
-        const raw = await mcpCallTool(fathomToken, sid, tTool.name, args);
-        const { text, summary } = summariseMcpResult(tTool.name, raw);
-        toolResults.push({ name: tTool.name, args, result: summary });
-        return (text && text !== '(no content)' && text !== '(empty)') ? text : '';
-      });
-    } catch (err) {
-      if (err.reconnect) throw err;
-      toolResults.push({ name: tToolName || 'transcript', error: err.message });
-      // transcript stays empty → the agentic fallback below takes over
-    }
+    // ── Fast path: pull the transcript directly (cached session/transcript). ──
+    // On a fetch error the transcript comes back empty and the agentic
+    // fallback below takes over.
+    let { transcript, sessionId } = await fetchFathomTranscript(fathomToken, recordingId, callUrl, toolResults);
 
     if (transcript) {
       const systemPrompt =
@@ -1809,38 +1875,11 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
         (userEmail ? `The signed-in user's email is "${userEmail}". ` : '') +
         '\n\n=== SKILL INSTRUCTIONS ===\n' + skill.instructions + '\n=== END SKILL INSTRUCTIONS ===';
 
-      // Run the skill over a given transcript body. Kept as a closure so we can
-      // retry with a smaller slice only if the model rejects an over-long input.
-      const runSkill = async (body, note = '') => {
-        const data = await callOpenRouter(apiKey, {
-          model:       OPENROUTER_EXECUTOR,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user',   content: `${callLabel}\n\n=== TRANSCRIPT${note} ===\n${body}` },
-          ],
-          temperature: 0.2,
-          max_tokens:  4000,
-          // Structured extraction, not deep reasoning — keep internal reasoning
-          // minimal so it answers fast instead of "thinking" for tens of seconds.
-          reasoning:   { effort: 'low' },
-        });
-        return extractReply(data.choices?.[0]?.message);
-      };
-
-      let reply;
-      try {
-        // Always send the FULL transcript, however large.
-        reply = await runSkill(transcript);
-      } catch (err) {
-        // Only if the model literally can't fit it: retry on a safe-size slice
-        // rather than failing the request outright.
-        if (/context|maximum.*token|too many tokens|token limit|length/i.test(err.message || '')) {
-          const SAFE = 280_000;
-          reply = await runSkill(`${transcript.slice(0, SAFE)}\n…[transcript truncated to fit the model]…`, ' (truncated to fit)');
-        } else {
-          throw err;
-        }
-      }
+      const reply = await runSkillOverTranscript(apiKey, {
+        systemPrompt,
+        userPrefix: callLabel,
+        transcript,
+      });
       return res.json({ reply: reply || 'The model returned an empty response.', toolResults });
     }
 
@@ -1861,6 +1900,60 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
     res.json({ reply: reply || 'The model returned an empty response.', toolResults });
   } catch (err) {
     console.error('[Fathom skill-run error]', err.message);
+    const status = err.reconnect ? 401 : 500;
+    res.status(status).json({ error: humaniseFetchError(err), toolResults, ...(err.reconnect ? { reconnect: true } : {}) });
+  }
+});
+
+// ─── Per-task deep dive ("More from call" on a Tasks Follow-up task) ──────────
+// Body: { fathomToken, recordingId, callTitle, callUrl, userEmail,
+//         task: { title, description, who } }.
+// Re-reads the SAME call transcript and extracts everything the call contains
+// about this one task (context, requirements, decisions, quotes with timestamp
+// links) — for extensive requests where the skill's 2-4 sentence description
+// isn't enough. The transcript usually comes from FATHOM_TRANSCRIPT_CACHE
+// (populated by the skill run moments earlier), so no MCP round-trip.
+app.post('/api/fathom/task-deep-dive', express.json({ limit: '30kb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { fathomToken, recordingId, callTitle, callUrl, task, userEmail } = req.body ?? {};
+  if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
+  if (!recordingId) return res.status(400).json({ error: 'recordingId is required' });
+  if (!task?.title && !task?.description) {
+    return res.status(400).json({ error: 'task.title or task.description is required' });
+  }
+
+  const toolResults = [];
+  try {
+    const { transcript } = await fetchFathomTranscript(fathomToken, recordingId, callUrl, toolResults);
+    if (!transcript) {
+      return res.status(502).json({ error: 'Could not retrieve the call transcript from Fathom. Please try again.', toolResults });
+    }
+
+    const callLabel = `Call: "${callTitle || 'Untitled meeting'}"${callUrl ? ` (${callUrl})` : ''}`;
+    const taskBlock = [
+      task.title       ? `Task title: ${task.title}`                       : '',
+      task.description ? `Current short description: ${task.description}` : '',
+      task.who         ? `Raised by: ${task.who}`                          : '',
+    ].filter(Boolean).join('\n');
+
+    const systemPrompt =
+      'You are the deep-dive step of the Tasks Follow-up tool: the user already extracted a task list from a Fathom call and now wants a developer-ready spec built from ALL the information the call contains about ONE specific task. ' +
+      'The full transcript is provided by the user below (it contains timestamped [MM:SS](url) deep links you should cite in References). ' +
+      'Read the ENTIRE transcript and follow the DEEP DIVE INSTRUCTIONS using ONLY what the transcript contains. Never invent content. Output the result only — no meta commentary. ' +
+      (userEmail ? `The signed-in user's email is "${userEmail}". ` : '') +
+      '\n\n=== DEEP DIVE INSTRUCTIONS ===\n' + DEEP_DIVE_INSTRUCTIONS + '\n=== END DEEP DIVE INSTRUCTIONS ===';
+
+    const details = await runSkillOverTranscript(apiKey, {
+      systemPrompt,
+      userPrefix: `${callLabel}\n\n=== TASK ===\n${taskBlock}\n=== END TASK ===`,
+      transcript,
+      maxTokens: 8000,
+    });
+    res.json({ details: details || '', toolResults });
+  } catch (err) {
+    console.error('[Fathom task-deep-dive error]', err.message);
     const status = err.reconnect ? 401 : 500;
     res.status(status).json({ error: humaniseFetchError(err), toolResults, ...(err.reconnect ? { reconnect: true } : {}) });
   }

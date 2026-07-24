@@ -135,6 +135,7 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
 
   const [taskModal, setTaskModal] = useState(null);  // { task } being created
   const [created,   setCreated]   = useState({});    // { [taskKey]: { jiraKey, jiraUrl, epicUrl } }
+  const [details,   setDetails]   = useState({});    // { [taskKey]: { loading, text, error } } — per-task deep dives
 
   // Load the skill catalogue once.
   useEffect(() => {
@@ -196,6 +197,7 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
     setResult('');
     setCopied(false);
     setCreated({});
+    setDetails({});
     try {
       const res = await fetch('/api/fathom/skill-run', {
         method:  'POST',
@@ -221,6 +223,40 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
       setRunning(false);
     }
   }, [selectedCall, selectedSkill, fathomToken, user]); // eslint-disable-line
+
+  // Per-task deep dive: re-read the same call and pull out everything related
+  // to this one task. The result lands on the task card and is appended to the
+  // description when the task is created.
+  const runDeepDive = useCallback(async (task) => {
+    const key = taskKey(task);
+    setDetails(prev => ({ ...prev, [key]: { ...prev[key], loading: true, error: '' } }));
+    try {
+      const res = await fetch('/api/fathom/task-deep-dive', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          fathomToken,
+          userEmail:   user,
+          recordingId: selectedCall?.id,
+          callTitle:   selectedCall?.title,
+          callUrl:     selectedCall?.url,
+          task: { title: task.title, description: task.description, who: task.who },
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        handleAuthFailure(data);
+        throw new Error(data.error || `Server error ${res.status}`);
+      }
+      const text = cleanDeepDive(data.details);
+      setDetails(prev => ({
+        ...prev,
+        [key]: { loading: false, text, error: text ? '' : 'The model returned nothing for this task.' },
+      }));
+    } catch (e) {
+      setDetails(prev => ({ ...prev, [key]: { ...prev[key], loading: false, error: e.message || 'Deep dive failed.' } }));
+    }
+  }, [fathomToken, user, selectedCall]); // eslint-disable-line
 
   // Groups derived from the loaded calls (label → count), sorted by frequency.
   const groups = useMemo(() => {
@@ -510,7 +546,9 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
                 parsed={parsedResult}
                 rawResult={result}
                 created={created}
+                details={details}
                 onCreate={task => setTaskModal({ task })}
+                onDeepDive={runDeepDive}
               />
             ) : (
               <p className="tf-empty">
@@ -527,7 +565,7 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
           allowedProjects={allowedProjects}
           callTitle={selectedCall?.title}
           initialTitle={taskModal.task.title}
-          initialDescription={buildTaskDescription(taskModal.task, selectedCall)}
+          initialDescription={buildTaskDescription(taskModal.task, selectedCall, details[taskKey(taskModal.task)]?.text)}
           onClose={() => setTaskModal(null)}
           onCreated={res => setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }))}
         />
@@ -565,11 +603,22 @@ function resolveFathomLink(task, call) {
   return call?.url || '';
 }
 
-// Compose the task description that pre-fills the create form: the task body
-// plus a Who / Priority / Fathom-link footer.
-export function buildTaskDescription(task, call) {
+// The deep-dive prompt asks for plain "Header:" sections, but models still slip
+// in markdown emphasis/headings sometimes; strip those so the text reads clean
+// both on the card and through textToHtml (which renders links, not markdown).
+export function cleanDeepDive(text) {
+  return String(text || '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*/g, '')
+    .trim();
+}
+
+// Compose the task description that pre-fills the create form: the task body,
+// the deep-dive details (when loaded), plus a Who / Priority / Fathom-link footer.
+export function buildTaskDescription(task, call, deepDive) {
   const parts = [];
   if (task.description) parts.push(task.description.trim());
+  if (deepDive) parts.push(`Details from call:\n${deepDive.trim()}`);
   const meta = [];
   if (task.who)      meta.push(`Who: ${task.who}`);
   if (task.priority) meta.push(`Priority: ${task.priority}`);
@@ -635,8 +684,28 @@ export function buildApprovalExport(parsed, call) {
   return { text, html };
 }
 
+// Tiny self-resetting copy button for a deep-dive block.
+function DetailCopyBtn({ text }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <button
+      type="button"
+      className="tf-linkbtn"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setOk(true);
+          setTimeout(() => setOk(false), 1500);
+        } catch { /* clipboard blocked */ }
+      }}
+    >
+      {ok ? 'Copied ✓' : 'Copy'}
+    </button>
+  );
+}
+
 // ─── Result view: one block per task + Create Task ────────────────────────────
-function ResultView({ parsed, rawResult, created, onCreate }) {
+function ResultView({ parsed, rawResult, created, details, onCreate, onDeepDive }) {
   if (!parsed.hasStructure) {
     // Non-conforming output (e.g. "No actionable tasks…") — show as-is.
     return <pre className="tf-result">{rawResult}</pre>;
@@ -646,8 +715,9 @@ function ResultView({ parsed, rawResult, created, onCreate }) {
       {parsed.analysis && <p className="tf-analysis">{parsed.analysis}</p>}
 
       {parsed.tasks.map((task, i) => {
-        const key = taskKey(task);
-        const done = created[key];
+        const key    = taskKey(task);
+        const done   = created[key];
+        const detail = details?.[key];
         return (
           <div className="tf-task" key={key + i}>
             <div className="tf-task-top">
@@ -660,6 +730,17 @@ function ResultView({ parsed, rawResult, created, onCreate }) {
               {task.who && <span><strong>Who:</strong> {task.who}</span>}
               {task.link && <span><strong>Fathom:</strong> <FathomLinkValue value={task.link} /></span>}
             </div>
+            {detail?.text && (
+              <div className="tf-task-details">
+                <div className="tf-task-details-head">
+                  <span className="tf-task-details-title">Details from call</span>
+                  <span className="tf-task-dim">included in Create Task</span>
+                  <DetailCopyBtn text={detail.text} />
+                </div>
+                <pre className="tf-task-details-body">{detail.text}</pre>
+              </div>
+            )}
+            {detail?.error && <p className="ba-input-error">⚠ {detail.error}</p>}
             <div className="tf-task-actions">
               {done ? (
                 <span className="tf-task-created">
@@ -673,6 +754,18 @@ function ResultView({ parsed, rawResult, created, onCreate }) {
                 </span>
               ) : (
                 <button className="btn btn-primary tf-create-btn" onClick={() => onCreate(task)}>Create Task ↗</button>
+              )}
+              {!done && !detail?.text && (
+                <button
+                  className="btn btn-ghost tf-more-btn"
+                  onClick={() => onDeepDive(task)}
+                  disabled={detail?.loading}
+                  title="Re-read the call and pull out everything related to this task"
+                >
+                  {detail?.loading
+                    ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Reading call…</>
+                    : 'More from call'}
+                </button>
               )}
             </div>
           </div>

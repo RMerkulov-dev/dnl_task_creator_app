@@ -93,6 +93,55 @@ Use Markdown. All headings must be bold. Every block starts on a new line. Separ
 - "Create a backlog from this workshop recording."
 - [User pastes a raw transcript with no instructions]`;
 
+// System-prompt body for the per-task "deep dive" (`/api/fathom/task-deep-dive`):
+// given the full transcript and ONE already-extracted task, pull out everything
+// the call contains about that specific task. Output is deliberately markdown-
+// lite (plain "Header:" lines + bullets, no ** or #) so it reads clean both on
+// the task card and after textToHtml() into a Jira description.
+export const DEEP_DIVE_INSTRUCTIONS = `# Task Deep Dive
+
+You are given ONE task (title + short description) that was extracted from a call, plus the call's full transcript. Write a complete, developer-ready task specification from EVERY piece of information in the transcript that relates to this specific task.
+
+## Rules
+
+- The output is a TICKET SPEC for a developer who was NOT on the call — not meeting minutes. Describe the system and the required change, don't narrate the conversation ("Cara asked…", "Dima said…" is forbidden outside Open questions and References).
+- Scan the WHOLE transcript: relevant details are often scattered across the call (a topic is raised, dropped, then picked up again later). Fold ALL passes over the topic into the spec.
+- Use ONLY the transcript. No assumptions, no invented details, no generic filler. If the call doesn't say how something works, leave it out or put it under Open questions.
+- Ignore everything unrelated to this task, even if important — other tasks have their own deep dives.
+- Use the exact system/field/status/process names as spoken on the call.
+- Names of people appear ONLY in Open questions (who should answer) and References (who said the quote).
+- Where the transcript contains timestamped deep links, cite them exactly as they appear ([MM:SS](url)).
+- Be exhaustive but not repetitive: every bullet must carry new information, never restate the title.
+- Write in the language the call was held in (e.g. Russian call → Russian output), keeping product/technical terms as spoken.
+
+## Output format
+
+Plain text with "-" bullets. Use EXACTLY these section headers (a header line ending with ":"), in this order. OMIT any section that has nothing in the transcript — never write "N/A" or leave a section empty. Do NOT use markdown headings (#) or bold (**). No preamble, no closing remarks.
+
+Where:
+[The place the change/check applies: system, module, screen, entity, process, automation — as named on the call. 1-2 lines.]
+
+What:
+[What must be done, imperative and concrete: implement/fix/verify X so that Y. 1-3 sentences a developer can act on.]
+
+Why:
+[Business reason / trigger for the task as voiced on the call. 1-2 sentences.]
+
+Current behavior:
+- [how the system works today, per the call: triggers, conditions, statuses, flows]
+
+Expected behavior:
+- [what should happen after the change, or what exactly must be verified — concrete, testable statements]
+
+Edge cases:
+- [specific scenarios and corner cases voiced on the call, written as test-able cases]
+
+Open questions:
+- [things left undecided or flagged for clarification — and who should answer]
+
+References:
+- [Name]: "[verbatim or near-verbatim quote]" [MM:SS](url)`;
+
 export const FOLLOWUP_SKILLS = {
   'tasks-follow-up': {
     id:          'tasks-follow-up',
