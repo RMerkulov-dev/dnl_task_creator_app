@@ -93,6 +93,20 @@ export async function getWorkItemComments(proxyKey, project, id) {
 }
 
 /**
+ * Add a comment to a work item's discussion. `text` may contain simple HTML
+ * (Azure renders comment text as HTML). Same preview API as getWorkItemComments.
+ */
+export async function addWorkItemComment(proxyKey, project, id, text) {
+  const url = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/workItems/${id}/comments?api-version=7.0-preview.3`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  return parse(res, 'addWorkItemComment');
+}
+
+/**
  * Change a work item's System.State. Azure validates the transition server-side
  * and returns an error for disallowed moves, which the caller surfaces.
  */

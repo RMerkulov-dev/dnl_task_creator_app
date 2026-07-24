@@ -47,6 +47,7 @@ function buildStepDefs(mode, project, stepCount) {
   }
   return [
     { label: `Creating Azure DevOps ${type}` },
+    ...(project?.features?.azureIdInTitle ? [{ label: 'Adding Azure ID to title' }] : []),
     ...(hasJira ? [{ label: 'Creating Jira Request' }] : []),
     ...(hasJira && hasLinkBack ? [{ label: 'Linking records' }] : []),
   ];

@@ -82,13 +82,51 @@ async function pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, ext
   }
 }
 
+// ─── Azure-id-in-title (feature `azureIdInTitle`, e.g. ABS) ───────────────────
+// After the Azure work item is created, its #id is inserted into the task title
+// right after the standard prefix — "ABS. QMP. Fix X" → "ABS. QMP. 1125. Fix X"
+// — and that numbered title is what the Jira issue is created with.
+
+// Known title prefixes, longest first (mirrors the Dashboard/TaskCreateModal
+// prefix logic — keep in sync when a new prefix is added there).
+const TITLE_PREFIXES = [
+  'ABS. [WS]. Customer Service.', 'ABS. QMP.', 'ABS. MAM.', 'ABS. CM.',
+  'ABSPO.', 'ABS.', 'HT.', 'NSMGM.', 'NSMGCM.', 'NSMG.',
+];
+
+export function insertIdAfterTitlePrefix(title, id) {
+  const t = String(title || '').trim();
+  let prefix = '';
+  for (const p of TITLE_PREFIXES) {
+    if (t.startsWith(p)) { prefix = p; break; }   // list is longest-first
+  }
+  if (prefix) {
+    let rest = t.slice(prefix.length).trimStart();
+    // The known prefix may be followed by extra short prefix tokens the user
+    // typed ("ABS. PO. Test Name" — "PO." belongs to the prefix, not the name).
+    let m;
+    while ((m = rest.match(/^([A-Z][A-Za-z0-9[\]]{0,9}\.)\s+(\S[\s\S]*)$/))) {
+      prefix = `${prefix} ${m[1]}`;
+      rest = m[2];
+    }
+    return `${prefix} ${id}. ${rest}`;
+  }
+  // Unknown prefix: treat a leading run of short dot-terminated segments as the
+  // prefix ("XX. YY. Test Name" → "XX. YY. <id>. Test Name").
+  const m = t.match(/^((?:[^.\s][^.]{0,29}\.\s+)+)(\S[\s\S]*)$/);
+  if (m) return `${m[1].trim()} ${id}. ${m[2]}`;
+  // No prefix at all — the id leads.
+  return `${id}. ${t}`;
+}
+
 // ─── Step counting ────────────────────────────────────────────────────────────
 // Centralised so Dashboard and SyncModal always agree on step count.
 
 export function getCreateStepCount(project) {
-  if (!project.jira) return 1;                       // Azure only
-  if (!project.azure.jiraIdField) return 2;          // Azure + Jira (no link-back field)
-  return 3;                                           // Azure + Jira + link-back
+  const titleStep = project.features?.azureIdInTitle ? 1 : 0;
+  if (!project.jira) return 1 + titleStep;           // Azure only
+  if (!project.azure.jiraIdField) return 2 + titleStep; // Azure + Jira (no link-back field)
+  return 3 + titleStep;                               // Azure + Jira + link-back
 }
 
 export function getEditStepCount(project, jiraKey) {
@@ -141,8 +179,13 @@ export async function createTask(project, title, description, extras = {}, onSte
   // ids back so a retry never creates duplicates.
   const resume = extras.resume || {};
 
-  // ── Step 0: Azure work item ──────────────────────────────────────────────
-  onStep(0, 'pending');
+  // Steps are numbered dynamically: the azureIdInTitle feature inserts an
+  // extra "number the title" step between the Azure create and the Jira create
+  // (getCreateStepCount and SyncModal's buildStepDefs mirror this).
+  let stepIdx = 0;
+
+  // ── Step: Azure work item ────────────────────────────────────────────────
+  onStep(stepIdx, 'pending');
 
   // Upload embedded images as Azure DevOps attachments and replace data URIs
   const { html: processedDesc, files: imageFiles, relations: imageRelations } =
@@ -175,23 +218,40 @@ export async function createTask(project, title, description, extras = {}, onSte
     try {
       item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
     } catch (err) {
-      onStep(0, 'error', err.message);
+      onStep(stepIdx, 'error', err.message);
       throw err;
     }
     itemId  = item.id;
     itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
   }
-  onStep(0, 'done', null, { epicId: itemId, epicUrl: itemUrl });
+  onStep(stepIdx, 'done', null, { epicId: itemId, epicUrl: itemUrl });
+
+  // ── Step (azureIdInTitle only): insert the Azure #id into the title ──────
+  // Recomputed from the original title, so a resumed retry never double-inserts.
+  let finalTitle = title;
+  if (project.features?.azureIdInTitle) {
+    stepIdx++;
+    onStep(stepIdx, 'pending');
+    finalTitle = insertIdAfterTitlePrefix(title, itemId);
+    try {
+      await updateWorkItem(azure.proxyKey, azure.project, itemId, { 'System.Title': finalTitle });
+    } catch (err) {
+      onStep(stepIdx, 'error', err.message);
+      throw err;
+    }
+    onStep(stepIdx, 'done');
+  }
 
   // If no Jira configured for this project — we're done
   if (!jira) {
     const result = { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
-    notifyTaskCreated(project, title, result);
+    notifyTaskCreated(project, finalTitle, result);
     return result;
   }
 
-  // ── Step 1: Jira issue ───────────────────────────────────────────────────
-  onStep(1, 'pending');
+  // ── Step: Jira issue (created with the numbered title) ───────────────────
+  stepIdx++;
+  onStep(stepIdx, 'pending');
   let jiraKey;
   if (resume.jiraKey) {
     jiraKey = resume.jiraKey;
@@ -200,10 +260,10 @@ export async function createTask(project, title, description, extras = {}, onSte
     try {
       jiraItem = await createIssue(
         jira.cloudId, jira.projectKey, jira.issueTypeId,
-        title, processedDesc, itemId, itemUrl, jira.clientRequestIdField, extras.componentId
+        finalTitle, processedDesc, itemId, itemUrl, jira.clientRequestIdField, extras.componentId
       );
     } catch (err) {
-      onStep(1, 'error', err.message);
+      onStep(stepIdx, 'error', err.message);
       throw err;
     }
     jiraKey = jiraItem.key;
@@ -214,26 +274,27 @@ export async function createTask(project, title, description, extras = {}, onSte
     await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, { epicId: itemId, epicUrl: itemUrl });
   }
 
-  onStep(1, 'done', null, { jiraKey, jiraUrl });
+  onStep(stepIdx, 'done', null, { jiraKey, jiraUrl });
 
   if (!azure.jiraIdField) {
     const result = { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
-    notifyTaskCreated(project, title, result);
+    notifyTaskCreated(project, finalTitle, result);
     return result;
   }
 
-  // ── Step 2: Link back — set Jira key on the Azure work item ─────────────
-  onStep(2, 'pending');
+  // ── Step: Link back — set Jira key on the Azure work item ────────────────
+  stepIdx++;
+  onStep(stepIdx, 'pending');
   try {
     await updateWorkItem(azure.proxyKey, azure.project, itemId, { [azure.jiraIdField]: jiraKey });
   } catch (err) {
-    onStep(2, 'error', err.message);
+    onStep(stepIdx, 'error', err.message);
     throw err;
   }
-  onStep(2, 'done');
+  onStep(stepIdx, 'done');
 
   const result = { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
-  notifyTaskCreated(project, title, result);
+  notifyTaskCreated(project, finalTitle, result);
   return result;
 }
 

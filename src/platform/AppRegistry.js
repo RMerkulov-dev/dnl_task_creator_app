@@ -65,6 +65,7 @@ export const PM_TABS = [
   { id: 'component',      name: 'Component' },
   { id: 'iterations',     name: 'Iterations' },
   { id: 'release',        name: 'Release' },
+  { id: 'azure-jira',     name: 'Azure-Jira' },
 ];
 
 // Returns true when the user is allowed to see/use this app entry.
@@ -86,6 +87,7 @@ export const APP_COMPONENTS = {
   'component':     lazy(() => import('../apps/jira_component/JiraComponentApp.jsx')),
   'iterations':    lazy(() => import('../apps/iterations/IterationsApp.jsx')),
   'release':       lazy(() => import('../apps/release/ReleaseApp.jsx')),
+  'azure-jira':    lazy(() => import('../apps/azure_jira/AzureJiraApp.jsx')),
   'fathom-agent':  lazy(() => import('../apps/fathom_agent/FathomAgentApp.jsx')),
   'email-agent':   lazy(() => import('../apps/email_agent/EmailAgentApp.jsx')),
   'status-updates': lazy(() => import('../apps/status_updates/StatusUpdatesApp.jsx')),

@@ -735,6 +735,39 @@ export async function addWorklog(cloudId, issueKey, worklog) {
   return parseJira(res, 'addWorklog');
 }
 
+// Comments on an issue, newest first, with the ADF body pre-rendered to HTML
+// (via our own adfToHtml, so the markup is safe by construction).
+// Returns [{ id, author, created, html }].
+export async function getIssueComments(cloudId, issueKey) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/comment?maxResults=100&orderBy=-created`;
+  const data = await parseJira(await fetch(url), 'getIssueComments');
+  return (data.comments ?? []).map(c => ({
+    id:      c.id,
+    author:  c.author?.displayName || 'Unknown',
+    created: c.created || null,
+    html:    adfToHtml(c.body),
+  }));
+}
+
+// Add a comment; `html` is TipTap-style HTML converted through the same
+// HTML→ADF pass as descriptions.
+export async function addIssueComment(cloudId, issueKey, html) {
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/comment`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: htmlToAdf(html) }),
+  });
+  return parseJira(res, 'addIssueComment');
+}
+
+// Global priority list: [{ id, name, iconUrl }].
+export async function getPriorities(cloudId) {
+  const url = `${jiraBase(cloudId)}/priority`;
+  const data = await parseJira(await fetch(url), 'getPriorities');
+  return Array.isArray(data) ? data : (data.values ?? []);
+}
+
 // Available workflow transitions for an issue, each with the status it leads to.
 export async function getTransitions(cloudId, issueKey) {
   const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/transitions`;

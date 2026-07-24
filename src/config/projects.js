@@ -25,8 +25,11 @@ export const PROJECTS = {
       issueTypeId:          import.meta.env.VITE_JIRA_ABS_ISSUE_TYPE_ID  || '10035',
       clientRequestIdField: import.meta.env.VITE_JIRA_ABS_CUSTOM_FIELD   || 'customfield_10034',
     },
-    // Shows Board (Area Path) + Jira Project + Component selectors on the form
-    features: { iteration: false, story: false, board: true, jiraProject: true, component: true },
+    // Shows Board (Area Path) + Jira Project + Component selectors on the form.
+    // azureIdInTitle: after the Azure item is created its #id is inserted into
+    // the title right after the standard prefix ("ABS. QMP. Fix X" →
+    // "ABS. QMP. 1125. Fix X") before the Jira issue is created.
+    features: { iteration: false, story: false, board: true, jiraProject: true, component: true, azureIdInTitle: true },
     jiraProjectOptions: ['ABS', 'ABSPO'],
     // ABSPO is only available for these boards
     abspoBoards: ['ABS - Project Operations'],
