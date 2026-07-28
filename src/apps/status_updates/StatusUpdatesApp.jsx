@@ -80,6 +80,79 @@ function updateTreeStatus(nodes, key, status, statusCategory) {
   return changed ? out : nodes;
 }
 
+// ── Release-readiness pre-filters ────────────────────────────────────────────
+// Evaluated per EPIC inside the request's Jira tree, over that epic's own tasks:
+//   • maybe ready for UAT — the UAT task itself sits in "Release Ready" /
+//     "UAT Release Ready" (no claim about STAGE);
+//   • ready for UAT  — a STAGE task is Done while the UAT task is NOT Done yet,
+//     i.e. the epic sits on stage and the UAT release is what's next;
+//   • ready for PROD — a PROD task is "Approved for Prod".
+// An Azure work item lands in a filter when ANY of its epics qualifies; the three
+// are independent (an item can show up in several).
+const UAT_READY_RE     = /^(?:uat\s+)?release\s*ready$/i;
+const PROD_APPROVED_RE = /^approved\s+for\s+prod(uction)?\.?$/i;
+
+// The env of a task is one of the leading short dot-segments of its summary:
+// "ABS. STAGE. [WS]. Customer Service. Advantage Module value" → ABS, STAGE;
+// "ABS. BA. DEV. [WS]. …" → ABS, BA, DEV. Scanning stops at the first segment
+// that isn't a short all-letters token ("[WS]", free text), so an env word
+// appearing later in the title can't be mistaken for the task's own env.
+function envTokens(summary) {
+  const out = [];
+  for (const raw of String(summary || '').split('.')) {
+    const seg = raw.trim();
+    if (!seg) continue;
+    if (!/^[a-z]{2,6}$/i.test(seg)) break;
+    out.push(seg.toUpperCase());
+  }
+  return out;
+}
+
+const isEnv = (n, env) => envTokens(n.summary).includes(env);
+
+const isDoneNode = n => n.statusCategory === 'done' || /^done$/i.test((n.status || '').trim());
+
+// Flatten one epic's subtree (its tasks, and anything below them).
+function collectTasks(nodes, out = []) {
+  for (const n of nodes || []) {
+    out.push(n);
+    if (n.children?.length) collectTasks(n.children, out);
+  }
+  return out;
+}
+
+// The epics of a request tree. A tree with no epic at all is treated as one
+// implicit group, so requests that hang tasks straight off the request still
+// get evaluated.
+function releaseGroups(tree) {
+  const epics = [];
+  const walk = (nodes) => {
+    for (const n of nodes || []) {
+      if (/epic/i.test(n.type || '')) epics.push(n);
+      if (n.children?.length) walk(n.children);
+    }
+  };
+  walk(tree);
+  return epics.length ? epics.map(e => collectTasks(e.children)) : [collectTasks(tree)];
+}
+
+// { uatMaybe, uat, prod } for one Azure item, from its Jira request's tree.
+function releaseStagesOf(jiraKey, jira, jiraChildren) {
+  const j = jiraKey ? jira.get(jiraKey) : null;
+  if (!j) return { uatMaybe: false, uat: false, prod: false };
+  let uatMaybe = false, uat = false, prod = false;
+  for (const tasks of releaseGroups(jiraChildren.get(j.key))) {
+    const stageDone = tasks.some(n => isEnv(n, 'STAGE') && isDoneNode(n));
+    const uatTasks  = tasks.filter(n => isEnv(n, 'UAT'));
+    if (uatTasks.some(n => UAT_READY_RE.test((n.status || '').trim()))) uatMaybe = true;
+    if (stageDone && uatTasks.length && uatTasks.some(n => !isDoneNode(n))) uat = true;
+    if (tasks.some(n => isEnv(n, 'PROD')
+                     && PROD_APPROVED_RE.test((n.status || '').trim()))) prod = true;
+    if (uatMaybe && uat && prod) break;
+  }
+  return { uatMaybe, uat, prod };
+}
+
 // Flatten a Jira descendant tree into a compact list for the AI snapshot.
 function flattenJiraTree(nodes, out = []) {
   for (const n of nodes || []) {
@@ -1027,7 +1100,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
   // Search + filter
   const [query,        setQuery]        = useState('');
-  const [activeFilter, setActiveFilter] = useState('all');   // all | linked | missing | unlinked
+  // all | linked | missing | unlinked | ready | unread | rel-uat | rel-prod
+  const [activeFilter, setActiveFilter] = useState('all');
   const [azureStateFilter, setAzureStateFilter] = useState(''); // '' = all Azure states
 
   // Azure state editing: cache valid states per work-item type (per project)
@@ -1283,17 +1357,27 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
     return flat.length > 0 && flat.every(n => n.statusCategory === 'done');
   }, [jira, jiraChildren]);
 
+  // Per-epic release readiness of an item (see releaseStagesOf).
+  const releaseStages = useCallback(
+    (it) => releaseStagesOf(it.jiraKey, jira, jiraChildren),
+    [jira, jiraChildren],
+  );
+
   // ── Summary counts (always over the full set, not the filtered view) ───────
   const stats = useMemo(() => {
-    let linked = 0, missing = 0, unlinked = 0, ready = 0;
+    let linked = 0, missing = 0, unlinked = 0, ready = 0, relUatMaybe = 0, relUat = 0, relProd = 0;
     for (const it of items) {
       if (!it.jiraKey) unlinked++;
       else if (jira.has(it.jiraKey)) linked++;
       else missing++;
       if (isReadyToClose(it)) ready++;
+      const rel = releaseStages(it);
+      if (rel.uatMaybe) relUatMaybe++;
+      if (rel.uat)      relUat++;
+      if (rel.prod)     relProd++;
     }
-    return { total: items.length, linked, missing, unlinked, ready };
-  }, [items, jira, isReadyToClose]);
+    return { total: items.length, linked, missing, unlinked, ready, relUatMaybe, relUat, relProd };
+  }, [items, jira, isReadyToClose, releaseStages]);
 
   // Unread comments per item = System.CommentCount − comments already marked read.
   const itemUnread = useCallback(
@@ -1365,6 +1449,9 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         if (activeFilter === 'unlinked' && it.jiraKey)                             return false;
         if (activeFilter === 'ready'    && !isReadyToClose(it))                    return false;
         if (activeFilter === 'unread'   && itemUnread(it) <= 0)                    return false;
+        if (activeFilter === 'rel-uat-maybe' && !releaseStages(it).uatMaybe)       return false;
+        if (activeFilter === 'rel-uat'  && !releaseStages(it).uat)                 return false;
+        if (activeFilter === 'rel-prod' && !releaseStages(it).prod)                return false;
       }
       if (!q) return true;
       const j = it.jiraKey ? jira.get(it.jiraKey) : null;
@@ -1372,12 +1459,21 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [items, jira, query, activeFilter, azureStateFilter, aiMatchIds, isReadyToClose, itemUnread]);
+  }, [items, jira, query, activeFilter, azureStateFilter, aiMatchIds, isReadyToClose, itemUnread, releaseStages]);
 
   const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
 
   const isFiltering = !!query.trim() || activeFilter !== 'all' || !!azureStateFilter || !!aiMatchIds;
   const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
+
+  // One way back to the unfiltered list, whatever narrowed it (chip, search,
+  // Azure status, AI match).
+  const clearFilters = useCallback(() => {
+    setActiveFilter('all');
+    setQuery('');
+    setAzureStateFilter('');
+    setAiMatchIds(null);
+  }, []);
 
   // ── Export the current view (filtered or full) as a flat table ─────────────
   const exportBaseName = useCallback(() => {
@@ -1513,6 +1609,46 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
           {loaded && (
             <div className="su-stats">
+              {/* Release pre-filters — per-epic STAGE/UAT/PROD task states. */}
+              <div className="su-stats-release">
+                <span className="su-stats-release-label">Release</span>
+                <button
+                  className={`su-stat su-stat-uat-maybe su-stat-btn${activeFilter === 'rel-uat-maybe' ? ' active' : ''}`}
+                  onClick={() => toggleFilter('rel-uat-maybe')}
+                  title={activeFilter === 'rel-uat-maybe'
+                    ? 'Click to remove this filter'
+                    : 'Epics whose UAT task is in Release Ready / UAT Release Ready — possibly ready for UAT'}
+                >
+                  <span className="su-stat-num">{stats.relUatMaybe}</span> maybe ready for UAT
+                  {activeFilter === 'rel-uat-maybe' && <span className="su-stat-x">✕</span>}
+                </button>
+                <button
+                  className={`su-stat su-stat-uat su-stat-btn${activeFilter === 'rel-uat' ? ' active' : ''}`}
+                  onClick={() => toggleFilter('rel-uat')}
+                  title={activeFilter === 'rel-uat'
+                    ? 'Click to remove this filter'
+                    : 'Epics whose STAGE task is Done while the UAT task is not Done yet — next UAT release'}
+                >
+                  <span className="su-stat-num">{stats.relUat}</span> ready for UAT
+                  {activeFilter === 'rel-uat' && <span className="su-stat-x">✕</span>}
+                </button>
+                <button
+                  className={`su-stat su-stat-prod su-stat-btn${activeFilter === 'rel-prod' ? ' active' : ''}`}
+                  onClick={() => toggleFilter('rel-prod')}
+                  title={activeFilter === 'rel-prod'
+                    ? 'Click to remove this filter'
+                    : 'Epics whose PROD task is "Approved for Prod" — next PROD release'}
+                >
+                  <span className="su-stat-num">{stats.relProd}</span> ready for PROD
+                  {activeFilter === 'rel-prod' && <span className="su-stat-x">✕</span>}
+                </button>
+                {activeFilter !== 'all' && (
+                  <button className="su-show-all" onClick={clearFilters}>
+                    ← Show all {stats.total} items
+                  </button>
+                )}
+              </div>
+
               <button
                 className={`su-stat su-stat-btn${activeFilter === 'all' ? ' active' : ''}`}
                 onClick={() => setActiveFilter('all')}
@@ -1628,7 +1764,14 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                 </span>
               )}
               {isFiltering && (
-                <span className="su-result-count">{filteredItems.length} / {items.length}</span>
+                <button
+                  className="su-clear-filters"
+                  onClick={clearFilters}
+                  title="Back to the full list — clears the chip filter, search, status and AI match"
+                >
+                  <span className="su-result-count">{filteredItems.length} / {items.length}</span>
+                  ✕ Show all
+                </button>
               )}
             </div>
           )}

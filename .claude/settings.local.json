@@ -181,7 +181,12 @@
       "Bash(node -e \"console.log\\('express', require\\('express/package.json'\\).version\\)\")",
       "Bash(git mv *)",
       "Bash(node --check api/checklistRoutes.js)",
-      "Bash(sed -i '' 's|`src/apps/checklist/ChecklistApp.jsx`, `api/checklist.js`|`src/apps/checklist/ChecklistApp.jsx`, `api/checklistRoutes.js`|; s|per-user server-side \\(api/checklist.js\\)|per-user server-side \\(api/checklistRoutes.js\\)|' CLAUDE.md)"
+      "Bash(sed -i '' 's|`src/apps/checklist/ChecklistApp.jsx`, `api/checklist.js`|`src/apps/checklist/ChecklistApp.jsx`, `api/checklistRoutes.js`|; s|per-user server-side \\(api/checklist.js\\)|per-user server-side \\(api/checklistRoutes.js\\)|' CLAUDE.md)",
+      "Bash(./node_modules/.bin/esbuild --loader=jsx --jsx=automatic src/apps/status_updates/StatusUpdatesApp.jsx --outfile=/dev/null)",
+      "Bash(./node_modules/.bin/esbuild src/index.css --outfile=/dev/null)",
+      "Bash(./node_modules/.bin/esbuild --jsx=automatic src/apps/status_updates/StatusUpdatesApp.jsx --outfile=/dev/null)",
+      "Bash(awk 'NR>=83 && NR<=160' src/apps/status_updates/StatusUpdatesApp.jsx)",
+      "Bash(awk '/^\\\\/\\\\/ Flatten a Jira descendant tree/{exit} {print}')"
     ]
   }
 }

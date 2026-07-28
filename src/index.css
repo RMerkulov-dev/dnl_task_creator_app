@@ -4019,6 +4019,46 @@ html, body, #root {
 .su-stat-comments.has-unread .su-stat-num { color: #f472b6; }
 .su-stat-sub { display: block; font-size: 11px; color: var(--text-3); margin-top: 2px; }
 
+/* Release pre-filters (ready for UAT / ready for PROD) — own group at the top
+   of the sidebar counters. */
+.su-stats-release {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.su-stats-release-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.su-stat-uat-maybe .su-stat-num,
+.su-stat-uat-maybe { color: #a78bfa; }
+.su-stat-uat  .su-stat-num,
+.su-stat-uat  { color: #60a5fa; }
+.su-stat-prod .su-stat-num,
+.su-stat-prod { color: #34d399; }
+
+/* ✕ on the chip that is currently filtering — click it again to switch off. */
+.su-stat-x { margin-left: 6px; font-size: 10px; opacity: 0.75; }
+
+/* Explicit way back to the unfiltered list, next to the release chips. */
+.su-show-all {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent-1);
+  cursor: pointer;
+}
+.su-show-all:hover { text-decoration: underline; }
+
 /* Bulk "mark all comments read" reset button under the sidebar counters. */
 .su-mark-all-read {
   display: inline-flex; align-items: center; gap: 6px;
@@ -4486,6 +4526,24 @@ button.su-status {
   font-family: var(--font-mono);
   white-space: nowrap;
 }
+
+/* "N / M ✕ Show all" — the toolbar reset for every kind of narrowing. */
+.su-clear-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.su-clear-filters:hover { color: var(--text-1); border-color: var(--accent-1); }
 
 .su-children-loading {
   display: inline-flex;
