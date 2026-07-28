@@ -136,22 +136,49 @@ function releaseGroups(tree) {
   return epics.length ? epics.map(e => collectTasks(e.children)) : [collectTasks(tree)];
 }
 
-// { uatMaybe, uat, prod } for one Azure item, from its Jira request's tree.
+// { uatMaybe, uat, prod } for one Azure item, from its Jira request's tree —
+// plus `hits`: per stage, the Jira tasks that actually made the rule fire
+// ({ key, why }), so an active pre-filter can highlight them in the tree.
+const EMPTY_HITS = { uatMaybe: [], uat: [], prod: [] };
+
 function releaseStagesOf(jiraKey, jira, jiraChildren) {
   const j = jiraKey ? jira.get(jiraKey) : null;
-  if (!j) return { uatMaybe: false, uat: false, prod: false };
+  if (!j) return { uatMaybe: false, uat: false, prod: false, hits: EMPTY_HITS };
+  const hits = { uatMaybe: [], uat: [], prod: [] };
   let uatMaybe = false, uat = false, prod = false;
   for (const tasks of releaseGroups(jiraChildren.get(j.key))) {
-    const stageDone = tasks.some(n => isEnv(n, 'STAGE') && isDoneNode(n));
+    const stageDone = tasks.filter(n => isEnv(n, 'STAGE') && isDoneNode(n));
     const uatTasks  = tasks.filter(n => isEnv(n, 'UAT'));
-    if (uatTasks.some(n => UAT_READY_RE.test((n.status || '').trim()))) uatMaybe = true;
-    if (stageDone && uatTasks.length && uatTasks.some(n => !isDoneNode(n))) uat = true;
-    if (tasks.some(n => isEnv(n, 'PROD')
-                     && PROD_APPROVED_RE.test((n.status || '').trim()))) prod = true;
-    if (uatMaybe && uat && prod) break;
+
+    const uatReady = uatTasks.filter(n => UAT_READY_RE.test((n.status || '').trim()));
+    if (uatReady.length) {
+      uatMaybe = true;
+      for (const n of uatReady) hits.uatMaybe.push({ key: n.key, why: `UAT task is "${n.status}"` });
+    }
+
+    const uatOpen = uatTasks.filter(n => !isDoneNode(n));
+    if (stageDone.length && uatOpen.length) {
+      uat = true;
+      for (const n of stageDone) hits.uat.push({ key: n.key, why: 'STAGE task is Done' });
+      for (const n of uatOpen)   hits.uat.push({ key: n.key, why: `UAT task is not Done yet ("${n.status}")` });
+    }
+
+    const prodApproved = tasks.filter(n => isEnv(n, 'PROD')
+                                        && PROD_APPROVED_RE.test((n.status || '').trim()));
+    if (prodApproved.length) {
+      prod = true;
+      for (const n of prodApproved) hits.prod.push({ key: n.key, why: `PROD task is "${n.status}"` });
+    }
   }
-  return { uatMaybe, uat, prod };
+  return { uatMaybe, uat, prod, hits };
 }
+
+// Release pre-filter id → the stage of `releaseStagesOf` it filters on.
+const REL_FILTER_STAGE = {
+  'rel-uat-maybe': 'uatMaybe',
+  'rel-uat':       'uat',
+  'rel-prod':      'prod',
+};
 
 // Flatten a Jira descendant tree into a compact list for the AI snapshot.
 function flattenJiraTree(nodes, out = []) {
@@ -378,6 +405,10 @@ const StatusEditCtx = createContext(null);
 // Same idea for the Azure side: proxy/project, a cache of valid states per work-
 // item type, a lazy loader, and the optimistic "state changed" callback.
 const AzureEditCtx = createContext(null);
+
+// While a release pre-filter is active: Map<jiraKey, why> of the tasks that made
+// the rule fire, so JiraLine can highlight itself (null = no release filter).
+const ReleaseHitsCtx = createContext(null);
 
 // ─── Anchored popover positioning ─────────────────────────────────────────────
 // Keep a fixed-position menu glued to its trigger. Previously these menus closed
@@ -707,8 +738,13 @@ function StatusChip({ issueKey, status, statusCategory }) {
 // One line in the Jira column: type chip · key · summary · status · assignee.
 // Laid out on a fixed grid so every line aligns in columns (no indentation drift).
 function JiraLine({ issue, isRequest }) {
+  // Highlighted when this very task is what made the active release rule fire.
+  const why = useContext(ReleaseHitsCtx)?.get(issue.key);
   return (
-    <div className={`su-jira-line${isRequest ? ' su-jira-request' : ''}`}>
+    <div
+      className={`su-jira-line${isRequest ? ' su-jira-request' : ''}${why ? ' su-jira-hit' : ''}`}
+      title={why ? `Matches the active release filter — ${why}` : undefined}
+    >
       <span className={`su-type ${typeClass(issue.type)}`} title={issue.type}>{issue.type || '—'}</span>
       <a className="su-jira-key" href={getJiraUrl(issue.key)} target="_blank" rel="noreferrer">
         {isRequest && <LinkIcon />} {issue.key}
@@ -1020,18 +1056,22 @@ function WorkItemRow({ item, jira, jiraChildren, depth }) {
 
   return (
     <div className="su-row" style={{ paddingLeft: 16 + depth * 22 }}>
-      {/* Left — Azure DevOps work item */}
+      {/* Left — Azure DevOps work item, stacked: meta · title · assignee */}
       <div className="su-cell su-azure">
-        <span className={`su-type su-type-${item.type.toLowerCase().replace(/\s+/g, '-')}`}>{item.type}</span>
-        {item.url
-          ? <a className="su-az-id su-az-link" href={item.url} target="_blank" rel="noreferrer" title="Open in Azure DevOps">#{item.id}</a>
-          : <span className="su-az-id">#{item.id}</span>}
+        <div className="su-az-meta">
+          <span className={`su-type su-type-${item.type.toLowerCase().replace(/\s+/g, '-')}`}>{item.type}</span>
+          {item.url
+            ? <a className="su-az-id su-az-link" href={item.url} target="_blank" rel="noreferrer" title="Open in Azure DevOps">#{item.id}</a>
+            : <span className="su-az-id">#{item.id}</span>}
+          <CommentButton item={item} />
+          <AzureStateChip item={item} />
+        </div>
         <span className="su-title" title={item.title}>{item.title}</span>
-        <span className="su-assignee" title={item.assignedTo || 'Unassigned'} style={{ maxWidth: 140, flexShrink: 0 }}>
-          {item.assignedTo || 'Unassigned'}
-        </span>
-        <CommentButton item={item} />
-        <AzureStateChip item={item} />
+        <div className="su-az-who">
+          <span className="su-assignee" title={item.assignedTo || 'Unassigned'}>
+            {item.assignedTo || 'Unassigned'}
+          </span>
+        </div>
       </div>
 
       {/* Right — linked Jira request and all its children */}
@@ -1463,6 +1503,19 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
 
   const { roots, childrenOf } = useMemo(() => buildTree(filteredItems), [filteredItems]);
 
+  // With a release pre-filter on, collect the Jira tasks that made the rule fire
+  // for the visible items — they get highlighted in the Jira column, so it is
+  // obvious *why* a request is in the list. null → no highlighting.
+  const releaseHits = useMemo(() => {
+    const stage = REL_FILTER_STAGE[activeFilter];
+    if (!stage || aiMatchIds) return null;
+    const m = new Map();
+    for (const it of filteredItems) {
+      for (const h of releaseStages(it).hits[stage]) if (!m.has(h.key)) m.set(h.key, h.why);
+    }
+    return m.size ? m : null;
+  }, [filteredItems, activeFilter, aiMatchIds, releaseStages]);
+
   const isFiltering = !!query.trim() || activeFilter !== 'all' || !!azureStateFilter || !!aiMatchIds;
   const toggleFilter = (f) => setActiveFilter(prev => (prev === f ? 'all' : f));
 
@@ -1642,6 +1695,12 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                   <span className="su-stat-num">{stats.relProd}</span> ready for PROD
                   {activeFilter === 'rel-prod' && <span className="su-stat-x">✕</span>}
                 </button>
+                {releaseHits && (
+                  <span className={`su-hl-legend su-hl-${activeFilter}`}>
+                    <span className="su-hl-swatch" />
+                    {releaseHits.size} highlighted task{releaseHits.size === 1 ? '' : 's'} triggered the rule
+                  </span>
+                )}
                 {activeFilter !== 'all' && (
                   <button className="su-show-all" onClick={clearFilters}>
                     ← Show all {stats.total} items
@@ -1848,7 +1907,8 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
             <StatusEditCtx.Provider value={editCtx}>
               <AzureEditCtx.Provider value={azEditCtx}>
               <CommentsCtx.Provider value={commentsCtx}>
-                <div className="su-table">
+              <ReleaseHitsCtx.Provider value={releaseHits}>
+                <div className={`su-table${releaseHits ? ` su-hl su-hl-${activeFilter}` : ''}`}>
                   <div className="su-table-head">
                     <span className="su-cell su-head-cell">
                       <span>Azure DevOps</span>
@@ -1880,6 +1940,7 @@ export default function StatusUpdatesApp({ user, allowedProjects, onLogout }) {
                     <TreeRows roots={roots} childrenOf={childrenOf} jira={jira} jiraChildren={jiraChildren} />
                   </div>
                 </div>
+              </ReleaseHitsCtx.Provider>
               </CommentsCtx.Provider>
               </AzureEditCtx.Provider>
             </StatusEditCtx.Provider>
