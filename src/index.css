@@ -43,6 +43,36 @@
   --tint-strong:    rgba(255,255,255,0.1);
   --shadow-card:    none;
   --shadow-pop:     0 12px 40px rgba(0,0,0,0.5);
+
+  /* ── Liquid glass (iOS-26 style) ───────────────────────────────────────────
+     One set of tokens drives every glass surface: the PM switcher, the sidebar,
+     and every .btn. Dark = smoked glass — a dark base tint with a whisper of
+     white falloff; a heavier white gradient reads as grey plastic. Depth comes
+     from the rim light (--glass-rim), never from a drop shadow. */
+  --glass-fill:      linear-gradient(180deg, rgba(255,255,255,0.055) 0%,
+                                             rgba(255,255,255,0.015) 100%);
+  --glass-fill-soft: linear-gradient(180deg, rgba(255,255,255,0.035) 0%,
+                                             rgba(255,255,255,0.008) 100%);
+  --glass-base:      rgba(10,10,11,0.30);
+  --glass-blur:      blur(20px) saturate(170%);
+  --glass-blur-sm:   blur(12px) saturate(160%);
+  --glass-rim:       linear-gradient(150deg,
+                       rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.16) 18%,
+                       rgba(255,255,255,0.03) 42%, rgba(255,255,255,0.02) 62%,
+                       rgba(255,255,255,0.30) 100%);
+  --glass-gloss:     rgba(255,255,255,0.45);
+  --glass-inner:     inset 0 -7px 14px -10px rgba(0,0,0,0.55);
+  --glass-hover:     rgba(255,255,255,0.09);
+  --glass-edge:      rgba(255,255,255,0.10);
+  /* Resting surface of a glass button, and of a selected/active surface. Split
+     from --glass-fill because on a near-white background white-on-white has no
+     edge to read: the light theme makes these matte instead of transparent. */
+  --glass-btn:       linear-gradient(180deg, rgba(255,255,255,0.055) 0%,
+                                             rgba(255,255,255,0.015) 100%),
+                     rgba(10,10,11,0.30);
+  --glass-sel:       linear-gradient(180deg, rgba(255,255,255,0.11) 0%,
+                                             rgba(255,255,255,0.035) 100%),
+                     rgba(255,255,255,0.05);
 }
 
 [data-theme="light"] {
@@ -77,6 +107,32 @@
   --tint-strong:    rgba(0,0,0,0.08);
   --shadow-card:    0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
   --shadow-pop:     0 12px 40px rgba(0,0,0,0.12);
+
+  /* Liquid glass — light: frosted white glass, rim light nearly pure white. */
+  --glass-fill:      linear-gradient(180deg, rgba(255,255,255,0.80) 0%,
+                                             rgba(255,255,255,0.58) 100%);
+  --glass-fill-soft: linear-gradient(180deg, rgba(255,255,255,0.55) 0%,
+                                             rgba(255,255,255,0.32) 100%);
+  --glass-base:      rgba(255,255,255,0.35);
+  --glass-blur:      blur(20px) saturate(160%);
+  --glass-blur-sm:   blur(12px) saturate(150%);
+  /* Stronger dark segments than the dark theme's rim: on a near-white page the
+     edge is the only thing separating glass from background. */
+  --glass-rim:       linear-gradient(150deg,
+                       rgba(255,255,255,1) 0%, rgba(255,255,255,0.6) 18%,
+                       rgba(10,10,11,0.16) 45%, rgba(10,10,11,0.19) 65%,
+                       rgba(255,255,255,0.95) 100%);
+  --glass-gloss:     rgba(255,255,255,0.9);
+  --glass-inner:     none;
+  --glass-hover:     rgba(10,10,11,0.055);
+  --glass-edge:      rgba(10,10,11,0.10);
+  /* Matte, faintly grey — a plain translucent white button is invisible here. */
+  --glass-btn:       linear-gradient(180deg, rgba(255,255,255,0.92) 0%,
+                                             rgba(255,255,255,0.66) 100%),
+                     rgba(10,10,11,0.05);
+  --glass-sel:       linear-gradient(180deg, rgba(255,255,255,0.85) 0%,
+                                             rgba(255,255,255,0.5) 100%),
+                     rgba(10,10,11,0.10);
 }
 
 html, body, #root {
@@ -225,8 +281,13 @@ body {
   color: var(--text-1);
 }
 
-/* ─── Buttons ────────────────────────────────────────────────────────────────── */
+/* ─── Buttons (liquid glass) ───────────────────────────────────────────────────
+   Every .btn is a glass slab: translucent tint + blurred backdrop, a gradient
+   specular rim instead of a flat border (the ::after ring comes from
+   `.glass-btn::after`, applied to .btn below), a gloss sweep on top, and a gel
+   squish on press. Variants only swap the tint. */
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -237,32 +298,70 @@ body {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   border: none;
-  border-radius: var(--r-md);
+  border-radius: 11px;
   cursor: pointer;
-  transition: background 0.18s, color 0.18s, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.18s, filter 0.18s;
+  transition: background 0.18s, color 0.18s, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.18s;
   padding: 14px 22px;
+  background: var(--glass-btn);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  color: var(--text-1);
+  /* No overflow:hidden — the rim/gloss layers already inherit the radius, and
+     clipping would trap fixed-position menus anchored inside a button. */
 }
 
-.btn:active { transform: scale(0.97); }
+/* Specular rim ring (same recipe as .glass-panel::after). */
+.btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--glass-rim);
+  -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+          mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* Gloss across the upper half of the slab. */
+.btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg,
+      rgba(255, 255, 255, 0.20) 0%,
+      rgba(255, 255, 255, 0.05) 32%,
+      rgba(255, 255, 255, 0) 55%);
+  pointer-events: none;
+}
+
+/* Squish on press, spring back on release (the transition curve overshoots). */
+.btn:active:not(:disabled) { transform: scale(0.97, 0.94); }
 .btn:disabled { opacity: 0.32; cursor: not-allowed; pointer-events: none; }
 
 .btn-primary {
   width: 100%;
-  background: var(--accent-1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0) 58%),
+    color-mix(in srgb, var(--accent-1) 90%, transparent);
   color: var(--accent-ink);
   box-shadow: none;
 }
 
 .btn-primary:hover:not(:disabled) {
-  transform: scale(1.025);
-  filter: brightness(0.88);
+  transform: scale(1.02);
+  filter: brightness(1.06) saturate(1.05);
   box-shadow: none;
   opacity: 1;
 }
 
+/* Clear glass: lighter than a solid action button but still matte enough to
+   have an edge on a near-white page. */
 .btn-ghost {
-  background: transparent;
-  border: 1px solid var(--border);
+  background: var(--glass-btn);
   color: var(--text-2);
   padding: 10px 16px;
   font-size: 11px;
@@ -270,20 +369,21 @@ body {
 
 .btn-danger {
   width: 100%;
-  background: var(--red);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0) 58%),
+    color-mix(in srgb, var(--red) 90%, transparent);
   color: #fff;
   box-shadow: none;
 }
 
 .btn-danger:hover:not(:disabled) {
-  background: #F87171;
+  filter: brightness(1.08);
   box-shadow: none;
   opacity: 1;
 }
 
-.btn-ghost:hover {
-  background: transparent;
-  border-color: var(--border-hi);
+.btn-ghost:hover:not(:disabled) {
+  background: var(--glass-sel);
   color: var(--text-1);
 }
 
@@ -1177,8 +1277,9 @@ body {
   width: 88px;
   min-width: 88px;
   height: 100vh;
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border);
+  /* Glass rail: the tint/blur come from .glass-rail; the right edge is a
+     gradient rim (see .glass-rail::after) instead of a flat 1px border. */
+  background: var(--glass-fill-soft), var(--bg-surface);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1227,58 +1328,154 @@ body {
   pointer-events: none;
 }
 
-/* Liquid-glass segmented control: a translucent, blurred track (content scrolls
-   through it) with a specular top edge instead of a drop shadow. */
+/* ── LIQUID GLASS PRIMITIVES (iOS-26 style) ───────────────────────────────────
+   Shared by the PM switcher, the sidebar rail and every .btn. Layers, back to
+   front, on any glass surface:
+     1. the surface itself  — translucent tint + blurred backdrop (frosted base)
+     2. .glass-refract      — displaced backdrop, masked to the rim (refraction)
+     3. .glass-pill-fill    — sliding indicator's body (+ gel squish)
+     4. content             — labels, icons
+     5. ::after rim         — non-uniform specular ring (the "lit edge")
+   Depth comes from the rim light, never from a drop shadow. All colours come
+   from the --glass-* tokens in :root / [data-theme="light"]. */
+.glass-panel,
+.glass-rail {
+  position: relative;
+  background: var(--glass-fill), var(--glass-base);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-inner);
+}
+
+/* Layer 5 — specular rim: a 1px gradient ring (masked to a ring, not a filled
+   box) — bright where the light hits, shaded at the bottom, with a second catch
+   on the lower right. A uniform border reads as plastic. */
+.glass-panel::after,
+.glass-btn::after,
+.sidebar-logout-btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: var(--glass-rim);
+  -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+          mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Layer 2 — refraction. Ring-masked layer whose backdrop goes through the SVG
+   displacement filter, so content behind the edge bends instead of just
+   blurring. `padding` sets the ring width; the mask keeps only that ring.
+   Displacement only — blurring here would re-blur the surface's already blurred
+   backdrop and leave a brightness seam where the ring ends. */
+.glass-refract {
+  position: absolute;
+  inset: 0;
+  padding: 10px;
+  border-radius: inherit;
+  backdrop-filter: url(#liquid-glass);
+  -webkit-backdrop-filter: url(#liquid-glass);
+  -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+          mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Layer 3 — body of a sliding indicator: violet glass with a glossy top edge,
+   liquid depth at the bottom and a thin glass wall. */
+.glass-pill-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(140deg, rgba(99, 102, 241, 0.94) 0%,
+                                      rgba(139, 92, 246, 0.84) 100%);
+  backdrop-filter: blur(6px) saturate(150%);
+  -webkit-backdrop-filter: blur(6px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -3px 8px rgba(46, 16, 101, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  transform-origin: 50% 50%;
+}
+
+/* Accent-tinted variant (theme toggle thumb). */
+.glass-pill-fill.accent {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0) 60%),
+    color-mix(in srgb, var(--accent-1) 88%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+/* Sheen across the pill's own surface. */
+.glass-pill-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(115deg,
+      rgba(255, 255, 255, 0.28) 0%,
+      rgba(255, 255, 255, 0.05) 34%,
+      rgba(255, 255, 255, 0) 55%);
+  pointer-events: none;
+}
+
+/* Gel motion: the indicator stretches along the direction of travel and settles
+   back. ease-in-out per segment — a front-loaded curve snaps through the stretch
+   too fast to be seen. */
+.glass-pill-fill.gel   { animation: glassGelX 0.46s ease-in-out both; }
+.glass-pill-fill.gel-y { animation: glassGelY 0.46s ease-in-out both; }
+
+@keyframes glassGelX {
+  0%   { transform: scale(1, 1); }
+  26%  { transform: scale(1.075, 0.9); }
+  58%  { transform: scale(0.975, 1.035); }
+  80%  { transform: scale(1.008, 0.99); }
+  100% { transform: scale(1, 1); }
+}
+
+@keyframes glassGelY {
+  0%   { transform: scale(1, 1); }
+  26%  { transform: scale(0.9, 1.075); }
+  58%  { transform: scale(1.035, 0.975); }
+  80%  { transform: scale(0.99, 1.008); }
+  100% { transform: scale(1, 1); }
+}
+
+/* Invisible host for the SVG displacement filter (no layout, no paint). */
+.glass-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ── PM segmented switcher (uses the primitives above) ──────────────────────── */
 .pm-switcher {
   pointer-events: auto;
   align-self: flex-start;
-  position: relative;                   /* anchors the sliding active pill */
   display: flex;
   gap: 4px;
   margin-top: 10px;                     /* centres the ~40px control in the 60px header */
   padding: 4px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%,
-                                      rgba(255, 255, 255, 0.03) 55%,
-                                      rgba(255, 255, 255, 0.055) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.20),      /* light catching the top rim */
-    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  border-radius: 15px;
 }
 
-/* Light theme: the glass is frosted-white instead of smoked. */
-[data-theme="light"] .pm-switcher {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75) 0%,
-                                      rgba(255, 255, 255, 0.45) 60%,
-                                      rgba(255, 255, 255, 0.62) 100%);
-  border-color: rgba(10, 10, 11, 0.07);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    inset 0 -1px 0 rgba(10, 10, 11, 0.03);
-}
-
-/* The filled indicator: one element that slides/resizes to the active tab
-   (geometry measured in PmWorkspace.jsx) instead of the background jumping.
-   Slightly translucent + its own sheen so it reads as glass on glass. */
 .pm-switcher-pill {
   position: absolute;
   top: 4px;
   bottom: 4px;
   left: 0;
-  border-radius: 10px;
-  background: linear-gradient(140deg, rgba(99, 102, 241, 0.92) 0%,
-                                      rgba(139, 92, 246, 0.82) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(6px) saturate(140%);
-  -webkit-backdrop-filter: blur(6px) saturate(140%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.38),      /* glossy top */
-    inset 0 -2px 6px rgba(46, 16, 101, 0.22);     /* liquid depth at the bottom */
+  border-radius: 11px;                  /* concentric with the 15px track − 4px pad */
   pointer-events: none;
-  z-index: 0;
+  z-index: 1;
 }
 
 /* Transition only once the first measurement landed, so it doesn't fly in
@@ -1293,7 +1490,7 @@ body {
   border: none;
   background: transparent;
   position: relative;
-  z-index: 1;
+  z-index: 2;
   color: var(--text-2);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -1317,14 +1514,21 @@ body {
   background: rgba(10, 10, 11, 0.05);
 }
 
-/* Background lives on the sliding pill — the active tab only owns its text. */
+/* Background lives on the sliding pill — the active tab only owns its text.
+   The shadow keeps the label legible when bright content refracts underneath
+   (Apple's adaptive-contrast trick, minus the sampling). */
 .pm-tab.active {
   color: #fff;
   background: transparent;
+  text-shadow: 0 1px 2px rgba(46, 16, 101, 0.45);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pm-switcher-pill.ready { transition: none; }
+  .pm-switcher-pill.ready,
+  .sidebar-nav-pill.ready,
+  .theme-toggle-thumb.ready { transition: none; }
+  .glass-pill-fill.gel,
+  .glass-pill-fill.gel-y { animation: none; }
 }
 
 @media (max-width: 720px) {
@@ -1357,8 +1561,25 @@ body {
   margin-bottom: 16px;
 }
 
+/* Right edge of the rail: rim light, brightest at the top, fading down. */
+.glass-rail::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 1px;
+  background: linear-gradient(180deg,
+      var(--glass-gloss) 0%,
+      var(--border) 22%,
+      var(--border) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
 /* ── Nav area ── */
 .sidebar-nav {
+  position: relative;                   /* anchors the sliding glass pill */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1367,9 +1588,36 @@ body {
   flex-shrink: 0;
 }
 
+/* One glass pill that slides down/up to the selected app. */
+.sidebar-nav-pill {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  top: 0;
+  border-radius: 16px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.sidebar-nav-pill.ready {
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1),
+              height    0.34s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Softer than the PM switcher's pill: this one sits behind an icon + label, so
+   a full violet fill would fight the accent-coloured icon. Uses --glass-sel,
+   which is matte in the light theme (white-on-white has no edge to read). */
+.sidebar-nav-pill .glass-pill-fill {
+  background: var(--glass-sel);
+  box-shadow:
+    inset 0 1px 0 var(--glass-gloss),
+    inset 0 0 0 1px var(--glass-edge);
+}
+
 /* ── App icon button ── */
 .sidebar-app-btn {
   position: relative;
+  z-index: 1;                           /* above the sliding pill */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1379,30 +1627,32 @@ body {
   cursor: pointer;
   padding: 8px 0;
   width: 76px;
-  border-radius: 14px;
-  transition: background 0.15s;
+  border-radius: 16px;
+  transition: background 0.15s, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
   color: inherit;
   text-decoration: none;
 }
 
-.sidebar-app-btn:hover:not(.coming-soon) {
-  background: var(--tint-soft);
+.sidebar-app-btn:hover:not(.coming-soon):not(.active) {
+  background: var(--glass-hover);
 }
 
-.sidebar-app-btn.active {
-  background: var(--tint-mid);
-}
+/* Active background is the sliding pill, not the button itself. */
+.sidebar-app-btn.active { background: none; }
 
-/* Active indicator bar */
+.sidebar-app-btn:active:not(.coming-soon) { transform: scale(0.955, 0.985); }
+
+/* Accent tick — rides along inside the sliding pill. */
 .sidebar-active-bar {
   position: absolute;
-  left: 0;
+  left: -4px;
   top: 50%;
   transform: translateY(-50%);
   width: 2px;
-  height: 32px;
+  height: 26px;
   background: var(--accent-1);
-  border-radius: 0;
+  border-radius: 2px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent-1) 55%, transparent);
 }
 
 /* ── Icon container ── */
@@ -1469,10 +1719,15 @@ body {
 }
 
 .sidebar-user-avatar {
+  position: relative;
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: var(--accent-1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.30) 0%, rgba(255, 255, 255, 0) 60%),
+    color-mix(in srgb, var(--accent-1) 92%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.16);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1485,24 +1740,30 @@ body {
 }
 
 .sidebar-logout-btn {
+  position: relative;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: transparent;
+  border-radius: 11px;
+  border: none;
+  background: var(--glass-btn);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
   color: var(--text-3);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .sidebar-logout-btn:hover {
-  background: rgba(239,68,68,0.12);
-  border-color: rgba(239,68,68,0.28);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 60%),
+    rgba(239, 68, 68, 0.16);
   color: var(--red);
 }
+
+.sidebar-logout-btn:active { transform: scale(0.92, 0.88); }
 
 /* ─── Voice App ──────────────────────────────────────────────────────────────── */
 .voice-lang-select {
@@ -2581,14 +2842,30 @@ html, body, #root {
   align-items: center;
   height: 30px;
   padding: 2px;
-  border: 1px solid var(--border);
   border-radius: 999px;
-  background: transparent;
   overflow: hidden;
   gap: 1px;
 }
 
+/* Sliding accent thumb (see .glass-pill-fill.accent). */
+.theme-toggle-thumb {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 0;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.theme-toggle-thumb.ready {
+  transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+              height    0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .theme-toggle-opt {
+  position: relative;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2599,14 +2876,17 @@ html, body, #root {
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.22s, background 0.15s, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
   flex-shrink: 0;
 }
 
+/* Fill lives on the sliding thumb — the option only owns its icon colour. */
 .theme-toggle-opt.active {
   color: var(--accent-ink);
-  background: var(--accent-1);
+  background: transparent;
 }
+
+.theme-toggle-opt:active { transform: scale(0.9); }
 
 /* Vertical variant — lives at the bottom of the platform sidebar */
 .theme-toggle-vertical {
@@ -5617,7 +5897,8 @@ button.su-status {
 /* ── Universal interactive polish (safe: transitions already on these) ──────── */
 .btn-ghost:hover:not(:disabled),
 .btn-danger:hover:not(:disabled) { transform: translateY(-1px); }
-.btn:active:not(:disabled)       { transform: scale(.96); }   /* wins over hover on press */
+/* Gel press: squishes across the direction of the tap, wins over hover. */
+.btn:active:not(:disabled)       { transform: scale(0.97, 0.94); }
 
 /* Keyboard-only focus ring in the accent — invisible to mouse users. */
 :focus-visible {
@@ -7642,3 +7923,60 @@ button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inh
   .qcal-layout { flex-direction: column; }
   .qcal-side { flex: none; width: 100%; position: static; }
 }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LIQUID GLASS — per-app action buttons
+   ════════════════════════════════════════════════════════════════════════════
+   The shared .btn family, the sidebar and the PM switcher get the full glass
+   treatment where they are defined. The namespaced buttons below are the ones
+   that do NOT use .btn (hence the `:not(.btn)` guard — anything that also
+   carries .btn must keep its variant tint: btn-primary stays accent, btn-danger
+   stays red). Their own hover/active rules are more specific, so this only
+   restyles the resting surface + press.
+   Deliberately NOT included: text-link buttons (.tf-linkbtn, .qcal-proj-del…),
+   segmented-control items (.seg-btn, .gantt-mode-tab, .qcal-view-btn), dashed
+   "+ add" affordances (.chk-add-btn, .qcal-add-btn) and status chips — a glass
+   slab there would read as a second layer of chrome. */
+.su-copycol-btn:not(.btn),
+.su-export-btn:not(.btn),
+.su-collapse-btn:not(.btn),
+.su-mark-all-read:not(.btn),
+.gantt-icon-btn:not(.btn),
+.gantt-tz-btn:not(.btn),
+.ba-issues-copy-btn:not(.btn),
+.modal-close-btn:not(.btn) {
+  position: relative;
+  border: none;
+  border-radius: 10px;
+  background: var(--glass-btn);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  box-shadow: inset 0 1px 0 var(--glass-gloss), inset 0 0 0 1px var(--glass-edge);
+  transition: background 0.15s, color 0.15s,
+              transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.su-copycol-btn:not(.btn):active:not(:disabled),
+.su-export-btn:not(.btn):active:not(:disabled),
+.su-collapse-btn:not(.btn):active:not(:disabled),
+.su-mark-all-read:not(.btn):active:not(:disabled),
+.gantt-icon-btn:not(.btn):active:not(:disabled),
+.gantt-tz-btn:not(.btn):active:not(:disabled),
+.ba-issues-copy-btn:not(.btn):active:not(:disabled),
+.modal-close-btn:not(.btn):active:not(:disabled) { transform: scale(0.95, 0.91); }
+
+/* Accent action button that isn't a .btn: tinted glass, same recipe as
+   .btn-primary. */
+.ba-send-btn:not(.btn) {
+  position: relative;
+  border: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0) 58%),
+    color-mix(in srgb, var(--accent-1) 90%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45),
+              inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  transition: filter 0.18s, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ba-send-btn:not(.btn):hover:not(:disabled) { filter: brightness(1.06) saturate(1.05); }
+.ba-send-btn:not(.btn):active:not(:disabled) { transform: scale(0.96, 0.92); }

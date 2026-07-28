@@ -1,4 +1,5 @@
 import { APP_REGISTRY, isAppAllowedForUser } from './AppRegistry.js';
+import { useSlidingPill } from './useSlidingPill.js';
 
 function TaskCreatorIcon() {
   return (
@@ -242,21 +243,36 @@ function MoonIcon() {
 
 export default function Sidebar({ activeId, onSelect, user, onLogout, themeMode, setThemeMode }) {
   const initials = getInitials(user);
+  const apps = APP_REGISTRY.filter(app => isAppAllowedForUser(app, user));
+
+  // One glass pill slides vertically to the selected app instead of the active
+  // background jumping between rows; same for the theme toggle's thumb.
+  const nav   = useSlidingPill(activeId);
+  const theme = useSlidingPill(themeMode);
 
   return (
-    <aside className="platform-sidebar">
-      <nav className="sidebar-nav">
-        {APP_REGISTRY.filter(app => isAppAllowedForUser(app, user)).map(app => {
+    <aside className="platform-sidebar glass-rail">
+      <span className="glass-refract" aria-hidden="true" />
+      <nav className="sidebar-nav" ref={nav.trackRef}>
+        <span
+          className={`sidebar-nav-pill${nav.ready ? ' ready' : ''}`}
+          aria-hidden="true"
+          style={{ transform: `translateY(${nav.box.top}px)`, height: nav.box.height }}
+        >
+          <span key={nav.seq} className={`glass-pill-fill${nav.seq > 0 ? ' gel-y' : ''}`} />
+          <span className="sidebar-active-bar" />
+        </span>
+        {apps.map(app => {
           const IconComp = ICON_MAP[app.id];
           const isActive = app.id === activeId;
           return (
             <button
               key={app.id}
+              ref={nav.setItemRef(app.id)}
               className={`sidebar-app-btn${isActive ? ' active' : ''}`}
               onClick={() => onSelect(app.id)}
               title={app.name}
             >
-              {isActive && <span className="sidebar-active-bar" />}
               <span className="sidebar-app-icon">
                 {IconComp && <IconComp />}
                 {app.beta && <span className="sidebar-beta-badge">Beta</span>}
@@ -277,9 +293,22 @@ export default function Sidebar({ activeId, onSelect, user, onLogout, themeMode,
       <div style={{ flex: 1 }} />
 
       {setThemeMode && (
-        <div className="theme-toggle theme-toggle-vertical" role="group" aria-label="Theme">
+        <div
+          className="theme-toggle theme-toggle-vertical glass-panel"
+          role="group"
+          aria-label="Theme"
+          ref={theme.trackRef}
+        >
+          <span
+            className={`theme-toggle-thumb${theme.ready ? ' ready' : ''}`}
+            aria-hidden="true"
+            style={{ transform: `translateY(${theme.box.top}px)`, height: theme.box.height }}
+          >
+            <span key={theme.seq} className={`glass-pill-fill accent${theme.seq > 0 ? ' gel-y' : ''}`} />
+          </span>
           <button
             type="button"
+            ref={theme.setItemRef('light')}
             className={`theme-toggle-opt ${themeMode === 'light' ? 'active' : ''}`}
             onClick={() => setThemeMode('light')}
             aria-label="Light theme"
@@ -289,6 +318,7 @@ export default function Sidebar({ activeId, onSelect, user, onLogout, themeMode,
           </button>
           <button
             type="button"
+            ref={theme.setItemRef('scheduled')}
             className={`theme-toggle-opt ${themeMode === 'scheduled' ? 'active' : ''}`}
             onClick={() => setThemeMode('scheduled')}
             aria-label="Scheduled theme (Kyiv time)"
@@ -298,6 +328,7 @@ export default function Sidebar({ activeId, onSelect, user, onLogout, themeMode,
           </button>
           <button
             type="button"
+            ref={theme.setItemRef('dark')}
             className={`theme-toggle-opt ${themeMode === 'dark' ? 'active' : ''}`}
             onClick={() => setThemeMode('dark')}
             aria-label="Dark theme"

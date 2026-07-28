@@ -2,6 +2,7 @@ import { useState, Suspense } from 'react';
 import Sidebar from './Sidebar.jsx';
 import { APP_REGISTRY, APP_COMPONENTS, isAppAllowedForUser } from './AppRegistry.js';
 import VoiceFab from '../components/VoiceFab.jsx';
+import GlassFilterDefs from './GlassFilterDefs.jsx';
 
 function AppLoader() {
   return (
@@ -27,6 +28,7 @@ export default function PlatformShell({ session, onLogout, theme, themeMode, set
 
   return (
     <div className="platform-shell">
+      <GlassFilterDefs />
       <Sidebar
         activeId={activeId}
         onSelect={setActiveId}
