@@ -1296,9 +1296,10 @@ body {
   width: 88px;
   min-width: 88px;
   height: 100vh;
-  /* Glass rail: the tint/blur come from .glass-rail; the right edge is a
-     gradient rim (see .glass-rail::after) instead of a flat 1px border. */
-  background: var(--glass-fill-soft), var(--bg-surface);
+  /* Glass rail: the tint/blur come from .glass-rail (do NOT set a background
+     here — it would be dead code anyway, .glass-rail wins the cascade); the
+     right edge is a gradient rim (see .glass-rail::after) instead of a flat
+     1px border. */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1503,6 +1504,24 @@ body {
       rgba(255, 255, 255, 0.07) 0%,
       rgba(255, 255, 255, 0.03) 16%,
       rgba(255, 255, 255, 0.015) 100%);
+}
+
+/* Same reasoning applies to the FILL of those long surfaces, not just to their
+   rim: --glass-base plus the white falloff stops reading as glass and becomes a
+   flat grey slab sitting on the page (~#171719 against #0A0A0B — a visible
+   panel, exactly what glass must not look like). In dark BOTH the rail and the
+   switcher TRACK are therefore fully transparent — the page shows through, the
+   whisper rim above outlines the shape, and on the switcher the sliding pill is
+   the only filled surface. backdrop-filter stays on (from .glass-panel /
+   .glass-rail), so content scrolling under the switcher still frosts.
+   Light keeps the frosted fill in both places: on a near-white page the fill is
+   what makes them a surface at all.
+   Deliberately scoped to the long surfaces — the theme toggle is .glass-panel
+   too and is short enough to keep its glass track in both themes. */
+[data-theme="dark"] .glass-rail,
+[data-theme="dark"] .pm-switcher {
+  background: none;
+  box-shadow: none;
 }
 
 /* ── PM segmented switcher (uses the primitives above) ──────────────────────── */
