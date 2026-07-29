@@ -1,167 +1,154 @@
 import { APP_REGISTRY, isAppAllowedForUser } from './AppRegistry.js';
 import { useSlidingPill } from './useSlidingPill.js';
 
+// ── App icons ─────────────────────────────────────────────────────────────────
+// One SF-Symbols-flavoured set: a single 24-unit grid, generously rounded
+// geometry, 1.6 round-capped strokes and solid dots for the few accents. Glyph
+// fixes those defaults so every icon reads at the same optical weight — an icon
+// only overrides strokeWidth where it deliberately wants a heavier bar.
+function Glyph({ children }) {
+  return (
+    <svg
+      width="27" height="27" viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth="1.6"
+      strokeLinecap="round" strokeLinejoin="round"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {children}
+    </svg>
+  );
+}
+
 function TaskCreatorIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Left document */}
-      <rect x="1.5" y="4.5" width="8" height="15" rx="2" stroke="currentColor" strokeWidth="1.35"/>
-      <path d="M3.5 8.5h4M3.5 12h4M3.5 15.5h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      {/* Bidirectional sync arrows */}
-      <path d="M11 10h2.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-      <path d="M12 8.5L13.5 10L12 11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M13.5 14H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-      <path d="M12.5 12.5L11 14L12.5 15.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* Right document */}
-      <rect x="14.5" y="4.5" width="8" height="15" rx="2" stroke="currentColor" strokeWidth="1.35"/>
-      <path d="M16.5 8.5h4M16.5 12h4M16.5 15.5h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* Document with a plus — "create a task" */}
+      <rect x="4" y="2.75" width="16" height="18.5" rx="5" />
+      <path d="M12 8.6v6.8M8.6 12h6.8" strokeWidth="1.9" />
+    </Glyph>
   );
 }
 
 function VoiceIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <rect x="9" y="2" width="6" height="11" rx="3" stroke="currentColor" strokeWidth="1.5"/>
-      <path d="M5 11a7 7 0 0014 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      <path d="M12 18v3M9 21h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* SF `mic` — capsule + pickup arc, no base bar */}
+      <rect x="9.25" y="2.6" width="5.5" height="10.8" rx="2.75" />
+      <path d="M5.6 11.4a6.4 6.4 0 0012.8 0" />
+      <path d="M12 17.9v3.4" />
+    </Glyph>
   );
 }
 
 function TaskAgentIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Robot head */}
-      <rect x="4" y="8" width="16" height="11" rx="3" stroke="currentColor" strokeWidth="1.5"/>
-      {/* Eyes */}
-      <circle cx="9.5" cy="13" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
-      <circle cx="14.5" cy="13" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
-      {/* Mouth */}
-      <path d="M9 17h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-      {/* Antenna */}
-      <path d="M12 8V5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-      <circle cx="12" cy="4" r="1.2" stroke="currentColor" strokeWidth="1.3"/>
-    </svg>
+    <Glyph>
+      {/* Agent head: soft capsule, solid eyes, antenna */}
+      <rect x="3.5" y="7.6" width="17" height="11.9" rx="5" />
+      <circle cx="9" cy="13.6" r="1.15" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="13.6" r="1.15" fill="currentColor" stroke="none" />
+      <path d="M12 7.6V5.1" />
+      <circle cx="12" cy="3.6" r="1.4" />
+    </Glyph>
   );
 }
 
 function JiraBaIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M4 4C4 2.9 4.9 2 6 2h12C19.1 2 20 2.9 20 4v10c0 1.1-.9 2-2 2H7.8L4 20V4z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-      <path d="M9 9h6M9 12.5h3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* Chat bubble with transcript lines */}
+      <path d="M3.6 7.2A3.6 3.6 0 017.2 3.6h9.6a3.6 3.6 0 013.6 3.6v5.6a3.6 3.6 0 01-3.6 3.6H9.4l-4.5 3.7a.8.8 0 01-1.3-.62V7.2z" />
+      <path d="M8.4 8.9h7.2M8.4 12.3h4.2" />
+    </Glyph>
   );
 }
 
 function FathomIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Video frame */}
-      <rect x="2.5" y="6" width="13" height="12" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
-      {/* Lens / play */}
-      <path d="M15.5 10l5-2.5v9L15.5 14" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/>
-      {/* Sound waves */}
-      <path d="M6 11v2M8.5 9.5v5M11 10.5v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* SF `video` + a waveform inside — recorded call, transcribed */}
+      <rect x="2.6" y="6.2" width="12.6" height="11.6" rx="4" />
+      <path d="M15.2 10.6l4.3-2.5a1.1 1.1 0 011.7.95v5.9a1.1 1.1 0 01-1.7.95l-4.3-2.5z" />
+      <path d="M6.3 11.3v1.4M8.9 9.9v4.2M11.5 11.3v1.4" strokeWidth="1.5" />
+    </Glyph>
   );
 }
 
 function EmailAgentIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Envelope */}
-      <rect x="3" y="5" width="18" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
-      <path d="M3.5 7.5l8.5 6 8.5-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* Sparkle (AI assist) */}
-      <path d="M19 14.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z" fill="currentColor"/>
-    </svg>
+    <Glyph>
+      {/* Envelope + sparkle (AI assist) */}
+      <rect x="2.75" y="4.9" width="18.5" height="14.2" rx="4.6" />
+      <path d="M4 8.2l6.7 4.6a2.3 2.3 0 002.6 0L20 8.2" />
+      <path d="M18.3 13.5l.72 1.73 1.73.72-1.73.72-.72 1.73-.72-1.73-1.73-.72 1.73-.72z"
+            fill="currentColor" stroke="none" />
+    </Glyph>
   );
 }
 
 function StatusUpdatesIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Two panes */}
-      <rect x="2.5" y="4" width="8" height="16" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-      <rect x="13.5" y="4" width="8" height="16" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-      {/* Compare arrows between panes */}
-      <path d="M10.5 9.5h3M12.5 8l1.5 1.5L12.5 11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-      {/* Status rows */}
-      <path d="M4.5 8h4M4.5 11.5h4M4.5 15h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-      <path d="M15.5 8h4M15.5 11.5h4M15.5 15h2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* One frame split in two — Azure beside Jira */}
+      <rect x="2.75" y="4" width="18.5" height="16" rx="5" />
+      <path d="M12 4.4v15.2" strokeWidth="1.35" />
+      <path d="M5.7 9.1h3.4M5.7 12.6h2.2" strokeWidth="1.8" />
+      <path d="M14.9 9.1h3.4M14.9 12.6h2.2" strokeWidth="1.8" />
+    </Glyph>
   );
 }
 
 function PmIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Kanban board — three columns of stacked cards */}
-      <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.4"/>
-      <path d="M8.5 3.5v17M15.5 3.5v17" stroke="currentColor" strokeWidth="1.4"/>
-      <path d="M4.5 7h2M11 7h2M17.5 7h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-      <path d="M4.5 10.5h2M11 10.5h2M17.5 10.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* Kanban board — three lanes of cards */}
+      <rect x="2.75" y="4" width="18.5" height="16" rx="5" />
+      <path d="M8.9 4.4v15.2M15.1 4.4v15.2" strokeWidth="1.35" />
+      <path d="M5.4 8.7h1.1M11.6 8.7h1.1M17.8 8.7h1.1" strokeWidth="2.1" />
+      <path d="M5.4 12.2h1.1M11.6 12.2h1.1" strokeWidth="2.1" />
+    </Glyph>
   );
 }
 
 function ReportIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Chart frame */}
-      <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.4"/>
-      {/* Horizontal bars: planned vs tracked pairs */}
-      <path d="M6 8h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-      <path d="M6 11h7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-      <path d="M6 14h9" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-      <path d="M6 17h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* SF `chart.bar` — free-standing rounded bars, no frame */}
+      <path d="M4.2 20.2V9.4M9.4 20.2V4.4M14.6 20.2V12.6M19.8 20.2V7.2" strokeWidth="2.3" />
+    </Glyph>
   );
 }
 
 function GanttIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Chart frame */}
-      <rect x="2.5" y="3.5" width="19" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.4"/>
-      {/* Staggered gantt bars */}
-      <path d="M5.5 8h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
-      <path d="M9 11.5h7.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
-      <path d="M12.5 15h6" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
-      {/* Milestone diamond */}
-      <path d="M6.8 15l1.2 1.2L6.8 17.4 5.6 16.2z" fill="currentColor"/>
-    </svg>
+    <Glyph>
+      {/* Staggered timeline bars — a dashed "today" line here read as sliders */}
+      <path d="M4.4 6.4h7.2M8.6 12h8.2M12 17.6h6.8" strokeWidth="2.8" />
+    </Glyph>
   );
 }
 
 function QuarterlyCallsIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Calendar frame */}
-      <rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
-      <path d="M3 9h18" stroke="currentColor" strokeWidth="1.4"/>
-      <path d="M8 2.5v4M16 2.5v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-      {/* Phone handset on the calendar body */}
-      <path d="M9.3 12.6c.6 1.9 2.1 3.4 4 4l1-1c.2-.2.55-.3.85-.2l1.5.5c.4.13.65.5.65.9v.9c0 .55-.45 1-1 .95-4.3-.35-7.75-3.8-8.1-8.1-.04-.55.4-1 .95-1h.9c.4 0 .77.25.9.65l.5 1.5c.1.3.02.65-.2.85l-.95 1z"
-            stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round"/>
-    </svg>
+    <Glyph>
+      {/* Calendar with a marked day */}
+      <rect x="2.9" y="4.6" width="18.2" height="16.5" rx="5" />
+      <path d="M3.3 9.6h17.4" strokeWidth="1.45" />
+      <path d="M8 2.7v3.6M16 2.7v3.6" />
+      <circle cx="12" cy="15.3" r="1.7" fill="currentColor" stroke="none" />
+    </Glyph>
   );
 }
 
 function ChecklistIcon() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Clipboard frame */}
-      <rect x="4" y="4" width="16" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.5"/>
-      <rect x="8.5" y="2" width="7" height="4" rx="1.3" stroke="currentColor" strokeWidth="1.4"/>
-      {/* Check + line rows */}
-      <path d="M7.3 10.4l1.3 1.3 2.2-2.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M13.2 10.6h3.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-      <path d="M7.3 15.4l1.3 1.3 2.2-2.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      <path d="M13.2 15.6h3.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-    </svg>
+    <Glyph>
+      {/* SF `checklist` — ticks beside their rows, no clipboard */}
+      <path d="M3.2 7.1l1.9 1.9 3.4-3.6" />
+      <path d="M11.6 7.4h9.2" strokeWidth="1.9" />
+      <path d="M3.2 16.7l1.9 1.9 3.4-3.6" />
+      <path d="M11.6 17h9.2" strokeWidth="1.9" />
+    </Glyph>
   );
 }
 
@@ -200,11 +187,10 @@ function LogoutIcon() {
 
 function ComingSoonIcon() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.4" strokeDasharray="3.5 2.5"/>
-      <path d="M12 8v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
-      <circle cx="12" cy="16.5" r="0.8" fill="currentColor"/>
-    </svg>
+    <Glyph>
+      <circle cx="12" cy="12" r="8.5" strokeDasharray="3.4 2.9" />
+      <path d="M12 8.6v6.8M8.6 12h6.8" strokeWidth="1.7" />
+    </Glyph>
   );
 }
 

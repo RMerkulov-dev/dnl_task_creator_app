@@ -73,6 +73,12 @@
   --glass-sel:       linear-gradient(180deg, rgba(255,255,255,0.11) 0%,
                                              rgba(255,255,255,0.035) 100%),
                      rgba(255,255,255,0.05);
+  /* Surface of a sliding selection pill (nav, PM switcher). Dark = the same
+     colourless glass as its track, one step brighter. Keep --glass-pill-lift a
+     valid shadow value (never `none`): it is composed into a shadow list. */
+  --glass-pill:      var(--glass-sel);
+  --glass-pill-edge: var(--glass-edge);
+  --glass-pill-lift: 0 0 rgba(0,0,0,0);
 }
 
 [data-theme="light"] {
@@ -123,16 +129,29 @@
                        rgba(10,10,11,0.16) 45%, rgba(10,10,11,0.19) 65%,
                        rgba(255,255,255,0.95) 100%);
   --glass-gloss:     rgba(255,255,255,0.9);
-  --glass-inner:     none;
+  /* A no-op shadow rather than `none`: it gets composed into shadow lists, and
+     one `none` in a list invalidates the whole declaration. */
+  --glass-inner:     0 0 rgba(0,0,0,0);
   --glass-hover:     rgba(10,10,11,0.055);
   --glass-edge:      rgba(10,10,11,0.10);
   /* Matte, faintly grey — a plain translucent white button is invisible here. */
   --glass-btn:       linear-gradient(180deg, rgba(255,255,255,0.92) 0%,
                                              rgba(255,255,255,0.66) 100%),
                      rgba(10,10,11,0.05);
-  --glass-sel:       linear-gradient(180deg, rgba(255,255,255,0.85) 0%,
-                                             rgba(255,255,255,0.5) 100%),
-                     rgba(10,10,11,0.10);
+  /* Matte, milkier than the plain fill — a translucent white surface has no edge
+     of its own on a near-white page. */
+  --glass-sel:       linear-gradient(180deg, rgba(255,255,255,0.92) 0%,
+                                             rgba(255,255,255,0.66) 100%),
+                     rgba(10,10,11,0.055);
+  /* Selection pill — the iOS light tab bar: a pale wash of the accent behind the
+     (accent-coloured) icon and label, not grey glass. Still translucent, so the
+     backdrop blur keeps reading through it. */
+  --glass-pill:      linear-gradient(180deg, rgba(255,255,255,0.50) 0%,
+                                             rgba(255,255,255,0.18) 100%),
+                     color-mix(in srgb, var(--accent-1) 14%, #FFFFFF);
+  --glass-pill-edge: color-mix(in srgb, var(--accent-1) 26%, transparent);
+  /* A hairline, not a lift — enough to detach the pill from the panel. */
+  --glass-pill-lift: 0 1px 2px rgba(10,10,11,0.045);
 }
 
 html, body, #root {
@@ -1387,20 +1406,21 @@ body {
   z-index: 0;
 }
 
-/* Layer 3 — body of a sliding indicator: violet glass with a glossy top edge,
-   liquid depth at the bottom and a thin glass wall. */
+/* Layer 3 — body of a sliding indicator: a brighter slab of the SAME glass as
+   the track it rides in (no colour of its own), with a glossy top edge and a
+   thin glass wall. Tinted variants opt in via .accent. */
 .glass-pill-fill {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: linear-gradient(140deg, rgba(99, 102, 241, 0.94) 0%,
-                                      rgba(139, 92, 246, 0.84) 100%);
-  backdrop-filter: blur(6px) saturate(150%);
-  -webkit-backdrop-filter: blur(6px) saturate(150%);
+  background: var(--glass-pill);
+  backdrop-filter: blur(5px) saturate(140%);
+  -webkit-backdrop-filter: blur(5px) saturate(140%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -3px 8px rgba(46, 16, 101, 0.28),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+    inset 0 1px 0 var(--glass-gloss),
+    inset 0 0 0 1px var(--glass-pill-edge),
+    var(--glass-inner),
+    var(--glass-pill-lift);
   transform-origin: 50% 50%;
 }
 
@@ -1414,17 +1434,26 @@ body {
     inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
-/* Sheen across the pill's own surface. */
+/* Sheen across the pill's own surface — a hint of specular light, not a wash:
+   on a colourless fill anything stronger turns the pill into grey plastic. */
 .glass-pill-fill::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background: linear-gradient(115deg,
+      rgba(255, 255, 255, 0.16) 0%,
+      rgba(255, 255, 255, 0.03) 34%,
+      rgba(255, 255, 255, 0) 55%);
+  pointer-events: none;
+}
+
+/* Tinted variants keep the old glossier sheen (they have a colour to catch it). */
+.glass-pill-fill.accent::after {
+  background: linear-gradient(115deg,
       rgba(255, 255, 255, 0.28) 0%,
       rgba(255, 255, 255, 0.05) 34%,
       rgba(255, 255, 255, 0) 55%);
-  pointer-events: none;
 }
 
 /* Gel motion: the indicator stretches along the direction of travel and settles
@@ -1455,6 +1484,25 @@ body {
   width: 0;
   height: 0;
   pointer-events: none;
+}
+
+/* Dark theme: the specular ring around a LONG surface stops reading as a lit
+   edge and starts reading as a hairline stripe drawn across the whole control —
+   so on the switcher track and the sidebar rail it is dimmed to a whisper. The
+   selection pill keeps the full rim (it is short enough for the light to look
+   like light). Light theme keeps its ring: on a near-white page it is the only
+   thing separating glass from background. */
+[data-theme="dark"] .pm-switcher::after {
+  background: linear-gradient(150deg,
+      rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0.04) 22%,
+      rgba(255, 255, 255, 0.015) 50%, rgba(255, 255, 255, 0.05) 100%);
+}
+
+[data-theme="dark"] .glass-rail::after {
+  background: linear-gradient(180deg,
+      rgba(255, 255, 255, 0.07) 0%,
+      rgba(255, 255, 255, 0.03) 16%,
+      rgba(255, 255, 255, 0.015) 100%);
 }
 
 /* ── PM segmented switcher (uses the primitives above) ──────────────────────── */
@@ -1515,12 +1563,20 @@ body {
 }
 
 /* Background lives on the sliding pill — the active tab only owns its text.
-   The shadow keeps the label legible when bright content refracts underneath
-   (Apple's adaptive-contrast trick, minus the sampling). */
+   The pill is colourless glass now, so the label carries the selection: full
+   --text-1 contrast against the dimmer --text-2 of the inactive tabs. */
 .pm-tab.active {
-  color: #fff;
+  color: var(--text-1);
   background: transparent;
-  text-shadow: 0 1px 2px rgba(46, 16, 101, 0.45);
+  text-shadow: none;
+}
+
+/* Light theme: the pill is an accent wash, so the label joins it — same pairing
+   as the sidebar's active icon + label (and iOS's tinted tab bar item). Mixed
+   with ink because pure --accent-1 on its own pale wash is too low-contrast for
+   11px uppercase mono. */
+[data-theme="light"] .pm-tab.active {
+  color: color-mix(in srgb, var(--accent-1) 62%, #0A0A0B);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1604,15 +1660,8 @@ body {
               height    0.34s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Softer than the PM switcher's pill: this one sits behind an icon + label, so
-   a full violet fill would fight the accent-coloured icon. Uses --glass-sel,
-   which is matte in the light theme (white-on-white has no edge to read). */
-.sidebar-nav-pill .glass-pill-fill {
-  background: var(--glass-sel);
-  box-shadow:
-    inset 0 1px 0 var(--glass-gloss),
-    inset 0 0 0 1px var(--glass-edge);
-}
+/* No override needed — .glass-pill-fill is already the matte --glass-sel slab
+   the nav wants (same surface as the PM switcher's pill). */
 
 /* ── App icon button ── */
 .sidebar-app-btn {
@@ -1655,11 +1704,14 @@ body {
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent-1) 55%, transparent);
 }
 
-/* ── Icon container ── */
+/* ── Icon container ──
+   Sized so the 27px glyph fills it the way an iOS app icon fills its tile —
+   the old 22px glyph in a 44px box left the square looking empty. */
 .sidebar-app-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  position: relative;                   /* anchors .sidebar-beta-badge */
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
   display: flex;
   align-items: center;
   justify-content: center;
