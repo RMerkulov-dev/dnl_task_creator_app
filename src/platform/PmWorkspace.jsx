@@ -1,4 +1,4 @@
-import { useState, useCallback, Suspense } from 'react';
+import { useState, useCallback, useRef, useEffect, Suspense } from 'react';
 import { APP_COMPONENTS, PM_TABS } from './AppRegistry.js';
 import { useSlidingPill } from './useSlidingPill.js';
 
@@ -11,11 +11,12 @@ function PaneLoader() {
 }
 
 // ── PM workspace ──────────────────────────────────────────────────────────────
-// Bundles the four project-management tools (Tasks, Status, Jira Agent, BA Agent)
-// under one sidebar entry. A segmented switcher floats in the header's empty
-// centre. Panes stay mounted once visited (display-toggled, not unmounted) so
-// each tool keeps its state — form drafts, loaded boards, chat history — when
-// you flip between them.
+// Bundles the project-management tools under one sidebar entry. The segmented
+// switcher owns a sticky row of its own at the top of the workspace — it used
+// to float over the sub-app header's empty centre, which only cleared the
+// tools' titles on very wide screens. Panes stay mounted once visited
+// (display-toggled, not unmounted) so each tool keeps its state — form drafts,
+// loaded boards, chat history — when you flip between them.
 export default function PmWorkspace(props) {
   const [tab, setTab] = useState(PM_TABS[0].id);
   const [visited, setVisited] = useState(() => new Set([PM_TABS[0].id]));
@@ -29,9 +30,28 @@ export default function PmWorkspace(props) {
   // instead of the background jumping between buttons (see useSlidingPill).
   const { trackRef, setItemRef, box, ready, seq } = useSlidingPill(tab);
 
+  // In a narrow window the track scrolls sideways instead of wrapping or being
+  // clipped; keep the selected tab in view when it does.
+  const scrollRef = useRef(null);
+  const tabEls = useRef(new Map());
+  const bindTab = (id) => {
+    const setPillRef = setItemRef(id);
+    return (el) => {
+      setPillRef(el);
+      if (el) tabEls.current.set(id, el); else tabEls.current.delete(id);
+    };
+  };
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const el = tabEls.current.get(tab);
+    if (!scroller || !el || scroller.scrollWidth <= scroller.clientWidth) return;
+    el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }, [tab]);
+
   return (
     <div className="pm-workspace">
       <div className="pm-switcher-bar">
+       <div className="pm-switcher-scroll" ref={scrollRef}>
         <div className="pm-switcher glass-panel" role="tablist" aria-label="PM tools" ref={trackRef}>
           {/* Refraction ring: the backdrop is displaced only near the rim, so the
               track bends the content behind it like a glass slab instead of just
@@ -50,7 +70,7 @@ export default function PmWorkspace(props) {
               type="button"
               role="tab"
               aria-selected={t.id === tab}
-              ref={setItemRef(t.id)}
+              ref={bindTab(t.id)}
               className={`pm-tab${t.id === tab ? ' active' : ''}`}
               onClick={() => select(t.id)}
             >
@@ -58,6 +78,7 @@ export default function PmWorkspace(props) {
             </button>
           ))}
         </div>
+       </div>
       </div>
 
       {PM_TABS.map(t => {

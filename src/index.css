@@ -1330,23 +1330,66 @@ body {
   min-height: 100vh;
 }
 
-/* ── PM workspace — grouped tools with a floating segmented switcher ── */
-.pm-workspace { position: relative; }
+/* ── PM workspace — grouped tools with a segmented switcher ── */
+.pm-workspace {
+  position: relative;
+  --pm-bar-h: 56px;               /* height of the switcher row (see below) */
+}
 
-/* A zero-height sticky rail so the switcher overlays the empty centre of each
-   sub-app's 60px header and stays put while the page scrolls. align-items must
-   be flex-start — otherwise the switcher stretches to the rail's 0 height and
-   collapses. */
+/* The switcher owns a sticky row of its OWN at the top of the workspace.
+   It used to be a zero-height overlay floating in the empty centre of each
+   sub-app's 60px header — but with 8 tabs the track is ~800px wide, so on every
+   MacBook (1440 / 1512 CSS px) it sat on top of the tool's title + subtitle
+   (they render on the same line, left-aligned). A real row can't collide with
+   anything at any width. The row costs no net vertical space: inside PM the
+   sub-app's duplicate 60px header is hidden (below).
+   align-items: flex-start so the track keeps its own height. */
 .pm-switcher-bar {
   position: sticky;
   top: 0;
   z-index: 15;
-  height: 0;
+  height: var(--pm-bar-h);
+  box-sizing: border-box;
   display: flex;
   align-items: flex-start;
   justify-content: center;
+  padding: 9px 16px;
   pointer-events: none;
 }
+
+/* Content still scrolls UNDER the row (the glass keeps something to frost), so
+   the row carries a short fade of the page colour — without it, scrolled text
+   grazes the track's rim. Sits behind the switcher via z-index on the ::before,
+   which is inside the row's own stacking context. */
+.pm-switcher-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg,
+      var(--bg-app) 0%,
+      var(--bg-app) 66%,
+      color-mix(in srgb, var(--bg-app) 45%, transparent) 100%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Narrow window (a half-screen Mac window, ~<900px): the track scrolls sideways
+   instead of wrapping or getting clipped. The padding/negative-margin pair keeps
+   the pill's rim and gel squish from being cut by the scroll container's clip;
+   the scrollbar itself is hidden (the tabs are the affordance). */
+.pm-switcher-scroll {
+  pointer-events: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px;
+  margin: -3px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior-x: contain;
+}
+
+.pm-switcher-scroll::-webkit-scrollbar { display: none; }
 
 /* ── LIQUID GLASS PRIMITIVES (iOS-26 style) ───────────────────────────────────
    Shared by the PM switcher, the sidebar rail and every .btn. Layers, back to
@@ -1530,7 +1573,7 @@ body {
   align-self: flex-start;
   display: flex;
   gap: 4px;
-  margin-top: 10px;                     /* centres the ~40px control in the 60px header */
+  width: max-content;                   /* never shrink inside the scroll wrapper */
   padding: 4px;
   border-radius: 15px;
 }
@@ -1606,19 +1649,42 @@ body {
   .glass-pill-fill.gel-y { animation: none; }
 }
 
-@media (max-width: 720px) {
-  .pm-tab { padding: 9px 12px; letter-spacing: 0.04em; }
+/* Tighten the tabs only once the track actually runs out of room (the full-size
+   track is ~800px, so it clears every Mac width with its own row); below that
+   the wrapper scrolls it. */
+@media (max-width: 1080px) {
+  .pm-tab { padding: 9px 13px; letter-spacing: 0.06em; }
 }
 
-/* The PM switcher floats centred over the sub-app header; with 7 tabs it overlaps
-   the right-aligned header email on anything narrower than ~1600px (i.e. every
-   normal laptop). The signed-in identity is already shown via the sidebar avatar
-   tooltip, so hide the redundant header email inside PM to give the switcher room.
-   Restore it only on very wide screens where the two comfortably clear each other. */
-.pm-workspace .header-user { display: none; }
-@media (min-width: 1700px) {
-  .pm-workspace .header-user { display: inline; }
+@media (max-width: 900px) {
+  .pm-tab { padding: 9px 10px; letter-spacing: 0.03em; }
 }
+
+/* Short screens (13" MacBook = 900px tall, and anything windowed): the row and
+   the tabs give back a few px of the scarce vertical space. */
+@media (max-height: 860px) {
+  .pm-workspace { --pm-bar-h: 48px; }
+  .pm-switcher-bar { padding: 6px 16px; }
+  .pm-tab { padding: 7px 16px; }
+  .pm-switcher-pill { top: 3px; bottom: 3px; }
+  .pm-switcher { padding: 3px; }
+}
+
+/* Inside PM the sub-app's own 60px header is pure duplication: the wordmark,
+   the tool name, the signed-in email and Sign out all live in the sidebar, and
+   the active tab already names the tool. Hiding it pays for the switcher row —
+   the workspace ends up with LESS chrome than the old floating layout, which is
+   what makes the tools' titles fit on a 1440×900 Mac. */
+.pm-workspace .header { display: none; }
+
+/* The two full-height panes sized themselves as "viewport minus the app header"
+   — inside PM the row they have to clear is the switcher instead. */
+.pm-workspace .su-main,
+.pm-workspace .ba-main { height: calc(100vh - var(--pm-bar-h)); }
+
+/* The tools that open with a title + subtitle used to need clearance for the
+   floating switcher; now they just breathe under its row. */
+.pm-workspace .main { padding-top: 28px; }
 
 /* ── Sidebar logo ── */
 .sidebar-logo {
@@ -6817,8 +6883,8 @@ button.su-status {
 /* ═══ Azure-Jira tab (.azj-*) ═══════════════════════════════════════════════ */
 
 .azj-wrap {
-  /* extra top padding clears the floating PM tab switcher */
-  padding: 64px 24px 20px;
+  /* the PM switcher has its own row now — no clearance needed here */
+  padding: 20px 24px;
   height: 100%;
   overflow: hidden;
 }
