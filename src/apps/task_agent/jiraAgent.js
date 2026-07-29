@@ -6,6 +6,7 @@ import {
   editIssueFieldsRaw,
   createRawIssue,
   addIssueLink,
+  addIssueLabels,
   deleteIssue,
   bulkMoveIssues,
   getBulkTaskStatus,
@@ -201,6 +202,30 @@ async function recoverFields(cloudId, newKey, sourceFields, alreadySetKeys) {
   }
 }
 
+// Labels survive the create call but a project automation rule can strip them a
+// second later (NSMGCM: an "Automation for Jira" rule wipes `labels` right after
+// the clone is transitioned into "Process Task"). The create payload alone is
+// therefore not enough — read the issue back once the status walk is done and
+// re-add anything missing with the additive `update` verb (never overwriting
+// labels the automation legitimately added). Two attempts max, so a rule that
+// insists on removing them can't turn this into a fight loop. Best-effort.
+async function enforceLabels(cloudId, newKey, wanted) {
+  const want = (wanted ?? []).filter(Boolean);
+  if (!want.length) return;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await sleep(2500);
+    let current;
+    try {
+      const data = await getIssueFull(cloudId, newKey);
+      current = data.fields?.labels ?? [];
+    } catch { return; }
+    const missing = want.filter(l => !current.includes(l));
+    if (!missing.length) return;
+    const res = await addIssueLabels(cloudId, newKey, missing);
+    if (!res.ok) return;
+  }
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export function findSprintField(sourceFields) {
@@ -334,6 +359,9 @@ export async function cloneInSameProject(cloudId, issue, { summaryOverride, fiel
     if (targetStatusName) {
       try { await replicateStatus(cloudId, newKey, targetStatusName); } catch { /* best-effort */ }
     }
+    // Last, because both the create and the status transition can trigger
+    // automation rules that wipe labels.
+    try { await enforceLabels(cloudId, newKey, payload.labels); } catch { /* best-effort */ }
   } catch (err) {
     onStep(1, 'error', err.message);
     throw err;

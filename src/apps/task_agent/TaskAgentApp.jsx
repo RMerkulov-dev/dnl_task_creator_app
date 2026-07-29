@@ -105,6 +105,93 @@ function UserPicker({ cloudId, label, value, onChange }) {
   );
 }
 
+// ─── MultiUserPicker (multi-clone) ────────────────────────────────────────────
+
+function MultiUserPicker({ cloudId, label, values, onChange }) {
+  const [query,   setQuery]   = useState('');
+  const [results, setResults] = useState([]);
+  const [busy,    setBusy]    = useState(false);
+
+  useEffect(() => {
+    if (query.trim().length < 2) { setResults([]); return; }
+    setBusy(true);
+    const timer = setTimeout(() => {
+      searchJiraUsers(cloudId, query)
+        .then(users => setResults(users))
+        .catch(() => setResults([]))
+        .finally(() => setBusy(false));
+    }, 280);
+    return () => clearTimeout(timer);
+  }, [query, cloudId]);
+
+  function toggle(user) {
+    const picked = values.some(v => v.accountId === user.accountId);
+    onChange(picked
+      ? values.filter(v => v.accountId !== user.accountId)
+      : [...values, { accountId: user.accountId, displayName: user.displayName }]);
+  }
+
+  return (
+    <div className="field">
+      <label className="field-label">{label}</label>
+
+      {values.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          {values.map(v => (
+            <span
+              key={v.accountId}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)', fontSize: 13 }}
+            >
+              {v.displayName}
+              <button
+                type="button"
+                onClick={() => onChange(values.filter(x => x.accountId !== v.accountId))}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 0, fontSize: 14, lineHeight: 1 }}
+                aria-label={`Remove ${v.displayName}`}
+              >×</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="input"
+          placeholder="Type a name to search…"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); setResults([]); } }}
+          style={{ flex: 1 }}
+        />
+        {busy && <span className="spinner" style={{ alignSelf: 'center', flexShrink: 0 }} />}
+      </div>
+
+      {results.length > 0 && (
+        <ul className="user-picker-results">
+          {results.map(u => {
+            const picked = values.some(v => v.accountId === u.accountId);
+            return (
+              <li key={u.accountId}>
+                <button type="button" className="user-picker-result" onClick={() => toggle(u)}>
+                  <span>{picked ? '✓ ' : ''}{u.displayName}</span>
+                  {u.emailAddress && (
+                    <span className="user-picker-email">{u.emailAddress}</span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!busy && query.trim().length >= 2 && results.length === 0 && (
+        <p style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text-3)' }}>
+          No users found
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ─── StepIcon ─────────────────────────────────────────────────────────────────
 
 function StepIcon({ status }) {
@@ -489,6 +576,11 @@ export default function TaskAgentApp({ user, onLogout }) {
   const [userSelections,    setUserSelections]     = useState({});
   const [loadingUserFields, setLoadingUserFields]  = useState(false);
 
+  // Multi-clone: one clone per selected user (assignee + developer set to them)
+  const [multiClone, setMultiClone] = useState(false);
+  const [multiUsers, setMultiUsers] = useState([]);
+  const [cloneRuns,  setCloneRuns]  = useState([]);
+
   // Clone sprint picker
   const [sprintFieldId,    setSprintFieldId]    = useState(null);
   const [sourceSprint,     setSourceSprint]     = useState(null);
@@ -561,6 +653,9 @@ export default function TaskAgentApp({ user, onLogout }) {
     setAvailableComponents([]);
     setSelectedComponents([]);
     setEstimateFields([]);
+    setMultiClone(false);
+    setMultiUsers([]);
+    setCloneRuns([]);
   }
 
   function handleModeChange(m) {
@@ -711,9 +806,49 @@ export default function TaskAgentApp({ user, onLogout }) {
 
   // ─── Execute actions ──────────────────────────────────────────────────────
 
+  // One clone per selected user: assignee (and Developer, if the project has it)
+  // are forced to that user; everything else matches the single-clone form.
+  async function executeMultiClone() {
+    const base = buildFieldOverrides();
+    setSteps([]);
+    setResult(null);
+    setCloneRuns(multiUsers.map(u => ({
+      accountId: u.accountId, displayName: u.displayName,
+      status: 'idle', newKey: null, newUrl: null, error: null,
+    })));
+    setRunning(true);
+    setShowProgress(true);
+
+    const patch = (i, p) => setCloneRuns(prev => prev.map((r, idx) => idx === i ? { ...r, ...p } : r));
+
+    for (let i = 0; i < multiUsers.length; i++) {
+      const u = multiUsers[i];
+      patch(i, { status: 'pending' });
+      const overrides = { ...base };
+      if (assigneeField)  overrides[assigneeField.id]  = { accountId: u.accountId };
+      if (developerField) overrides[developerField.id] = { accountId: u.accountId };
+      try {
+        const res = await cloneInSameProject(
+          CLOUD_ID, source,
+          {
+            summaryOverride:  cloneSummary || source.summary,
+            fieldOverrides:   overrides,
+            targetStatusName: selectedStatus || null,
+          },
+          () => {}, // per-clone step detail is collapsed into one row per user
+        );
+        patch(i, { status: 'done', newKey: res.newKey, newUrl: res.newUrl });
+      } catch (err) {
+        patch(i, { status: 'error', error: err.message });
+      }
+    }
+    setRunning(false);
+  }
+
   async function executeClone() {
     setSteps(CLONE_STEP_LABELS.map(() => ({ status: 'idle' })));
     setResult(null);
+    setCloneRuns([]);
     setRunning(true);
     setShowProgress(true);
     try {
@@ -836,7 +971,7 @@ export default function TaskAgentApp({ user, onLogout }) {
   }
 
   function handleAction() {
-    if (mode === 'clone') executeClone();
+    if (mode === 'clone') (multiClone ? executeMultiClone() : executeClone());
     else setShowConfirm(true);
   }
 
@@ -844,9 +979,11 @@ export default function TaskAgentApp({ user, onLogout }) {
     if (running) return;
     setShowProgress(false);
     if (mode === 'clone') {
+      const anyCloned = !!result || cloneRuns.some(r => r.status === 'done');
       setSteps([]);
       setResult(null);
-      if (result) { resetSource(); setIssueKey(''); }
+      setCloneRuns([]);
+      if (anyCloned) { resetSource(); setIssueKey(''); }
     } else if (mode === 'move') {
       const rootDoneKeys = new Set(
         moveResults
@@ -868,21 +1005,39 @@ export default function TaskAgentApp({ user, onLogout }) {
   const loadedMoveItems    = moveItems.filter(m => m.source);
   const anyLoadingChildren = moveItems.some(m => m.loadingChildren);
 
+  // Multi-clone drives these two fields itself, so their single pickers are hidden.
+  const assigneeField  = userFields.find(f => f.id === 'assignee' || f.name === 'Assignee') ?? null;
+  const developerField = userFields.find(f => f.name === 'Developer') ?? null;
+  const multiDrivenIds = new Set([assigneeField?.id, developerField?.id].filter(Boolean));
+  const visibleUserFields = multiClone
+    ? userFields.filter(f => !multiDrivenIds.has(f.id))
+    : userFields;
+
   const canRun = mode === 'clone'
     ? !!source && !running && !loadingUserFields && !loadingSprints
+      && (!multiClone || multiUsers.length > 0)
     : loadedMoveItems.length > 0 && !running && !!targetProject && !anyLoadingChildren;
 
   const allCloneDone = steps.length > 0 && steps.every(s => s?.status === 'done' || s?.status === 'skipped');
   const hasCloneErr  = steps.some(s => s?.status === 'error');
+  const multiRunning = cloneRuns.length > 0;
+  const multiDone    = multiRunning && cloneRuns.every(r => r.status === 'done' || r.status === 'error');
+  const multiOkCount = cloneRuns.filter(r => r.status === 'done').length;
   const allMoveDone  = moveResults.length > 0 && moveResults.every(treeAllSettled);
   const allMoveOk    = moveResults.length > 0 && moveResults.every(treeAllOk);
 
   const modalTitle = mode === 'clone'
-    ? running
-      ? 'Cloning issue…'
-      : result
-        ? (hasCloneErr ? '✓ Cloned (with warnings)' : '✓ Cloned successfully')
-        : '⚠ Error'
+    ? multiRunning
+      ? running
+        ? `Cloning ${cloneRuns.length} issue${cloneRuns.length !== 1 ? 's' : ''}…`
+        : multiOkCount === cloneRuns.length
+          ? `✓ Cloned ${multiOkCount} issue${multiOkCount !== 1 ? 's' : ''}`
+          : `✓ Cloned ${multiOkCount} of ${cloneRuns.length} (with errors)`
+      : running
+        ? 'Cloning issue…'
+        : result
+          ? (hasCloneErr ? '✓ Cloned (with warnings)' : '✓ Cloned successfully')
+          : '⚠ Error'
     : running
       ? `Moving to ${targetProject}…`
       : allMoveDone
@@ -979,16 +1134,46 @@ export default function TaskAgentApp({ user, onLogout }) {
               )}
 
               {source && (
+                <>
+                  <label className="agent-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={multiClone}
+                      onChange={e => {
+                        setMultiClone(e.target.checked);
+                        if (!e.target.checked) setMultiUsers([]);
+                      }}
+                    />
+                    Multi cloning
+                  </label>
+                  {multiClone && (
+                    <>
+                      <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '6px 0 12px' }}>
+                        One clone per selected user — Assignee
+                        {developerField ? ' and Developer' : ''} set to that user.
+                      </p>
+                      <MultiUserPicker
+                        cloudId={CLOUD_ID}
+                        label={`Users${multiUsers.length ? ` (${multiUsers.length})` : ''}`}
+                        values={multiUsers}
+                        onChange={setMultiUsers}
+                      />
+                    </>
+                  )}
+                </>
+              )}
+
+              {source && (
                 <div style={{ marginTop: 20 }}>
                   {loadingUserFields ? (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--text-3)', fontSize: 13 }}>
                       <span className="spinner" />
                       Loading people fields…
                     </div>
-                  ) : userFields.length > 0 ? (
+                  ) : visibleUserFields.length > 0 ? (
                     <>
                       <p className="field-label" style={{ marginBottom: 12 }}>People</p>
-                      {userFields.map(f => (
+                      {visibleUserFields.map(f => (
                         <UserPicker
                           key={f.id}
                           cloudId={CLOUD_ID}
@@ -1144,7 +1329,9 @@ export default function TaskAgentApp({ user, onLogout }) {
                   disabled={!canRun}
                   onClick={handleAction}
                 >
-                  Clone Issue ↗
+                  {multiClone && multiUsers.length > 0
+                    ? `Clone ${multiUsers.length} Issue${multiUsers.length !== 1 ? 's' : ''} ↗`
+                    : 'Clone Issue ↗'}
                 </button>
               )}
             </>
@@ -1234,7 +1421,34 @@ export default function TaskAgentApp({ user, onLogout }) {
           <div className="modal">
             <p className="modal-title">{modalTitle}</p>
 
-            {mode === 'clone' && (
+            {mode === 'clone' && multiRunning && (
+              <>
+                <ul className="step-list">
+                  {cloneRuns.map(r => (
+                    <li key={r.accountId} className="step-item">
+                      <StepIcon status={r.status} />
+                      <div className="step-body">
+                        <p className="step-name">{r.displayName}</p>
+                        {r.newKey && (
+                          <a className="step-link" href={r.newUrl} target="_blank" rel="noreferrer">
+                            {r.newKey} ↗
+                          </a>
+                        )}
+                        {r.error && <p className="step-error">{r.error}</p>}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+
+                {!running && multiDone && (
+                  <button className="btn btn-primary" style={{ marginTop: 20 }} onClick={handleCloseModal}>
+                    Done
+                  </button>
+                )}
+              </>
+            )}
+
+            {mode === 'clone' && !multiRunning && (
               <>
                 <ul className="step-list">
                   {CLONE_STEP_LABELS.map((label, i) => {

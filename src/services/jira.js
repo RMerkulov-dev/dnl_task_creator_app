@@ -793,6 +793,34 @@ export async function addIssueComponent(cloudId, issueKey, componentIds) {
   return { ok: false, error: parts.join(' | ') || `HTTP ${res.status}` };
 }
 
+// Add labels to an existing issue WITHOUT dropping the ones already on it
+// (additive `update` verb, same pattern as addIssueComponent). Used to re-assert
+// labels a project automation rule strips off a freshly created issue.
+// Never throws — returns { ok } or { ok:false, error }.
+export async function addIssueLabels(cloudId, issueKey, labels) {
+  const list = (Array.isArray(labels) ? labels : [labels]).filter(Boolean);
+  if (!list.length) return { ok: false, error: 'No labels given' };
+  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ update: { labels: list.map(l => ({ add: String(l) })) } }),
+    });
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  if (res.status === 204 || res.ok) return { ok: true };
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { /* non-JSON error body */ }
+  const parts = [];
+  if (data.errorMessages?.length) parts.push(...data.errorMessages);
+  if (data.errors && Object.keys(data.errors).length) parts.push(Object.values(data.errors).join('; '));
+  return { ok: false, error: parts.join(' | ') || `HTTP ${res.status}` };
+}
+
 // Generic enhanced-search that follows nextPageToken pagination and returns all
 // matching issues (capped by maxTotal as a safety valve).
 export async function searchIssuesPaged(cloudId, jql, fields, { maxTotal = 2000 } = {}) {
