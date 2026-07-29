@@ -187,7 +187,8 @@
       "Bash(./node_modules/.bin/esbuild --jsx=automatic src/apps/status_updates/StatusUpdatesApp.jsx --outfile=/dev/null)",
       "Bash(awk 'NR>=83 && NR<=160' src/apps/status_updates/StatusUpdatesApp.jsx)",
       "Bash(awk '/^\\\\/\\\\/ Flatten a Jira descendant tree/{exit} {print}')",
-      "Bash(lsof -nP -iTCP -sTCP:LISTEN)"
+      "Bash(lsof -nP -iTCP -sTCP:LISTEN)",
+      "Bash(node -e \"console.log\\(typeof DOMParser\\)\")"
     ]
   }
 }

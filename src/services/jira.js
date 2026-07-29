@@ -27,55 +27,177 @@ function htmlToAdf(html, mediaMap = null) {
   }
 }
 
-// Jira's ADF validator rejects whole documents (HTTP 400 INVALID_INPUT) when
-// they contain "empty" container nodes — a bulletList/orderedList with no
-// listItems, a blockquote with no block children, or a listItem with no content.
-// Rich descriptions occasionally produce these from the HTML→ADF pass, so we
-// scrub them here before sending. Returns a cleaned array of nodes.
-function sanitizeAdfNodes(nodes) {
+// ─── ADF sanitizer ───────────────────────────────────────────────────────────
+// Jira answers 400 "The field value is not valid Atlassian Document Format (ADF)
+// content." for ANY structural violation, with no hint which node is at fault.
+// The converter below can produce several such shapes from real-world HTML
+// (pasted email markup, unknown tags, empty containers), so nothing goes out
+// before passing through here. The rules Jira enforces that we hit in practice:
+//   - a doc/blockquote/listItem may only hold BLOCK nodes — a bare `text` node
+//     at block level (what unknown tags like <table>/<font> used to produce)
+//     invalidates the whole document;
+//   - a `text` node must have a non-empty string (an empty <pre> produced one);
+//   - bulletList/orderedList need ≥1 listItem, listItem/blockquote need ≥1 block;
+//   - `textColor` must be #rrggbb, `link` needs an href, and the `code` mark
+//     can't be combined with other formatting marks;
+//   - a `mediaSingle` must wrap exactly one `media` node with an id.
+// Anything unrecognised keeps its text (wrapped in a paragraph) instead of
+// silently disappearing.
+
+const ADF_INLINE_TYPES = new Set(['text', 'hardBreak', 'emoji', 'mention', 'inlineCard', 'status', 'date']);
+const ADF_BLOCK_TYPES  = new Set([
+  'paragraph', 'heading', 'bulletList', 'orderedList', 'listItem', 'blockquote',
+  'codeBlock', 'rule', 'mediaSingle', 'mediaGroup', 'panel',
+]);
+// Nodes a container may hold; anything else is degraded to a paragraph.
+const ADF_CONTAINER_ALLOWED = {
+  blockquote: new Set(['paragraph', 'bulletList', 'orderedList', 'codeBlock', 'mediaSingle']),
+  listItem:   new Set(['paragraph', 'bulletList', 'orderedList', 'codeBlock', 'mediaSingle']),
+};
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+// The `code` mark is exclusive — Jira rejects it alongside strong/em/underline/…
+const CODE_COMPATIBLE_MARKS = new Set(['code', 'link', 'annotation']);
+
+function sanitizeAdfNodes(nodes, container = 'doc') {
+  const out = [];
+  const allowed = ADF_CONTAINER_ALLOWED[container];
+  let inlineRun = [];
+
+  const flushInlineRun = () => {
+    if (!inlineRun.length) return;
+    // Formatting whitespace between block tags carries no meaning — drop it
+    // instead of turning it into a blank paragraph.
+    const meaningful = inlineRun.some(n => n.type !== 'text' || n.text.trim());
+    if (meaningful) out.push({ type: 'paragraph', content: inlineRun });
+    inlineRun = [];
+  };
+
+  for (const raw of nodes || []) {
+    if (!raw || typeof raw !== 'object') continue;
+
+    // An inline node where a block was expected: collect the run and wrap it.
+    if (ADF_INLINE_TYPES.has(raw.type)) {
+      inlineRun.push(...sanitizeAdfInlines([raw]));
+      continue;
+    }
+    flushInlineRun();
+
+    let node = sanitizeAdfBlock(raw);
+    if (!node) continue;
+    if (allowed && !allowed.has(node.type)) {
+      // e.g. a heading inside a blockquote — keep the words, lose the shape.
+      const inlines = sanitizeAdfInlines(node.content);
+      node = inlines.length ? { type: 'paragraph', content: inlines } : null;
+      if (!node) continue;
+    }
+    out.push(node);
+  }
+  flushInlineRun();
+  return out;
+}
+
+function sanitizeAdfBlock(node) {
+  switch (node.type) {
+    case 'paragraph':
+      node.content = sanitizeAdfInlines(node.content);
+      return node;
+
+    case 'heading':
+      node.attrs = { level: Math.min(6, Math.max(1, Number(node.attrs?.level) || 1)) };
+      node.content = sanitizeAdfInlines(node.content);
+      return node;
+
+    case 'codeBlock': {
+      // Code holds plain text only — no marks, and never an empty text node.
+      const text = (node.content || []).map(c => (typeof c?.text === 'string' ? c.text : '')).join('');
+      node.content = text ? [{ type: 'text', text }] : [];
+      return node;
+    }
+
+    case 'bulletList':
+    case 'orderedList':
+      node.content = (node.content || [])
+        .filter(c => c?.type === 'listItem')
+        .map(sanitizeAdfBlock)
+        .filter(Boolean);
+      return node.content.length ? node : null;
+
+    case 'listItem': {
+      const content = sanitizeAdfNodes(node.content, 'listItem');
+      // A listItem must hold ≥1 block and may not open with a nested list.
+      if (!content.length || content[0].type !== 'paragraph') {
+        content.unshift({ type: 'paragraph', content: [] });
+      }
+      node.content = content;
+      return node;
+    }
+
+    case 'blockquote':
+      node.content = sanitizeAdfNodes(node.content, 'blockquote');
+      return node.content.length ? node : null;
+
+    case 'mediaSingle': {
+      const media = (node.content || []).find(c => c?.type === 'media' && c.attrs?.id);
+      if (!media) return null;
+      node.content = [media];
+      return node;
+    }
+
+    case 'rule':
+      return { type: 'rule' };
+
+    default: {
+      if (Array.isArray(node.content)) node.content = sanitizeAdfNodes(node.content);
+      if (ADF_BLOCK_TYPES.has(node.type)) return node;
+      // Unknown node type — salvage its text rather than dropping it.
+      const inlines = sanitizeAdfInlines(node.content);
+      return inlines.length ? { type: 'paragraph', content: inlines } : null;
+    }
+  }
+}
+
+function sanitizeAdfInlines(nodes) {
   const out = [];
   for (const node of nodes || []) {
-    const clean = sanitizeAdfNode(node);
-    if (clean) out.push(clean);
+    if (!node || typeof node !== 'object') continue;
+
+    if (node.type === 'text') {
+      if (typeof node.text !== 'string' || !node.text.length) continue;
+      const marks = sanitizeAdfMarks(node.marks);
+      if (marks.length) node.marks = marks;
+      else delete node.marks;
+      out.push(node);
+    } else if (ADF_INLINE_TYPES.has(node.type)) {
+      out.push(node);
+    } else if (Array.isArray(node.content)) {
+      // A block node where an inline was expected — splice its text in.
+      out.push(...sanitizeAdfInlines(node.content));
+    }
   }
   return out;
 }
 
-function sanitizeAdfNode(node) {
-  if (!node || typeof node !== 'object') return null;
-
-  // Recurse into children first so emptiness is evaluated bottom-up.
-  if (Array.isArray(node.content)) {
-    node.content = sanitizeAdfNodes(node.content);
+function sanitizeAdfMarks(marks) {
+  const out = [];
+  const seen = new Set();
+  for (const mark of marks || []) {
+    if (!mark || typeof mark !== 'object' || typeof mark.type !== 'string') continue;
+    if (seen.has(mark.type)) continue;                                  // no duplicates
+    if (mark.type === 'link' && !mark.attrs?.href) continue;
+    if (mark.type === 'textColor' && !HEX_COLOR_RE.test(mark.attrs?.color || '')) continue;
+    seen.add(mark.type);
+    out.push(mark);
   }
-
-  switch (node.type) {
-    case 'bulletList':
-    case 'orderedList':
-      // Lists may only contain listItems and must contain at least one.
-      node.content = (node.content || []).filter(c => c.type === 'listItem');
-      return node.content.length ? node : null;
-
-    case 'listItem':
-      // A listItem must hold at least one block node.
-      if (!node.content?.length) node.content = [{ type: 'paragraph', content: [] }];
-      return node;
-
-    case 'blockquote':
-      // A blockquote must hold at least one block node.
-      return node.content?.length ? node : null;
-
-    default:
-      return node;
-  }
+  return seen.has('code') ? out.filter(m => CODE_COMPATIBLE_MARKS.has(m.type)) : out;
 }
 
 function convertNodes(nodes) {
   const result = [];
   for (const node of nodes) {
     if (node.nodeType === Node.TEXT_NODE) {
+      // Block context: whitespace between tags is markup formatting, not content.
       const text = node.textContent;
-      if (text) result.push({ type: 'text', text });
+      if (text && text.trim()) result.push({ type: 'text', text });
     } else if (node.nodeType === Node.ELEMENT_NODE) {
       const block = convertElement(node);
       if (block) {
@@ -91,14 +213,16 @@ function convertElement(el) {
   const tag = el.tagName.toLowerCase();
 
   // Block elements
-  if (tag === 'h1') return { type: 'heading', attrs: { level: 1 }, content: convertInline(el) };
-  if (tag === 'h2') return { type: 'heading', attrs: { level: 2 }, content: convertInline(el) };
-  if (tag === 'h3') return { type: 'heading', attrs: { level: 3 }, content: convertInline(el) };
+  const heading = tag.match(/^h([1-6])$/);
+  if (heading) return { type: 'heading', attrs: { level: Number(heading[1]) }, content: convertInline(el) };
   if (tag === 'p')  return { type: 'paragraph', content: convertInline(el) };
-  if (tag === 'blockquote') return { type: 'blockquote', content: convertNodes(el.childNodes).filter(n => n.type !== 'text') };
+  // Stray inline content inside a quote is wrapped into a paragraph by the
+  // sanitizer, so it survives instead of being filtered out.
+  if (tag === 'blockquote') return { type: 'blockquote', content: convertNodes(el.childNodes) };
   if (tag === 'ul') return { type: 'bulletList', content: convertListItems(el) };
   if (tag === 'ol') return { type: 'orderedList', content: convertListItems(el) };
-  if (tag === 'li') return { type: 'listItem', content: [{ type: 'paragraph', content: convertInline(el) }] };
+  if (tag === 'li') return convertListItem(el);
+  if (tag === 'hr') return { type: 'rule' };
   if (tag === 'pre') {
     const code = el.querySelector('code');
     return { type: 'codeBlock', content: [{ type: 'text', text: (code || el).textContent }] };
@@ -143,11 +267,40 @@ function convertElement(el) {
 function convertListItems(el) {
   const items = [];
   for (const child of el.children) {
-    if (child.tagName.toLowerCase() === 'li') {
-      items.push({ type: 'listItem', content: [{ type: 'paragraph', content: convertInline(child) }] });
-    }
+    if (child.tagName.toLowerCase() === 'li') items.push(convertListItem(child));
   }
   return items;
+}
+
+// A listItem is a block container: its text becomes a paragraph, and a nested
+// <ul>/<ol> stays a nested list instead of being flattened into that paragraph.
+function convertListItem(li) {
+  const blocks = [];
+  let inline = [];
+  const flushInline = () => {
+    if (inline.length) blocks.push({ type: 'paragraph', content: inline });
+    inline = [];
+  };
+
+  for (const child of li.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      if (child.textContent) inline.push({ type: 'text', text: child.textContent });
+      continue;
+    }
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+    const tag = child.tagName.toLowerCase();
+    if (tag === 'ul' || tag === 'ol') {
+      flushInline();
+      blocks.push({ type: tag === 'ul' ? 'bulletList' : 'orderedList', content: convertListItems(child) });
+    } else if (tag === 'p' || tag === 'div') {
+      flushInline();
+      blocks.push({ type: 'paragraph', content: convertInline(child) });
+    } else {
+      inline.push(...inlineElement(child));
+    }
+  }
+  flushInline();
+  return { type: 'listItem', content: blocks.length ? blocks : [{ type: 'paragraph', content: [] }] };
 }
 
 function convertInline(el) {
@@ -166,6 +319,7 @@ function convertInline(el) {
 
 function inlineElement(el, parentMarks = []) {
   const tag = el.tagName.toLowerCase();
+  if (tag === 'br') return [{ type: 'hardBreak' }];
   const marks = [...parentMarks];
 
   if (tag === 'strong' || tag === 'b') marks.push({ type: 'strong' });
@@ -524,6 +678,7 @@ function adfBlock(node) {
     case 'codeBlock':   return `<pre><code>${escHtml((node.content || []).map(n => n.text || '').join(''))}</code></pre>`;
     case 'text':        return adfInline(node);
     case 'hardBreak':   return '<br>';
+    case 'rule':        return '<hr>';
     default:            return children(node.content);
   }
 }
