@@ -4244,7 +4244,9 @@ html, body, #root {
   margin-top: 2px;
 }
 
-.tf-create-btn { padding: 7px 16px; font-size: 13px; }
+/* width: auto overrides the global full-width .btn-primary — on a task card the
+   button belongs next to "More…", not stretched across the whole column. */
+.tf-create-btn { padding: 7px 16px; font-size: 13px; width: auto; }
 
 .tf-task-created {
   font-size: 13px;
@@ -4364,6 +4366,289 @@ html, body, #root {
   gap: 10px;
   margin-top: 8px;
 }
+
+/* ─── Create-target choice (.ctc-*) + add-to-parent (.atp-*) ───────────────────
+   Two steps of "where should this task go?": pick new-vs-existing request, then
+   pick the parent + child type. Both reuse .tcm-head / .tcm-actions. */
+
+.ctc-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  animation: rise 0.35s cubic-bezier(0.16,1,0.3,1);
+}
+
+.ctc-body { padding: 18px 24px 4px; }
+
+.ctc-task {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+.ctc-q {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin: 0 0 12px;
+}
+
+.ctc-opt {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 13px 16px;
+  margin-bottom: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  transition: border-color 0.16s, background 0.16s;
+}
+.ctc-opt:hover { background: var(--bg-card-hover); border-color: var(--accent-1); }
+
+.ctc-opt-title { font-size: 14px; font-weight: 650; color: var(--text-1); }
+.ctc-opt-sub   { font-size: 12.5px; color: var(--text-3); line-height: 1.45; }
+
+.ctc-modal .tcm-actions { padding: 0 24px 18px; }
+
+/* ── Add to an existing request ── */
+
+.atp-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  width: 100%;
+  max-width: 660px;
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  animation: rise 0.35s cubic-bezier(0.16,1,0.3,1);
+}
+
+.atp-body {
+  padding: 18px 24px 22px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.atp-row { display: flex; gap: 12px; align-items: flex-end; }
+
+.atp-dim { color: var(--text-3); font-size: 12.5px; margin: 6px 2px; }
+
+/* Search results: a scrolling list of one-line candidates. */
+.atp-results {
+  margin-top: 8px;
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+}
+
+.atp-result,
+.atp-parent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-1);
+  cursor: pointer;
+}
+.atp-result:last-child { border-bottom: none; }
+.atp-result:hover      { background: var(--bg-card-hover); }
+
+.atp-result-key { font-weight: 700; font-size: 12.5px; flex: none; }
+.atp-result-sum,
+.atp-parent-sum {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atp-parent {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  cursor: default;
+}
+.atp-change { flex: none; }
+/* The key is the row's anchor — never let it wrap onto a second line. */
+.atp-parent .ba-issue-link { flex: none; white-space: nowrap; font-weight: 700; font-size: 12.5px; }
+
+.atp-type {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+
+.atp-status {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+.atp-status-todo { color: var(--text-3); background: rgba(148,163,184,0.14); }
+.atp-status-prog { color: var(--yellow); background: rgba(234,179,8,0.14); }
+.atp-status-done { color: var(--green);  background: rgba(34,197,94,0.14); }
+
+/* Epic / Task segmented choice. */
+.atp-kinds { display: flex; gap: 8px; }
+
+.atp-kind {
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.atp-kind:hover:not(:disabled) { color: var(--text-1); background: var(--bg-card-hover); }
+.atp-kind.active {
+  color: var(--accent-ink);
+  background: var(--accent-1);
+  border-color: var(--accent-1);
+}
+.atp-kind:disabled { opacity: 0.34; cursor: not-allowed; }
+
+.atp-hint { font-size: 12px; color: var(--text-3); margin: 8px 2px 0; }
+
+.atp-success { font-size: 14px; color: var(--text-1); margin: 6px 0 2px; line-height: 1.6; }
+.atp-warning { font-size: 12.5px; color: var(--yellow); margin: 10px 0 0; line-height: 1.5; }
+
+/* ── Per-kind field grid (status / sprint / people / estimates / priority) ── */
+
+.atp-fields {
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-bottom: 4px;
+}
+
+.atp-fields-head {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin: 0 0 12px;
+}
+
+.atp-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+}
+@media (max-width: 620px) {
+  .atp-fields-grid { grid-template-columns: 1fr; }
+}
+
+/* The 420px default editor would push the field grid two screens down in this
+   dialog — the fields are the point of the form, so keep them reachable. */
+.atp-body .rte-content .tiptap { min-height: 170px; max-height: 340px; }
+
+.atp-f { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+.atp-f-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.atp-f .select,
+.atp-f .input { font-size: 13px; }
+
+/* User picker: value button + search popover. */
+.atp-user { position: relative; }
+
+.atp-user-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-1);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+.atp-user-btn:hover { border-color: var(--accent-1); }
+.atp-user-caret { color: var(--text-3); font-size: 11px; flex: none; }
+.atp-dim-inline { color: var(--text-3); }
+
+.atp-user-pop {
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.atp-user-input { font-size: 13px; }
+
+.atp-user-list { display: flex; flex-direction: column; max-height: 170px; overflow-y: auto; }
+
+.atp-user-opt {
+  background: none;
+  border: none;
+  color: var(--text-1);
+  font-size: 13px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.atp-user-opt:hover  { background: var(--bg-input); }
+.atp-user-clear      { color: var(--red); }
+
+/* `.btn-primary` / `.btn-danger` are width:100% globally (that's the Dashboard's
+   full-width submit). In a right-aligned modal action row a 100%-wide button
+   swallows the whole row and pushes Cancel out of the dialog, so every
+   .tcm-actions row sizes its buttons to content. */
+.tcm-actions .btn-primary,
+.tcm-actions .btn-danger,
+.atp-btn { width: auto; }
 
 /* ─── Status Updates app ──────────────────────────────────────────────────── */
 .su-main {
@@ -6891,7 +7176,10 @@ button.su-status {
 
 .azj-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …), not 1fr: a long unbreakable URL in a description would
+     otherwise widen a column past the viewport and drag the panel's own
+     buttons (Edit / ✕) off-screen with it. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   height: 100%;
   align-items: stretch;
@@ -6904,6 +7192,7 @@ button.su-status {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 
 .azj-panel-head {
@@ -6934,8 +7223,10 @@ button.su-status {
 .azj-panel-body {
   padding: 14px;
   overflow-y: auto;
+  overflow-x: hidden;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -6999,9 +7290,39 @@ button.su-status {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
-.azj-title-input { flex: 1; font-size: 14px; font-weight: 600; }
-.azj-mini-btn    { padding: 6px 12px; font-size: 12.5px; white-space: nowrap; }
+.azj-title-input { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 600; }
+
+/* Every action button in this tab is inline-sized.
+   `.btn-primary` / `.btn-danger` are `width: 100%` globally (the Dashboard's
+   full-width submit) — inside a flex row that made Save / Send claim the whole
+   row and collapse the input or textarea next to them to zero width, so the
+   width reset here is load-bearing, not cosmetic. */
+.azj-mini-btn {
+  width: auto;
+  flex: 0 0 auto;
+  padding: 7px 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  border-radius: 9px;
+  white-space: nowrap;
+  min-height: 30px;
+}
+
+/* Square glyph button (discard changes). */
+.azj-icon-btn {
+  padding: 0;
+  width: 30px;
+  min-width: 30px;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+.azj-load-btn { min-height: 32px; }
+
+/* The composer's button sits on the textarea's last line, not stretched up it. */
+.azj-send-btn { align-self: flex-end; }
 
 .azj-meta {
   display: flex;
@@ -7013,7 +7334,7 @@ button.su-status {
 }
 .azj-meta strong { color: var(--text-1); font-weight: 600; }
 
-.azj-section { border-top: 1px solid var(--border); padding-top: 10px; }
+.azj-section { border-top: 1px solid var(--border); padding-top: 10px; min-width: 0; }
 
 .azj-section-head {
   display: flex;
@@ -7043,6 +7364,8 @@ button.su-status {
   color: var(--text-2);
   line-height: 1.6;
   word-break: break-word;
+  /* Bare work-item / Jira URLs are single unbreakable words. */
+  overflow-wrap: anywhere;
 }
 .azj-desc p  { margin: 0 0 6px; }
 .azj-desc ul, .azj-desc ol { margin: 0 0 6px; padding-left: 20px; }
@@ -7051,11 +7374,12 @@ button.su-status {
 
 .azj-comment-box {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 8px;
   margin-bottom: 10px;
+  min-width: 0;
 }
-.azj-comment-input { flex: 1; resize: vertical; font-size: 13px; }
+.azj-comment-input { flex: 1 1 auto; min-width: 0; resize: vertical; font-size: 13px; }
 
 .azj-comment {
   border: 1px solid var(--border);

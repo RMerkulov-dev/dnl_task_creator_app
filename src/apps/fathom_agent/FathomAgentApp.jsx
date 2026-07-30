@@ -217,6 +217,10 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
   const [fathomToken,  setFathomToken]  = useState(() => readStoredFathomToken());
   const [connecting,   setConnecting]   = useState(false);
   const [connectError, setConnectError] = useState('');
+  // A token in localStorage only *looks* like a connection — it may have been
+  // revoked or expired since. Verified on mount (below) so the Connect screen
+  // appears the moment the app is opened, not after the first Load calls.
+  const [checking,     setChecking]     = useState(() => !!readStoredFathomToken());
   const popupRef = useRef(null);
 
   function persistToken(token) {
@@ -293,6 +297,34 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
       window.removeEventListener('storage', onStorage);
     };
   }, []);
+
+  // Validate the stored token as soon as the app opens (and whenever it
+  // changes). A 401 wipes it, so the user lands straight on the Connect screen
+  // with the reason; anything else (network, MCP hiccup) is reported without
+  // discarding a token that may well be fine.
+  useEffect(() => {
+    if (!fathomToken) { setChecking(false); return; }
+    let alive = true;
+    setChecking(true);
+    fetch('/api/fathom/session-check', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ fathomToken }),
+    })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!alive || res.ok) return;
+        if (data.reconnect) {
+          persistToken('');
+          setConnectError(data.error || 'Fathom access expired. Please reconnect.');
+        } else {
+          setError(data.error || `Could not reach Fathom (${res.status}).`);
+        }
+      })
+      .catch((e) => { if (alive) setError(e.message || 'Could not reach Fathom.'); })
+      .finally(() => { if (alive) setChecking(false); });
+    return () => { alive = false; };
+  }, [fathomToken]); // eslint-disable-line
 
   const bottomRef   = useRef(null);
   const textareaRef = useRef(null);
@@ -503,7 +535,10 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
   const canSend = input.trim().length > 0 && !loading && !!fathomToken;
   const micBusy = recording || transcribing;
 
-  const isConnected = !!fathomToken;
+  // The working UI waits for the token check — otherwise the user starts typing
+  // (or hits Load calls) against a connection we already know is dead.
+  const verifying   = !!fathomToken && checking;
+  const isConnected = !!fathomToken && !checking;
 
   return (
     <div className="app-shell">
@@ -544,7 +579,14 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
           </div>
         )}
 
-        {!isConnected ? (
+        {verifying ? (
+          <div className="ba-chat">
+            <div className="ba-empty">
+              <span className="spinner" style={{ width: 22, height: 22 }} />
+              <p className="ba-empty-sub" style={{ marginTop: 12 }}>Checking your Fathom connection…</p>
+            </div>
+          </div>
+        ) : !isConnected ? (
           <div className="ba-chat">
             <div className="ba-empty">
               <p className="ba-empty-title">Connect your Fathom account</p>

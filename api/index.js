@@ -1551,6 +1551,25 @@ app.get('/api/fathom/skills', (req, res) => {
   res.json({ skills: listFollowupSkills() });
 });
 
+// Is this Fathom token still good? The app calls this on mount so an expired
+// token shows the Connect screen immediately instead of after the first
+// "Load calls" (a stored-but-dead token used to look connected until then).
+// Cheap by design: one MCP handshake + tools/list, both of which are cached
+// afterwards, so the check also warms the session for the real request.
+app.post('/api/fathom/session-check', express.json({ limit: '4kb' }), async (req, res) => {
+  const { fathomToken } = req.body ?? {};
+  if (!fathomToken) return res.status(401).json({ ok: false, error: 'Fathom is not connected.', reconnect: true });
+  try {
+    await withFathomSession(fathomToken, sid => ensureFathomTools(fathomToken, sid));
+    res.json({ ok: true });
+  } catch (err) {
+    // Only an auth failure means "reconnect" — a network/MCP hiccup must not
+    // wipe a perfectly good token.
+    const status = err.reconnect ? 401 : 502;
+    res.status(status).json({ ok: false, error: err.message, reconnect: !!err.reconnect });
+  }
+});
+
 // Find a discovered Fathom MCP tool by purpose, resilient to exact naming.
 function findFathomRawTool(kind) {
   const tools = FATHOM_TOOLS_RAW || [];

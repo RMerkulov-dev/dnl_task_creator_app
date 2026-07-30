@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
+import AddToParentModal, { CreateTargetChoice } from '../../components/AddToParentModal.jsx';
 
 // ─── Skill output parser ──────────────────────────────────────────────────────
 // Turns the strict "Tasks Follow-Up" markdown into structured task objects so we
@@ -133,7 +134,10 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
   const [copied,   setCopied]   = useState(false);
   const [exported, setExported] = useState(false);
 
-  const [taskModal, setTaskModal] = useState(null);  // { task } being created
+  // Creating a task runs in two steps: choose the target (new request vs an
+  // existing one), then the matching modal. `taskModal.mode` is null while the
+  // choice is up, then 'new' | 'existing'.
+  const [taskModal, setTaskModal] = useState(null);  // { task, mode }
   const [created,   setCreated]   = useState({});    // { [taskKey]: { jiraKey, jiraUrl, epicUrl } }
   const [details,   setDetails]   = useState({});    // { [taskKey]: { loading, text, error } } — per-task deep dives
 
@@ -547,7 +551,7 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
                 rawResult={result}
                 created={created}
                 details={details}
-                onCreate={task => setTaskModal({ task })}
+                onCreate={task => setTaskModal({ task, mode: null })}
                 onDeepDive={runDeepDive}
               />
             ) : (
@@ -559,9 +563,29 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
         </section>
       </div>
 
-      {taskModal && (
+      {taskModal && !taskModal.mode && (
+        <CreateTargetChoice
+          taskTitle={taskModal.task.title}
+          onNew={() => setTaskModal(m => ({ ...m, mode: 'new' }))}
+          onExisting={() => setTaskModal(m => ({ ...m, mode: 'existing' }))}
+          onClose={() => setTaskModal(null)}
+        />
+      )}
+
+      {taskModal?.mode === 'new' && (
         <TaskCreateModal
           user={user}
+          allowedProjects={allowedProjects}
+          callTitle={selectedCall?.title}
+          initialTitle={taskModal.task.title}
+          initialDescription={buildTaskDescription(taskModal.task, selectedCall, details[taskKey(taskModal.task)]?.text)}
+          onClose={() => setTaskModal(null)}
+          onCreated={res => setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }))}
+        />
+      )}
+
+      {taskModal?.mode === 'existing' && (
+        <AddToParentModal
           allowedProjects={allowedProjects}
           callTitle={selectedCall?.title}
           initialTitle={taskModal.task.title}
@@ -764,7 +788,7 @@ function ResultView({ parsed, rawResult, created, details, onCreate, onDeepDive 
                 >
                   {detail?.loading
                     ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Reading call…</>
-                    : 'More from call'}
+                    : 'More…'}
                 </button>
               )}
             </div>

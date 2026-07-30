@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { PROJECT_LIST } from '../../config/projects.js';
 import {
   getWorkItem, getWorkItemStates, getWorkItemComments, addWorkItemComment,
   updateWorkItem, updateWorkItemState, resolveJiraFieldValue, extractJiraKey,
-  workItemWebUrl,
+  workItemWebUrl, findWorkItemByJiraKey,
 } from '../../services/azureDevops.js';
 import {
   getIssueFull, getIssueComments, addIssueComment, getTransitions,
@@ -15,11 +15,14 @@ import RichTextEditor from '../../components/RichTextEditor.jsx';
 // ─── Azure-Jira tab ───────────────────────────────────────────────────────────
 //
 // Side-by-side editor for one Azure DevOps work item (left) and its linked Jira
-// issue (right). Enter an Azure #id → the card loads with editable state /
-// title / description / comments; the Jira key is resolved from the card's
-// Jira field (falling back to the Jira-side Azure-id custom field) and the
-// right panel loads the issue with editable status (workflow transitions),
-// summary, description, priority, assignee and comments.
+// issue (right). Loading either side resolves and loads the other:
+//   Azure #id → Jira key   from the Azure-side Jira field, falling back to the
+//                          Jira-side Azure-id custom field (JQL);
+//   Jira key  → Azure #id  from the Jira-side Azure-id custom field, falling
+//                          back to the id in the description's work-item link,
+//                          then to a WIQL lookup by Jira key.
+// Both cards are editable: state/status, title/summary, description, comments
+// (plus priority and assignee on the Jira side).
 
 // ── small helpers ─────────────────────────────────────────────────────────────
 
@@ -64,6 +67,36 @@ function isHtmlEmpty(html) {
   return !String(html || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim();
 }
 
+// ── link resolution (Jira → Azure) ────────────────────────────────────────────
+
+// The Azure work-item id stored on the Jira side. Primary source is the
+// clientRequestIdField (customfield_10034), which createIssue() always stamps —
+// it is a *number* field, so it arrives as 1243 / 1243.0, not a string. Older
+// issues created by hand may only carry the id inside the description's
+// "Azure DevOps Epic ID / _workitems/edit/<id>" link, so that is the fallback.
+function azureIdFromJira(issue, project) {
+  const raw = issue?.fields?.[project?.jira?.clientRequestIdField];
+  const n = Number(String(raw ?? '').trim());
+  if (Number.isFinite(n) && n > 0) return Math.round(n);
+
+  const html = String(adfToHtml(issue?.fields?.description) || '');
+  const m = html.match(/_workitems\/edit\/(\d+)/i)
+         || html.match(/Azure\s*DevOps[^:<]*:\s*(\d+)/i);
+  const id = m ? Number(m[1]) : 0;
+  return id > 0 ? id : null;
+}
+
+// Which registered project owns a Jira key ("ABS-12213" → ABS, "ABSPO-7" → ABS
+// via jiraProjectOptions). Lets the Jira input drive the Azure side even when
+// the selected project is a different one.
+function projectForJiraKey(key, projects) {
+  const prefix = String(key || '').trim().toUpperCase().match(/^([A-Z][A-Z0-9]*)-\d+$/)?.[1];
+  if (!prefix) return null;
+  return projects.find(p =>
+    (p.jiraProjectOptions || [p.jira?.projectKey]).filter(Boolean).includes(prefix)
+  ) || null;
+}
+
 // ── shared field widgets ──────────────────────────────────────────────────────
 
 // A one-line editable text field: input + Save button that appears when dirty.
@@ -96,7 +129,12 @@ function EditableTitle({ value, onSave, disabled }) {
           <button className="btn btn-primary azj-mini-btn" onClick={save} disabled={busy}>
             {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Save'}
           </button>
-          <button className="btn btn-ghost azj-mini-btn" onClick={() => { setDraft(value); setError(''); }} disabled={busy}>✕</button>
+          <button
+            className="btn btn-ghost azj-mini-btn azj-icon-btn"
+            title="Discard changes"
+            onClick={() => { setDraft(value); setError(''); }}
+            disabled={busy}
+          >✕</button>
         </>
       )}
       {error && <span className="azj-err">⚠ {error}</span>}
@@ -135,7 +173,7 @@ function DescriptionSection({ html, onSave }) {
           <div className="azj-edit-actions">
             <button className="btn btn-ghost azj-mini-btn" onClick={() => { setEditing(false); setError(''); }} disabled={busy}>Cancel</button>
             <button className="btn btn-primary azj-mini-btn" onClick={save} disabled={busy}>
-              {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Save description'}
+              {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Save'}
             </button>
           </div>
           {error && <p className="azj-err">⚠ {error}</p>}
@@ -180,8 +218,8 @@ function CommentsSection({ comments, loading, error, onAdd, renderBody }) {
           disabled={busy}
           onChange={e => setDraft(e.target.value)}
         />
-        <button className="btn btn-primary azj-mini-btn" onClick={submit} disabled={busy || !draft.trim()}>
-          {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Comment'}
+        <button className="btn btn-primary azj-mini-btn azj-send-btn" onClick={submit} disabled={busy || !draft.trim()}>
+          {busy ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Send'}
         </button>
       </div>
       {err && <p className="azj-err">⚠ {err}</p>}
@@ -319,35 +357,70 @@ export default function AzureJiraApp({ allowedProjects }) {
   const [jrCommentsLoading, setJrCommentsLoading] = useState(false);
   const [jrCommentsError,   setJrCommentsError]   = useState('');
   const [jrLinkNote,   setJrLinkNote]   = useState('');   // how the key was resolved / not
+  const [azLinkNote,   setAzLinkNote]   = useState('');   // …and the other way round
 
   const azSeq = useRef(0);
   const jrSeq = useRef(0);
 
   const cloudId = proj.jira?.cloudId;
 
-  // ── Jira load ──
-  const loadJira = useCallback(async (key) => {
+  // loadJira ⇄ loadAzureById call each other (each side resolves the other), so
+  // they are plain functions rather than useCallback pairs — nothing depends on
+  // their identity, and the `linkOther` flag is what stops the ping-pong.
+
+  // ── Jira load (+ Azure id resolution) ──
+  async function loadJira(key, { linkOther = true } = {}) {
     const issueKey = (key || '').trim().toUpperCase();
     if (!issueKey) return;
+    // A key from another registered project switches the selection, so the
+    // Azure side is looked up in the org that actually owns it.
+    const target = projectForJiraKey(issueKey, visibleProjects) || proj;
+    if (target.id !== proj.id) setProj(target);
+    const cid = target.jira?.cloudId;
+
     const mySeq = ++jrSeq.current;
     setJrInput(issueKey);
     setJrLoading(true); setJrError('');
     setJrIssue(null); setJrTransitions([]); setJrComments(null); setJrCommentsError('');
+    if (linkOther) setAzLinkNote('');
     try {
       const [issue, transitions] = await Promise.all([
-        getIssueFull(cloudId, issueKey),
-        getTransitions(cloudId, issueKey).catch(() => []),
+        getIssueFull(cid, issueKey),
+        getTransitions(cid, issueKey).catch(() => []),
       ]);
       if (jrSeq.current !== mySeq) return;
       setJrIssue(issue);
       setJrTransitions(transitions);
       setJrCommentsLoading(true);
-      getIssueComments(cloudId, issueKey)
+      getIssueComments(cid, issueKey)
         .then(list => { if (jrSeq.current === mySeq) setJrComments(list); })
         .catch(e => { if (jrSeq.current === mySeq) setJrCommentsError(e.message); })
         .finally(() => { if (jrSeq.current === mySeq) setJrCommentsLoading(false); });
       if (!jrPriorities.length) {
-        getPriorities(cloudId).then(setJrPriorities).catch(() => {});
+        getPriorities(cid).then(setJrPriorities).catch(() => {});
+      }
+
+      if (!linkOther) return;
+
+      // Resolve the linked Azure work item: the Jira-side Azure-id field (or the
+      // id in the description link), then a WIQL lookup by Jira key.
+      let azureId = azureIdFromJira(issue, target);
+      let note = azureId ? 'linked via Jira Azure ID' : '';
+      if (!azureId && target.azure) {
+        try {
+          azureId = await findWorkItemByJiraKey(
+            target.azure.proxyKey, target.azure.project, target.azure.jiraIdField,
+            issueKey, getJiraUrl(issueKey),
+          );
+          if (azureId) note = 'linked via Azure Jira field';
+        } catch { /* resolution is best-effort */ }
+      }
+      if (jrSeq.current !== mySeq) return;
+      if (azureId) {
+        setAzLinkNote(note);
+        loadAzureById(azureId, target, { linkOther: false });
+      } else {
+        setAzLinkNote('No linked Azure work item found — enter a number manually.');
       }
     } catch (e) {
       if (jrSeq.current !== mySeq) return;
@@ -355,46 +428,47 @@ export default function AzureJiraApp({ allowedProjects }) {
     } finally {
       if (jrSeq.current === mySeq) setJrLoading(false);
     }
-  }, [cloudId, jrPriorities.length]); // eslint-disable-line
+  }
 
   // ── Azure load (+ Jira key resolution) ──
-  const loadAzure = useCallback(async () => {
-    const id = Number(String(azInput).match(/\d+/)?.[0]);
-    if (!id) { setAzError('Enter a work item number.'); return; }
+  async function loadAzureById(id, p = proj, { linkOther = true } = {}) {
     const mySeq = ++azSeq.current;
+    setAzInput(String(id));
     setAzLoading(true); setAzError('');
-    setAzItem(null); setAzComments(null); setAzCommentsError('');
-    setJrLinkNote('');
+    setAzItem(null); setAzComments(null); setAzCommentsError(''); setAzStates([]);
+    if (linkOther) setJrLinkNote('');
     try {
-      const item = await getWorkItem(proj.azure.proxyKey, proj.azure.project, id);
+      const item = await getWorkItem(p.azure.proxyKey, p.azure.project, id);
       if (azSeq.current !== mySeq) return;
       setAzItem(item);
 
       const type = item.fields?.['System.WorkItemType'];
-      getWorkItemStates(proj.azure.proxyKey, proj.azure.project, type)
+      getWorkItemStates(p.azure.proxyKey, p.azure.project, type)
         .then(list => { if (azSeq.current === mySeq) setAzStates(list); })
         .catch(() => { if (azSeq.current === mySeq) setAzStates([]); });
 
       setAzCommentsLoading(true);
-      getWorkItemComments(proj.azure.proxyKey, proj.azure.project, id)
+      getWorkItemComments(p.azure.proxyKey, p.azure.project, id)
         .then(list => { if (azSeq.current === mySeq) setAzComments(list); })
         .catch(e => { if (azSeq.current === mySeq) setAzCommentsError(e.message); })
         .finally(() => { if (azSeq.current === mySeq) setAzCommentsLoading(false); });
 
+      if (!linkOther) return;
+
       // Resolve the linked Jira issue: Azure-side Jira field first, then the
       // authoritative Jira-side Azure-id custom field.
-      let jiraKey = extractJiraKey(resolveJiraFieldValue(item.fields, proj.azure.jiraIdField));
-      if (!jiraKey && proj.jira) {
+      let jiraKey = extractJiraKey(resolveJiraFieldValue(item.fields, p.azure.jiraIdField));
+      if (!jiraKey && p.jira) {
         try {
-          const keys = proj.jiraProjectOptions || [proj.jira.projectKey];
-          const map = await getIssueKeysByAzureIds(cloudId, keys, proj.jira.clientRequestIdField, [id]);
+          const keys = p.jiraProjectOptions || [p.jira.projectKey];
+          const map = await getIssueKeysByAzureIds(p.jira.cloudId, keys, p.jira.clientRequestIdField, [id]);
           jiraKey = map.get(String(id)) || null;
           if (jiraKey && azSeq.current === mySeq) setJrLinkNote('linked via Jira-side Azure ID');
         } catch { /* resolution is best-effort */ }
       }
       if (azSeq.current !== mySeq) return;
       if (jiraKey) {
-        loadJira(jiraKey);
+        loadJira(jiraKey, { linkOther: false });
       } else {
         setJrLinkNote('No linked Jira issue found — enter a key manually.');
       }
@@ -404,14 +478,20 @@ export default function AzureJiraApp({ allowedProjects }) {
     } finally {
       if (azSeq.current === mySeq) setAzLoading(false);
     }
-  }, [azInput, proj, cloudId, loadJira]); // eslint-disable-line
+  }
+
+  function loadAzure() {
+    const id = Number(String(azInput).match(/\d+/)?.[0]);
+    if (!id) { setAzError('Enter a work item number.'); return; }
+    loadAzureById(id, proj);
+  }
 
   function handleProjectChange(id) {
     const p = visibleProjects.find(p => p.id === id);
     if (!p) return;
     setProj(p);
     azSeq.current++; jrSeq.current++;
-    setAzItem(null); setAzComments(null); setAzError(''); setAzStates([]);
+    setAzItem(null); setAzComments(null); setAzError(''); setAzStates([]); setAzLinkNote('');
     setJrIssue(null); setJrComments(null); setJrError(''); setJrTransitions([]); setJrInput(''); setJrLinkNote('');
   }
 
@@ -501,14 +581,15 @@ export default function AzureJiraApp({ allowedProjects }) {
               onChange={e => setAzInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') loadAzure(); }}
             />
-            <button className="btn" onClick={loadAzure} disabled={azLoading}>
-              {azLoading ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Load'}
+            <button className="btn azj-mini-btn azj-load-btn" onClick={loadAzure} disabled={azLoading}>
+              {azLoading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Load'}
             </button>
+            {azLinkNote && <span className="azj-dim azj-linknote">{azLinkNote}</span>}
           </div>
           <div className="azj-panel-body">
             {azError && <p className="azj-err">⚠ {azError}</p>}
             {!azItem && !azError && !azLoading && (
-              <p className="azj-dim azj-empty">Enter an Azure DevOps work item number and press Load.</p>
+              <p className="azj-dim azj-empty">Enter an Azure DevOps work item number and press Load — or load a Jira key on the right and its work item appears here.</p>
             )}
             {azItem && (
               <>
@@ -556,8 +637,8 @@ export default function AzureJiraApp({ allowedProjects }) {
               onChange={e => setJrInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') loadJira(jrInput); }}
             />
-            <button className="btn" onClick={() => loadJira(jrInput)} disabled={jrLoading || !jrInput.trim()}>
-              {jrLoading ? <span className="spinner" style={{ width: 14, height: 14 }} /> : 'Load'}
+            <button className="btn azj-mini-btn azj-load-btn" onClick={() => loadJira(jrInput)} disabled={jrLoading || !jrInput.trim()}>
+              {jrLoading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Load'}
             </button>
             {jrLinkNote && <span className="azj-dim azj-linknote">{jrLinkNote}</span>}
           </div>

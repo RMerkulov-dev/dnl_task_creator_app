@@ -407,6 +407,166 @@ async function parseJira(res, label) {
   return data;
 }
 
+// ─── Child issues under an existing parent ────────────────────────────────────
+// Jira's hierarchy in these projects is Request (level 2) → Epic (1) →
+// Task/Story (0) → Sub-task (-1), and every level is linked through the `parent`
+// field. A child may only sit exactly one level below its parent, so callers
+// pick the type from the parent's hierarchyLevel (see getProjectIssueTypes,
+// whose entries carry hierarchyLevel).
+//
+// Unlike createIssue() — the "new request" flow, which stamps the Azure work-item
+// id — this creates a plain Jira issue with no Azure counterpart.
+export async function createChildIssue(cloudId, projectKey, issueTypeId, parentKey, summary, descriptionHtml, { componentIds, fields } = {}) {
+  const ids = (Array.isArray(componentIds) ? componentIds : [componentIds]).filter(Boolean);
+  const body = {
+    fields: {
+      project:     { key: projectKey },
+      issuetype:   { id: String(issueTypeId) },
+      parent:      { key: parentKey },
+      summary,
+      description: htmlToAdf(descriptionHtml),
+      ...(ids.length ? { components: ids.map(id => ({ id: String(id) })) } : {}),
+      // Caller-supplied extras (assignee, priority, Developer/QA, estimates…),
+      // already shaped for Jira and pre-filtered against the create screen.
+      ...(fields || {}),
+    },
+  };
+  const res = await fetch(`${jiraBase(cloudId)}/issue`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return parseJira(res, 'createChildIssue');
+}
+
+/**
+ * Statuses actually in use by one issue type in a project.
+ *
+ * There is no cheap authoritative list for us: `/project/{key}/statuses` and
+ * `/statuses/search` both answer 401 "scope does not match" with our token, and
+ * `/status` is the whole site. So harvest the distinct statuses off recent issues
+ * of that type — the ones the team really uses, which is what a picker wants.
+ * 4 pages × 100 issues covers every status in ABS (Backlog only shows up a few
+ * pages in). Ordered new → in-progress → done.
+ */
+export async function getStatusesUsedByType(cloudId, projectKey, typeName, { pages = 4 } = {}) {
+  const jql = `project = "${projectKey}" AND issuetype = "${typeName}" ORDER BY created DESC`;
+  const seen = new Map();   // name → statusCategory key
+  let nextPageToken = null;
+  for (let page = 0; page < pages; page++) {
+    const body = { jql, maxResults: 100, fields: ['status'], ...(nextPageToken ? { nextPageToken } : {}) };
+    const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await parseJira(res, 'getStatusesUsedByType');
+    for (const issue of data.issues ?? []) {
+      const s = issue.fields?.status;
+      if (s?.name && !seen.has(s.name)) seen.set(s.name, s.statusCategory?.key || 'new');
+    }
+    nextPageToken = data.nextPageToken ?? null;
+    if (!nextPageToken) break;
+  }
+  const rank = { new: 0, indeterminate: 1, done: 2 };
+  return [...seen.entries()]
+    .map(([name, category]) => ({ name, category }))
+    .sort((a, b) => (rank[a.category] ?? 1) - (rank[b.category] ?? 1) || a.name.localeCompare(b.name));
+}
+
+// Active + future sprints across a project's scrum boards, deduped by id.
+export async function getSprintOptions(cloudId, projectKey) {
+  const boards = await getBoardsForProject(cloudId, projectKey);
+  const scrum  = boards.filter(b => b.type === 'scrum');
+  const lists  = await Promise.all(scrum.map(b =>
+    getSprintsForBoard(cloudId, b.id).catch(() => [])
+  ));
+  const byId = new Map();
+  for (const list of lists) {
+    for (const s of list) if (!byId.has(s.id)) byId.set(s.id, { id: s.id, name: s.name, state: s.state });
+  }
+  // Active first — that's the one people mean by "the current sprint".
+  return [...byId.values()].sort((a, b) =>
+    (a.state === 'active' ? 0 : 1) - (b.state === 'active' ? 0 : 1) || a.name.localeCompare(b.name));
+}
+
+/**
+ * The Sprint field (gh-sprint) is written as a bare sprint id on some instances
+ * and as an array on others, and Jira rejects the wrong shape with a 400. Set it
+ * AFTER the create so a shape mismatch can never leave a duplicate issue behind.
+ */
+export async function setIssueSprint(cloudId, issueKey, sprintFieldId, sprintId) {
+  const id = Number(sprintId);
+  const first = await editIssueFieldsRaw(cloudId, issueKey, { [sprintFieldId]: id });
+  if (first.ok) return first;
+  const second = await editIssueFieldsRaw(cloudId, issueKey, { [sprintFieldId]: [id] });
+  if (second.ok) return second;
+  throw new Error(first.error || second.error || 'Could not set the sprint');
+}
+
+/**
+ * Walk the workflow toward `statusName` (a fresh issue always starts in the
+ * workflow's initial status, so the wanted status is often 1–2 transitions away).
+ * Greedy with a hop cap and a visited set; returns true when it lands on it.
+ */
+export async function transitionIssueToStatus(cloudId, issueKey, statusName) {
+  if (!statusName) return true;
+  const wanted = statusName.trim().toLowerCase();
+  try {
+    const current = await getIssueFull(cloudId, issueKey);
+    if (current.fields?.status?.name?.trim().toLowerCase() === wanted) return true;
+  } catch { /* fall through and try transitions anyway */ }
+
+  const visited = new Set();
+  for (let hops = 0; hops < 8; hops++) {
+    const transitions = await getTransitions(cloudId, issueKey);
+    if (!transitions.length) return false;
+    const direct = transitions.find(t => t.to?.name?.trim().toLowerCase() === wanted);
+    if (direct) { await transitionIssue(cloudId, issueKey, direct.id); return true; }
+    const next = transitions.find(t => t.to?.name && !visited.has(t.to.name.trim().toLowerCase()));
+    if (!next) return false;
+    visited.add(next.to.name.trim().toLowerCase());
+    await transitionIssue(cloudId, issueKey, next.id);
+  }
+  return false;
+}
+
+/**
+ * Search issues that can act as a parent (Requests / Epics) by key or summary.
+ * An empty query lists the most recently updated candidates, so the picker is
+ * useful before the user types anything.
+ * @returns {Promise<Array<{key, summary, type, hierarchyLevel, status, components}>>}
+ */
+export async function searchParentCandidates(cloudId, projectKeys, query, { types = ['Request', 'Epic'], max = 30 } = {}) {
+  const keys = (Array.isArray(projectKeys) ? projectKeys : [projectKeys]).filter(Boolean);
+  // Quotes and backslashes would break out of the JQL string literal.
+  const q = String(query || '').replace(/["\\]/g, ' ').trim();
+
+  const clauses = [];
+  if (keys.length) clauses.push(`project in (${keys.map(k => `"${k}"`).join(',')})`);
+  clauses.push(`issuetype in (${types.map(t => `"${t}"`).join(',')})`);
+  const asKey = q.toUpperCase().match(/^[A-Z][A-Z0-9]*-\d+$/);
+  if (asKey)      clauses.push(`key = "${asKey[0]}"`);
+  // A trailing wildcard only works on a single term; a phrase is matched as-is.
+  else if (q)     clauses.push(`summary ~ "${/\s/.test(q) ? q : `${q}*`}"`);
+
+  const jql = `${clauses.join(' AND ')} ORDER BY updated DESC`;
+  const res = await fetch(`${jiraBase(cloudId)}/search/jql`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jql, maxResults: max, fields: ['summary', 'issuetype', 'status', 'components'] }),
+  });
+  const data = await parseJira(res, 'searchParentCandidates');
+  return (data.issues ?? []).map(i => ({
+    key:            i.key,
+    summary:        i.fields?.summary || '',
+    type:           i.fields?.issuetype?.name || '',
+    hierarchyLevel: i.fields?.issuetype?.hierarchyLevel ?? null,
+    status:         i.fields?.status?.name || '',
+    components:     (i.fields?.components ?? []).map(c => ({ id: c.id, name: c.name })),
+  }));
+}
+
 export async function createIssue(cloudId, projectKey, issueTypeId, summary, description, epicId, epicUrl, clientRequestIdField, componentId) {
   const url = `${jiraBase(cloudId)}/issue`;
   const body = {
@@ -918,30 +1078,65 @@ export async function addWorklog(cloudId, issueKey, worklog) {
   return parseJira(res, 'addWorklog');
 }
 
-// Comments on an issue, newest first, with the ADF body pre-rendered to HTML
-// (via our own adfToHtml, so the markup is safe by construction).
-// Returns [{ id, author, created, html }].
-export async function getIssueComments(cloudId, issueKey) {
-  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/comment?maxResults=100&orderBy=-created`;
-  const data = await parseJira(await fetch(url), 'getIssueComments');
-  return (data.comments ?? []).map(c => ({
+// Shape one raw ADF comment into { id, author, created, html }.
+function mapComment(c) {
+  return {
     id:      c.id,
     author:  c.author?.displayName || 'Unknown',
     created: c.created || null,
     html:    adfToHtml(c.body),
-  }));
+  };
+}
+
+// Comments on an issue, newest first, with the ADF body pre-rendered to HTML
+// (via our own adfToHtml, so the markup is safe by construction).
+// Returns [{ id, author, created, html }].
+//
+// **Read through the ISSUE endpoint, not `/issue/{key}/comment`.** With our
+// API-token auth Atlassian answers the dedicated comment resource with
+// `401 {"code":401,"message":"Unauthorized; scope does not match"}` while
+// `GET /issue/{key}?fields=comment` returns the very same comment list — that
+// 401 used to surface as a red error under every Jira card in the Azure-Jira
+// tab. `?fields=comment` caps out at Jira's default page size, so the
+// dedicated resource is still tried first for issues with long threads and
+// only its failure falls back.
+export async function getIssueComments(cloudId, issueKey) {
+  const paged = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/comment?maxResults=100&orderBy=-created`;
+  try {
+    const data = await parseJira(await fetch(paged), 'getIssueComments');
+    return (data.comments ?? []).map(mapComment);
+  } catch {
+    const url  = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}?fields=comment`;
+    const data = await parseJira(await fetch(url), 'getIssueComments(field)');
+    const list = data.fields?.comment?.comments ?? [];
+    // The field variant comes back oldest-first.
+    return list.map(mapComment).reverse();
+  }
 }
 
 // Add a comment; `html` is TipTap-style HTML converted through the same
-// HTML→ADF pass as descriptions.
+// HTML→ADF pass as descriptions. Mirrors the read path above: POST to the
+// comment resource first, and if that is blocked (401 "scope does not match")
+// add the comment through the issue-edit verb, which our token may use.
 export async function addIssueComment(cloudId, issueKey, html) {
-  const url = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/comment`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body: htmlToAdf(html) }),
-  });
-  return parseJira(res, 'addIssueComment');
+  const body = htmlToAdf(html);
+  const url  = `${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}/comment`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    return await parseJira(res, 'addIssueComment');
+  } catch (err) {
+    const res = await fetch(`${jiraBase(cloudId)}/issue/${encodeURIComponent(issueKey)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ update: { comment: [{ add: { body } }] } }),
+    });
+    if (!res.ok) throw err;   // report the original failure, not the fallback's
+    return parseJira(res, 'addIssueComment(update)');
+  }
 }
 
 // Global priority list: [{ id, name, iconUrl }].
