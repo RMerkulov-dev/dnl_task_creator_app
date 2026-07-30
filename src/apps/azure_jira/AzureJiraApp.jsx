@@ -570,21 +570,24 @@ export default function AzureJiraApp({ allowedProjects }) {
         {/* ── Azure panel ── */}
         <section className="azj-panel">
           <div className="azj-panel-head">
-            <span className="azj-panel-tag azj-tag-azure">Azure</span>
-            <select className="select azj-proj-select" value={proj.id} onChange={e => handleProjectChange(e.target.value)}>
-              {visibleProjects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-            </select>
-            <input
-              className="input azj-id-input"
-              placeholder="Work item #"
-              value={azInput}
-              onChange={e => setAzInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') loadAzure(); }}
-            />
-            <button className="btn azj-mini-btn azj-load-btn" onClick={loadAzure} disabled={azLoading}>
-              {azLoading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Load'}
-            </button>
-            {azLinkNote && <span className="azj-dim azj-linknote">{azLinkNote}</span>}
+            <div className="azj-head-row">
+              <span className="azj-panel-tag azj-tag-azure">Azure</span>
+              <select className="select azj-proj-select" value={proj.id} onChange={e => handleProjectChange(e.target.value)}>
+                {visibleProjects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+              <input
+                className="input azj-id-input"
+                placeholder="Work item #"
+                value={azInput}
+                onChange={e => setAzInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') loadAzure(); }}
+              />
+              <button className="btn azj-mini-btn azj-load-btn" onClick={loadAzure} disabled={azLoading}>
+                {azLoading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Load'}
+              </button>
+            </div>
+            {/* always rendered (nbsp when empty) so both panel heads stay the same height */}
+            <span className="azj-dim azj-linknote" title={azLinkNote || undefined}>{azLinkNote || ' '}</span>
           </div>
           <div className="azj-panel-body">
             {azError && <p className="azj-err">⚠ {azError}</p>}
@@ -629,18 +632,20 @@ export default function AzureJiraApp({ allowedProjects }) {
         {/* ── Jira panel ── */}
         <section className="azj-panel">
           <div className="azj-panel-head">
-            <span className="azj-panel-tag azj-tag-jira">Jira</span>
-            <input
-              className="input azj-id-input azj-key-input"
-              placeholder="e.g. ABS-123"
-              value={jrInput}
-              onChange={e => setJrInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') loadJira(jrInput); }}
-            />
-            <button className="btn azj-mini-btn azj-load-btn" onClick={() => loadJira(jrInput)} disabled={jrLoading || !jrInput.trim()}>
-              {jrLoading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Load'}
-            </button>
-            {jrLinkNote && <span className="azj-dim azj-linknote">{jrLinkNote}</span>}
+            <div className="azj-head-row">
+              <span className="azj-panel-tag azj-tag-jira">Jira</span>
+              <input
+                className="input azj-id-input azj-key-input"
+                placeholder="e.g. ABS-123"
+                value={jrInput}
+                onChange={e => setJrInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') loadJira(jrInput); }}
+              />
+              <button className="btn azj-mini-btn azj-load-btn" onClick={() => loadJira(jrInput)} disabled={jrLoading || !jrInput.trim()}>
+                {jrLoading ? <span className="spinner" style={{ width: 12, height: 12 }} /> : 'Load'}
+              </button>
+            </div>
+            <span className="azj-dim azj-linknote" title={jrLinkNote || undefined}>{jrLinkNote || ' '}</span>
           </div>
           <div className="azj-panel-body">
             {jrError && <p className="azj-err">⚠ {jrError}</p>}

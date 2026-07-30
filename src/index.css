@@ -7195,12 +7195,21 @@ button.su-status {
   min-width: 0;
 }
 
+/* head = controls row + a link-note row that is ALWAYS present (nbsp when empty),
+   so the two panels' heads are exactly the same height and the cards inside the
+   bodies (#id / key, title, meta…) line up across the grid */
 .azj-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.azj-head-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
 
@@ -7218,7 +7227,14 @@ button.su-status {
 .azj-proj-select { max-width: 210px; font-size: 13px; }
 .azj-id-input    { width: 130px; font-size: 13px; }
 .azj-key-input   { width: 150px; text-transform: uppercase; }
-.azj-linknote    { font-size: 12px; }
+.azj-linknote    {
+  font-size: 12px;
+  line-height: 16px;
+  min-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .azj-panel-body {
   padding: 14px;
@@ -7246,6 +7262,8 @@ button.su-status {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  /* stable row height so a panel without a state select still lines up with the other */
+  min-height: 30px;
 }
 
 .azj-key  { font-size: 14px; font-weight: 700; }
