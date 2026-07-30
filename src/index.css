@@ -4545,8 +4545,45 @@ html, body, #root {
 
 .atp-hint { font-size: 12px; color: var(--text-3); margin: 8px 2px 0; }
 
-.atp-success { font-size: 14px; color: var(--text-1); margin: 6px 0 2px; line-height: 1.6; }
-.atp-warning { font-size: 12.5px; color: var(--yellow); margin: 10px 0 0; line-height: 1.5; }
+.atp-warning { font-size: 12.5px; color: var(--yellow); margin: 14px 0 0; line-height: 1.5; }
+
+/* ── Success panel ──
+   The form's own action row lives INSIDE .atp-body (padded); the success panel's
+   does not, so it carries its own padding — without it Done sat flush in the
+   modal's rounded bottom-right corner. The panel is also narrower than the
+   660px form: one line of text in a 660px box reads as an empty modal. */
+
+.atp-modal-done { max-width: 440px; }
+
+.atp-done { padding: 26px 24px 6px; text-align: center; }
+
+.atp-done-icon {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 42%, transparent);
+  color: var(--green);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.atp-done-key { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: 0.01em; }
+.atp-done-key .ba-issue-link { font-size: inherit; font-weight: inherit; }
+.atp-done-sub { margin: 6px 0 0; font-size: 13px; color: var(--text-3); }
+.atp-done .atp-warning { text-align: left; }
+
+.atp-done-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 22px 24px 22px;
+}
+/* .btn-ghost is 10px/16px vs .btn's 14px/22px — equalise so the two sit level. */
+.atp-done-actions .btn { flex: none; text-decoration: none; padding: 13px 20px; }
 
 /* ── Per-kind field grid (status / sprint / people / estimates / priority) ── */
 

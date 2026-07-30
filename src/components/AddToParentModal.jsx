@@ -351,21 +351,27 @@ export default function AddToParentModal({ allowedProjects, callTitle, initialTi
   // ── Success panel ──
   if (result) {
     return (
-      <div className="overlay">
-        <div className="atp-modal">
+      <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose?.(); }}>
+        <div className="atp-modal atp-modal-done">
           <div className="tcm-head">
             <h2 className="card-title" style={{ margin: 0 }}>{chosenKind?.label} created</h2>
             <button className="tcm-close" onClick={onClose} title="Close" aria-label="Close">✕</button>
           </div>
-          <div className="atp-body">
-            <p className="atp-success">
-              <a className="ba-issue-link" href={result.jiraUrl} target="_blank" rel="noreferrer">{result.jiraKey} ↗</a>
-              {' '}created in{' '}
-              <a className="ba-issue-link" href={getJiraUrl(result.parentKey)} target="_blank" rel="noreferrer">{result.parentKey} ↗</a>
+          <div className="atp-done">
+            <div className="atp-done-icon" aria-hidden="true">✓</div>
+            <p className="atp-done-key">
+              <a className="ba-issue-link" href={result.jiraUrl} target="_blank" rel="noreferrer">{result.jiraKey}</a>
+            </p>
+            <p className="atp-done-sub">
+              created in{' '}
+              <a className="ba-issue-link" href={getJiraUrl(result.parentKey)} target="_blank" rel="noreferrer">
+                {result.parentKey} ↗
+              </a>
             </p>
             {warning && <p className="atp-warning">⚠ {warning}</p>}
           </div>
-          <div className="tcm-actions">
+          <div className="atp-done-actions">
+            <a className="btn btn-ghost atp-btn" href={result.jiraUrl} target="_blank" rel="noreferrer">Open in Jira ↗</a>
             <button type="button" className="btn btn-primary atp-btn" onClick={onClose}>Done</button>
           </div>
         </div>
