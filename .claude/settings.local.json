@@ -191,7 +191,8 @@
       "Bash(node -e \"console.log\\(typeof DOMParser\\)\")",
       "mcp__claude_ai_Atlassian__getAccessibleAtlassianResources",
       "mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql",
-      "mcp__claude_ai_Atlassian__getJiraIssue"
+      "mcp__claude_ai_Atlassian__getJiraIssue",
+      "Bash(ps ax *)"
     ]
   }
 }
