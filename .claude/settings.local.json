@@ -192,7 +192,9 @@
       "mcp__claude_ai_Atlassian__getAccessibleAtlassianResources",
       "mcp__claude_ai_Atlassian__searchJiraIssuesUsingJql",
       "mcp__claude_ai_Atlassian__getJiraIssue",
-      "Bash(ps ax *)"
+      "Bash(ps ax *)",
+      "Bash(crontab -l)",
+      "Bash(ps -eo pid,etime,command)"
     ]
   }
 }

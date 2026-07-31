@@ -17,9 +17,13 @@ const STATE_ORDER = [
   'Ready for testing on Samdbox',
   'Approved for Prod',
   'Ready for testing on Prod',
-  'Resolved',
-  'Closed',
 ];
+
+// Finished work never moves to another sprint, so Closed/Resolved items are
+// dropped right after the load — they never reach the board, the counters or a
+// "Select all" (which used to sweep them into the move set).
+const EXCLUDED_STATES = new Set(['closed', 'resolved']);
+const isExcludedState = (state) => EXCLUDED_STATES.has((state || '').trim().toLowerCase());
 const STATE_RANK = new Map(STATE_ORDER.map((s, i) => [s.toLowerCase(), i]));
 const rankOf = (state) => {
   const r = STATE_RANK.get((state || '').trim().toLowerCase());
@@ -91,7 +95,7 @@ export default function IterationsApp({ allowedProjects }) {
         null,            // no board / area-path filter
         sourceSprint,    // filter by the chosen sprint
       );
-      setItems(list.map(i => ({ ...i, _move: null })));
+      setItems(list.filter(i => !isExcludedState(i.state)).map(i => ({ ...i, _move: null })));
       setLoaded(true);
     } catch (e) {
       setError(e.message || 'Failed to load work items.');
@@ -271,7 +275,7 @@ export default function IterationsApp({ allowedProjects }) {
           )}
           {loading && <div className="iter-empty"><span className="spinner spinner-lg" /></div>}
           {loaded && !loading && items.length === 0 && (
-            <div className="iter-empty">No work items in this sprint.</div>
+            <div className="iter-empty">No open work items in this sprint (Closed and Resolved are hidden).</div>
           )}
 
           {loaded && !loading && items.length > 0 && (

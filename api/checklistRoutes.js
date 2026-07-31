@@ -105,6 +105,16 @@ async function load() {
   return loading;
 }
 
+// Drop the warm in-memory copy and re-read the store. Every serverless
+// instance keeps its own `cache` for its whole warm lifetime, so a sweep that
+// trusted it could not see the "already sent today" stamp another instance had
+// written — that is how four identical Friday digests went out inside one
+// 11:00 window. Scheduled sweeps therefore always start from storage.
+async function reload() {
+  cache = null;
+  return load();
+}
+
 async function save() {
   const localOk = saveLocal();
   if (useBlob()) {
@@ -204,34 +214,52 @@ function belledToday(u, weekdayIdx) {
 // ─── Reminder sweep ───────────────────────────────────────────────────────────
 // One digest per user per day at 11:00 Kyiv: scheduled triggers pass
 // { atHour: 11 } and are no-ops outside that hour; a manual sweep (no atHour)
-// sends immediately. sentLog.lastDate dedupes repeat ticks inside the hour and
-// lets a missed tick catch up later the same hour.
-export async function checkChecklistReminders({ atHour = null } = {}) {
+// sends immediately. The 11:00 gate is a whole hour wide and several triggers
+// can fire inside it (both Vercel crons, a cron retry, another warm instance,
+// the local dev sweep), so sentLog.lastDate is the ONLY thing keeping it to one
+// email — hence: re-read the store first (never the warm cache) and persist the
+// stamp BEFORE sending, releasing it again if the send fails.
+export async function checkChecklistReminders({ atHour = null, source = 'manual' } = {}) {
   if (atHour !== null && kyivHour() !== atHour) {
     return { due: 0, sent: 0, skipped: `outside ${atHour}:00 Kyiv window` };
   }
-  const db = await load();
+  const db = await reload();
   const today = kyivToday();
   const wd = kyivWeekdayIdx();
-  let due = 0, sent = 0;
+  let due = 0, sent = 0, blocked = 0;
 
   for (const [email, u] of Object.entries(db.users)) {
     const tasks = belledToday(u, wd);
     if (!tasks.length) continue;
     if (u.sentLog?.lastDate === today) continue;   // already sent today
     due++;
+
+    // Claim the day first: a concurrent or later trigger re-reads the store,
+    // sees today's stamp and skips. Sending first and stamping afterwards left
+    // a window in which every extra trigger sent its own copy.
+    const prev = u.sentLog;
+    u.sentLog = { lastDate: today, sentAt: new Date().toISOString(), source };
+    if (!(await save())) {
+      // Nothing durable to dedupe against — skip rather than risk a repeat;
+      // the next tick inside this hour retries.
+      u.sentLog = prev;
+      blocked++;
+      console.warn(`[Checklist] storage unavailable — digest for ${email} skipped to avoid duplicates`);
+      continue;
+    }
+
     try {
       await sendEmail({ to: [email], ...buildDigestEmail(wd, tasks) });
-      u.sentLog = { lastDate: today };
       sent++;
-      console.log(`[Checklist] digest sent to ${email} (${DAY_NAMES[wd]}, ${tasks.length} tasks)`);
+      console.log(`[Checklist] digest sent to ${email} (${DAY_NAMES[wd]}, ${tasks.length} tasks, source=${source})`);
     } catch (err) {
+      u.sentLog = prev;            // release the claim so a later tick retries
+      await save();
       console.warn(`[Checklist] digest failed for ${email}:`, err.message);
       if (err.notConfigured) return { due, sent, error: 'SMTP is not configured' };
     }
   }
-  if (sent) await save();
-  return { due, sent };
+  return { due, sent, ...(blocked ? { blocked } : {}) };
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
@@ -327,7 +355,7 @@ export function registerChecklistRoutes(app) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     try {
-      const result = await checkChecklistReminders({ atHour: 11 });
+      const result = await checkChecklistReminders({ atHour: 11, source: 'cron' });
       console.log('[Checklist] cron sweep:', JSON.stringify(result));
       res.json(result);
     } catch (err) {

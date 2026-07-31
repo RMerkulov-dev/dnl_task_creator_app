@@ -2325,7 +2325,7 @@ if (process.env.NODE_ENV !== 'production') {
   // Checklist digest sweep: every 15 minutes, but emails only go out in the
   // 11:00 Kyiv hour (sentLog.lastDate dedupes the ticks inside it).
   // On Vercel this block never runs — Vercel Cron hits /api/checklist/cron.
-  const checklistSweep = () => checkChecklistReminders({ atHour: 11 })
+  const checklistSweep = () => checkChecklistReminders({ atHour: 11, source: 'dev-sweep' })
     .catch(err => console.warn('[Checklist] digest sweep failed:', err.message));
   setTimeout(checklistSweep, 20_000);
   setInterval(checklistSweep, 15 * 60_000);
