@@ -23,7 +23,9 @@
 
 import express from 'express';
 import crypto from 'node:crypto';
-import { VAULT_PROJECTS, loadPmBrainProject, requirePmBrainOwner, pmBrainAllowed } from './pmBrain.js';
+import {
+  VAULT_PROJECTS, loadPmBrainProject, requirePmBrainOwner, pmBrainAllowed, redactSecrets,
+} from './pmBrain.js';
 import {
   canWriteVault, vaultTarget, readLedger, ledgerAdd,
   buildCallNote, callFileName, writeCallNote, appendInboxLine, INBOX_DIR,
@@ -372,7 +374,7 @@ export function registerFathomVaultSyncRoutes(app, deps) {
         ledger: canWriteVault() ? Object.keys((await readLedger()).calls).length : 0,
       });
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: redactSecrets(e.message) });
     }
   });
 
@@ -424,8 +426,10 @@ export function registerFathomVaultSyncRoutes(app, deps) {
         .catch(e => console.warn('[vault-save] could not mark seen:', e.message));
       res.json({ saved: entry });
     } catch (e) {
-      console.error('[vault-save]', e.message);
-      res.status(e.reconnect ? 401 : 500).json({ error: e.message, ...(e.reconnect ? { reconnect: true } : {}) });
+      // Redacted on BOTH paths: an upstream error can quote a header value.
+      const safe = redactSecrets(e.message);
+      console.error('[vault-save]', safe);
+      res.status(e.reconnect ? 401 : 500).json({ error: safe, ...(e.reconnect ? { reconnect: true } : {}) });
     }
   });
 
@@ -440,8 +444,9 @@ export function registerFathomVaultSyncRoutes(app, deps) {
       });
       res.status(result.ok ? 200 : 503).json(result);
     } catch (e) {
-      console.error('[vault-sync]', e.message);
-      res.status(500).json({ error: e.message });
+      const safe = redactSecrets(e.message);
+      console.error('[vault-sync]', safe);
+      res.status(500).json({ error: safe });
     }
   });
 
@@ -460,8 +465,9 @@ export function registerFathomVaultSyncRoutes(app, deps) {
       }));
       res.json(result);
     } catch (e) {
-      console.error('[vault-sync cron]', e.message);
-      res.status(500).json({ error: e.message });
+      const safe = redactSecrets(e.message);
+      console.error('[vault-sync cron]', safe);
+      res.status(500).json({ error: safe });
     }
   });
 }

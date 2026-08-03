@@ -71,15 +71,69 @@ export function requirePmBrainOwner(req, res, next) {
   });
 }
 
+/**
+ * An env value as a single clean line.
+ *
+ * Pasting a secret into a dashboard (or copying it out of `.env`) regularly drags
+ * along the following lines. A multi-line value then blows up as
+ * `Headers.append: "Bearer …\n# Optional overrides…" is an invalid header value`
+ * — an error that says nothing about where it came from. Take the first
+ * non-empty, non-comment line and strip quotes, so a sloppy paste still works and
+ * says so once in the log.
+ */
+let envWarned = new Set();
+export function envValue(name) {
+  const raw = process.env[name];
+  if (!raw) return '';
+  const lines = String(raw).split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+  const first = lines.find(l => !l.startsWith('#')) ?? '';
+  // Warn only about a genuinely multi-line value; stripping surrounding quotes is
+  // routine and must not produce log noise.
+  if (lines.length > 1 && !envWarned.has(name)) {
+    envWarned.add(name);
+    console.warn(`[env] ${name} spans ${lines.length} lines — using the first one. Re-paste it as a single value.`);
+  }
+  return first.replace(/^["']|["']$/g, '').trim();
+}
+
+/**
+ * Strip secrets out of anything that may be shown to a user or logged.
+ *
+ * This is not paranoia: `fetch()` itself puts the offending HEADER VALUE into its
+ * exception message (`Headers.append: "Bearer github_pat_…" is an invalid header
+ * value`), and that message was being handed straight to the UI. Redact by
+ * pattern AND by the live env values, so a future error path cannot leak them
+ * either.
+ */
+const SECRET_ENV = ['PM_BRAIN_GITHUB_TOKEN', 'GITHUB_TOKEN', 'CRON_SECRET', 'JIRA_API_TOKEN'];
+const TOKEN_PATTERNS = [
+  /gh[pousr]_[A-Za-z0-9_]{10,}/g,
+  /github_pat_[A-Za-z0-9_]{10,}/g,
+  /Bearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+];
+
+export function redactSecrets(text) {
+  let out = String(text ?? '');
+  for (const name of SECRET_ENV) {
+    const raw = process.env[name];
+    if (!raw) continue;
+    for (const piece of String(raw).split(/[\r\n]+/).map(s => s.trim()).filter(s => s.length > 7)) {
+      out = out.split(piece).join('<redacted>');
+    }
+  }
+  for (const re of TOKEN_PATTERNS) out = out.replace(re, m => (/^bearer/i.test(m) ? 'Bearer <redacted>' : '<redacted>'));
+  return out;
+}
+
 const expandHome = p => (p?.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
 
 // Lazily, for the same reason as in pmBrainWrite.js: imported modules are
 // evaluated before `dotenv.config()` runs in api/index.js, so anything read into
 // a module-level const here would be undefined in the local dev server.
-const vaultPath = () => expandHome(process.env.PM_BRAIN_PATH || '~/Vaults/PM Brain');
-const ghRepo    = () => process.env.PM_BRAIN_REPO   || 'RMerkulov-dev/projects_wiki';
-const ghBranch  = () => process.env.PM_BRAIN_BRANCH || 'main';
-const ghToken   = () => process.env.PM_BRAIN_GITHUB_TOKEN || process.env.GITHUB_TOKEN || '';
+const vaultPath = () => expandHome(envValue('PM_BRAIN_PATH') || '~/Vaults/PM Brain');
+const ghRepo    = () => envValue('PM_BRAIN_REPO')   || 'RMerkulov-dev/projects_wiki';
+const ghBranch  = () => envValue('PM_BRAIN_BRANCH') || 'main';
+const ghToken   = () => envValue('PM_BRAIN_GITHUB_TOKEN') || envValue('GITHUB_TOKEN');
 
 // ─── Sources ──────────────────────────────────────────────────────────────────
 

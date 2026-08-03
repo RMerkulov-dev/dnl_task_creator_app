@@ -16,20 +16,39 @@
 //      "ABS Bureau and Group Only - July 08 / 17 / 22 / 29" — titles repeat by
 //      design. The ledger below is the memory of what has been archived.
 
+import { envValue, redactSecrets } from './pmBrain.js';
+
 const GH_API = 'https://api.github.com';
 
 // Read LAZILY, never into a module-level const: `dotenv.config()` runs in the
 // body of api/index.js, which executes AFTER every imported module has been
 // evaluated. A `const GH_TOKEN = process.env.…` here is therefore always '' —
 // that is exactly why the vault looked unwritable with the token sitting in .env.
-const ghRepo   = () => process.env.PM_BRAIN_REPO   || 'RMerkulov-dev/projects_wiki';
-const ghBranch = () => process.env.PM_BRAIN_BRANCH || 'main';
-const ghToken  = () => process.env.PM_BRAIN_GITHUB_TOKEN || process.env.GITHUB_TOKEN || '';
+// envValue() also guards against a multi-line paste: a value carrying the next
+// line of a .env file cannot go into an Authorization header at all.
+const ghRepo   = () => envValue('PM_BRAIN_REPO')   || 'RMerkulov-dev/projects_wiki';
+const ghBranch = () => envValue('PM_BRAIN_BRANCH') || 'main';
+
+/**
+ * The PAT, checked BEFORE it reaches a header. `fetch()` reports an invalid
+ * header value by quoting the value itself, so a malformed token has to be
+ * rejected here — with a message that names the variable and never its content.
+ */
+function ghToken() {
+  const token = envValue('PM_BRAIN_GITHUB_TOKEN') || envValue('GITHUB_TOKEN');
+  if (!token) return '';
+  if (!/^[\x21-\x7e]+$/.test(token)) {
+    throw new Error('PM_BRAIN_GITHUB_TOKEN is not a valid header value (it contains a space, newline or non-ASCII character). Re-paste just the token, on one line.');
+  }
+  return token;
+}
 
 export const LEDGER_PATH = '00_DASHBOARD/.calls-synced.json';
 export const INBOX_DIR   = '00_DASHBOARD/Calls Inbox';
 
-export const canWriteVault = () => Boolean(ghToken());
+export const canWriteVault = () => {
+  try { return Boolean(ghToken()); } catch { return false; }
+};
 
 const ghHeaders = (accept = 'application/vnd.github+json') => ({
   Authorization: `Bearer ${ghToken()}`,
@@ -47,7 +66,7 @@ async function ghGet(path) {
     { headers: ghHeaders(), signal: AbortSignal.timeout(20_000) },
   );
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error(`GitHub GET ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) throw new Error(redactSecrets(`GitHub GET ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`));
   return r.json();     // { content (base64), sha, ... }
 }
 
@@ -66,7 +85,7 @@ async function ghCreate(path, text, message) {
     body: JSON.stringify({ message, content: b64encode(text), branch: ghBranch() }),
   });
   if (r.status === 409 || r.status === 422) return { exists: true };
-  if (!r.ok) throw new Error(`GitHub PUT ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) throw new Error(redactSecrets(`GitHub PUT ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`));
   const data = await r.json();
   return { path, commit: data.commit?.sha ?? null };
 }
@@ -90,7 +109,7 @@ async function ghUpdate(path, mutate, message) {
     if (r.ok) return { path };
     // 409 = someone else committed between our read and write: re-read and redo.
     if (r.status !== 409 && r.status !== 422) {
-      throw new Error(`GitHub PUT ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`);
+      throw new Error(redactSecrets(`GitHub PUT ${path} → ${r.status} ${(await r.text()).slice(0, 200)}`));
     }
   }
   throw new Error(`GitHub PUT ${path}: gave up after 3 conflicting attempts`);
