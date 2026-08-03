@@ -30,6 +30,14 @@ export const APP_REGISTRY = [
     glow: 'rgba(16, 185, 129, 0.5)',
   },
   {
+    id: 'project-status',
+    name: 'Project Status',
+    shortName: 'Health',
+    gradient: 'linear-gradient(135deg, #6366f1 0%, #22c55e 100%)',
+    glow: 'rgba(99, 102, 241, 0.5)',
+    beta: true,
+  },
+  {
     id: 'report',
     name: 'Report',
     shortName: 'Report',
@@ -99,6 +107,7 @@ export const APP_COMPONENTS = {
   'fathom-agent':  lazy(() => import('../apps/fathom_agent/FathomAgentApp.jsx')),
   'email-agent':   lazy(() => import('../apps/email_agent/EmailAgentApp.jsx')),
   'status-updates': lazy(() => import('../apps/status_updates/StatusUpdatesApp.jsx')),
+  'project-status': lazy(() => import('../apps/project_status/ProjectStatusApp.jsx')),
   'report':        lazy(() => import('../apps/report/ReportApp.jsx')),
   'gantt':         lazy(() => import('../apps/gantt/GanttApp.jsx')),
   'quarterly-calls': lazy(() => import('../apps/quarterly_calls/QuarterlyCallsApp.jsx')),

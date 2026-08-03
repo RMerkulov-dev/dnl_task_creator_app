@@ -8496,3 +8496,1193 @@ button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inh
 
 .ba-send-btn:not(.btn):hover:not(:disabled) { filter: brightness(1.06) saturate(1.05); }
 .ba-send-btn:not(.btn):active:not(:disabled) { transform: scale(0.96, 0.92); }
+
+/* ═══ Health / Project Status app (.ps-*) ═══════════════════════════════════ */
+
+/* Chart colours live here as tokens, per theme, and are validated with the
+   dataviz palette checker (OKLCH lightness band, chroma floor, CVD separation,
+   contrast vs the card surface) — do NOT hand-tune them:
+     • --ps-seq            ONE hue for magnitude (bar length carries the value);
+     • --ps-done/prog/todo the reserved status trio (never a categorical series);
+     • --ps-cat-1/2        the categorical pair for the created/closed trend.
+   Every series is also labelled (legend + direct label + tooltip), so colour is
+   never the only carrier of identity. */
+.ps-wrap {
+  --ps-seq:    var(--accent-1);
+  --ps-done:   #0EA678;
+  --ps-prog:   #3B82F6;
+  --ps-todo:   #52525B;
+  --ps-cat-1:  #3B82F6;
+  --ps-cat-2:  #0EA678;
+  --ps-warn:   #D97706;
+  --ps-track:  rgba(255, 255, 255, 0.07);
+  --ps-grid:   rgba(255, 255, 255, 0.07);
+
+  padding: 24px 28px 40px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+[data-theme="light"] .ps-wrap {
+  --ps-done:   #0F9370;
+  --ps-prog:   #2563EB;
+  --ps-todo:   #9A9A9F;
+  --ps-cat-1:  #2563EB;
+  --ps-cat-2:  #0F9370;
+  --ps-warn:   #B45309;
+  --ps-track:  rgba(0, 0, 0, 0.08);
+  --ps-grid:   rgba(0, 0, 0, 0.08);
+}
+
+.ps-head { margin-bottom: 18px; }
+.ps-title { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+
+.ps-sub {
+  font-size: 13px;
+  color: var(--text-3);
+  margin: 0;
+  max-width: 760px;
+  line-height: 1.5;
+}
+
+/* Compact filter bar: pickers stay narrow so the row reads as chrome, not as a
+   form. `.btn-primary` is width:100% globally — see "Known quirks" — hence the
+   explicit width on the load button. */
+.ps-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  flex-wrap: wrap;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.ps-field { display: flex; flex-direction: column; gap: 2px; min-width: 200px; }
+.ps-field-board { min-width: 280px; }
+.ps-field .select { padding: 6px 0 8px; font-size: 14.5px; }
+
+.ps-field-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.ps-load-btn.btn-primary { width: auto; padding: 9px 20px; flex: none; }
+
+.ps-progress {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0 0 14px;
+}
+
+.ps-err   { color: var(--red); font-size: 12.5px; margin: 0 0 12px; }
+.ps-empty { color: var(--text-3); font-size: 13.5px; margin: 24px 0 0; }
+.ps-none  { color: var(--text-3); font-size: 12.5px; margin: 8px 0; }
+.ps-dash  { color: var(--text-3); }
+
+.ps-report { display: flex; flex-direction: column; gap: 14px; }
+
+/* ── KPI row ──────────────────────────────────────────────────────────────── */
+
+.ps-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.ps-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+/* The one number the report leads with — a hero figure, not a one-bar chart. */
+.ps-kpi-hero { grid-column: span 2; }
+.ps-kpi-hero .ps-kpi-n { font-size: 40px; line-height: 1.05; }
+.ps-kpi-hero .ps-meter { margin-top: 6px; }
+
+.ps-kpi-n { font-size: 23px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.ps-kpi-l { font-size: 11.5px; color: var(--text-3); line-height: 1.35; }
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+
+.ps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+}
+
+.ps-card {
+  position: relative;
+  padding: 14px 16px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  min-width: 0;
+}
+
+.ps-card-wide { grid-column: 1 / -1; }
+
+.ps-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ps-card-title { font-size: 13px; font-weight: 620; margin: 0; color: var(--text-1); }
+.ps-card-hint  { font-size: 11px; color: var(--text-3); text-align: right; }
+.ps-card-note  { font-size: 11px; color: var(--text-3); margin: 10px 0 0; line-height: 1.45; }
+
+/* ── Tooltip (one per chart, positioned from the hovered mark) ─────────────── */
+
+.ps-tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 8px));
+  z-index: 5;
+  pointer-events: none;
+  min-width: 132px;
+  padding: 7px 9px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.ps-tip-trend { transform: translate(-50%, -4px); }
+.ps-tip-title { font-weight: 620; color: var(--text-1); margin-bottom: 3px; }
+.ps-tip-row { display: flex; justify-content: space-between; gap: 12px; }
+.ps-tip-l { color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
+.ps-tip-v { color: var(--text-1); font-variant-numeric: tabular-nums; font-weight: 560; }
+
+/* ── Meter ────────────────────────────────────────────────────────────────── */
+
+.ps-meter {
+  display: block;
+  width: 100%;
+  min-width: 40px;
+  background: var(--ps-track);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.ps-meter-fill { display: block; height: 100%; border-radius: 999px; transition: width 0.25s; }
+
+/* ── 100% stacked bar ─────────────────────────────────────────────────────── */
+
+.ps-stack-wrap { position: relative; }
+
+/* 2px surface gaps between segments — a stacked bar without them reads as one
+   blurred band under CVD. */
+.ps-stack { display: flex; gap: 2px; border-radius: var(--r-sm); overflow: hidden; }
+.ps-stack-seg { min-width: 3px; border-radius: 2px; transition: filter 0.15s; }
+.ps-stack-seg:hover { filter: brightness(1.18); }
+
+.ps-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.ps-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.ps-legend b { color: var(--text-1); font-variant-numeric: tabular-nums; font-weight: 560; }
+.ps-legend-pct { color: var(--text-3); }
+
+.ps-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+
+.ps-splits { display: flex; flex-direction: column; gap: 14px; }
+.ps-split-l { font-size: 11.5px; color: var(--text-3); display: block; margin-bottom: 5px; }
+
+/* ── Horizontal bars ──────────────────────────────────────────────────────── */
+
+.ps-hbars { position: relative; display: flex; flex-direction: column; gap: 5px; }
+
+.ps-hbar {
+  display: grid;
+  grid-template-columns: minmax(84px, 34%) 1fr 38px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.ps-hbar-btn { cursor: pointer; border-radius: var(--r-sm); }
+.ps-hbar-btn:hover .ps-hbar-fill { filter: brightness(1.18); }
+.ps-hbar.active .ps-hbar-l { color: var(--text-1); font-weight: 600; }
+
+.ps-hbar-l {
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-hbar-track { height: 9px; background: var(--ps-track); border-radius: 3px; overflow: hidden; }
+.ps-hbar-fill  { display: block; height: 100%; border-radius: 3px; transition: width 0.25s, filter 0.15s; }
+.ps-hbar-v     { font-size: 11.5px; color: var(--text-1); text-align: right; font-variant-numeric: tabular-nums; }
+.ps-hbar.active .ps-hbar-track { box-shadow: 0 0 0 1px var(--accent-1); }
+
+/* ── Columns (distribution; a column is a table filter) ───────────────────── */
+
+.ps-cols-wrap { position: relative; }
+.ps-cols { display: flex; align-items: flex-end; gap: 8px; }
+
+.ps-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: stretch;
+  gap: 4px;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.ps-col-v {
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 4px rounded data-end, square where it meets the baseline. */
+.ps-col-bar {
+  display: block;
+  border-radius: 4px 4px 0 0;
+  transition: height 0.25s, filter 0.15s;
+}
+
+.ps-col-l { font-size: 10.5px; color: var(--text-3); text-align: center; white-space: nowrap; }
+.ps-col:hover .ps-col-bar { filter: brightness(1.18); }
+.ps-col.active .ps-col-bar { box-shadow: inset 0 0 0 2px var(--text-1); }
+.ps-col.active .ps-col-l, .ps-col.active .ps-col-v { color: var(--text-1); font-weight: 600; }
+
+/* ── Trend (SVG) ──────────────────────────────────────────────────────────── */
+
+.ps-trend { position: relative; }
+.ps-trend svg { display: block; overflow: visible; }
+
+.ps-gridline { stroke: var(--ps-grid); stroke-width: 1; }
+.ps-axis  { fill: var(--text-3); font-size: 10px; }
+.ps-line  { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ps-area  { opacity: 0.14; }
+.ps-cross { stroke: var(--border-hi); stroke-width: 1; stroke-dasharray: 3 3; }
+.ps-dot   { stroke: var(--bg-card); stroke-width: 2; }
+.ps-line-label { fill: var(--text-3); font-size: 10px; }
+
+/* ── Risks ────────────────────────────────────────────────────────────────── */
+
+.ps-risks { display: flex; flex-direction: column; gap: 6px; }
+
+.ps-risk { border: 1px solid var(--border); border-radius: var(--r-md); }
+.ps-risk > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.ps-risk-n {
+  min-width: 34px;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--ps-warn) 22%, transparent);
+  color: var(--text-1);
+  font-size: 11.5px;
+  font-weight: 620;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.ps-risk-t { color: var(--text-1); }
+.ps-risk-hint { color: var(--text-3); font-size: 11px; }
+
+.ps-risk-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 10px 10px 54px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.ps-risk-link {
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-risk-link:hover { color: var(--accent-1); }
+
+/* ── Items table ──────────────────────────────────────────────────────────── */
+
+.ps-table-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.ps-search { flex: 1; min-width: 220px; font-size: 12.5px; }
+
+.ps-filter-chip,
+.ps-clear {
+  padding: 4px 9px;
+  border: 1px solid var(--border-hi);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.ps-filter-chip:hover, .ps-clear:hover { color: var(--text-1); border-color: var(--accent-1); }
+.ps-clear { border-style: dashed; }
+
+.ps-table-scroll { overflow-x: auto; }
+
+.ps-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+
+.ps-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-hi);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.ps-th-n { text-align: right; }
+.ps-th-sort { cursor: pointer; user-select: none; }
+.ps-th-sort:hover { color: var(--text-1); }
+
+.ps-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.ps-row:hover td { background: var(--bg-card-hover); }
+.ps-row.open td { background: var(--bg-card-hover); }
+
+.ps-td-exp { width: 26px; padding-right: 0; }
+
+.ps-exp {
+  width: 18px;
+  height: 18px;
+  line-height: 1;
+  padding: 0;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ps-exp:hover { color: var(--text-1); border-color: var(--accent-1); }
+.ps-exp-empty { display: inline-block; width: 18px; }
+
+.ps-td-az { white-space: nowrap; }
+.ps-az-id { color: var(--accent-1); text-decoration: none; font-variant-numeric: tabular-nums; }
+.ps-az-id:hover { text-decoration: underline; }
+.ps-az-type { display: block; font-size: 10.5px; color: var(--text-3); }
+
+.ps-td-title { max-width: 420px; }
+.ps-title-text {
+  display: block;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ps-who { display: block; font-size: 10.5px; color: var(--text-3); }
+
+.ps-td-jira { white-space: nowrap; }
+.ps-jira-key { color: var(--accent-1); text-decoration: none; margin-right: 6px; }
+.ps-jira-key:hover { text-decoration: underline; }
+
+.ps-td-n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ps-td-act { color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+.ps-td-prog { min-width: 140px; }
+.ps-prog-cell { display: flex; align-items: center; gap: 8px; }
+.ps-prog-cell .ps-meter { height: 6px; flex: 1; }
+.ps-prog-cell b { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 34px; text-align: right; }
+
+/* Status chip: the state trio is always accompanied by its label, never colour
+   alone. */
+.ps-chip {
+  display: inline-block;
+  max-width: 190px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.ps-chip-done { background: color-mix(in srgb, var(--ps-done) 20%, transparent); color: var(--text-1); }
+.ps-chip-progress { background: color-mix(in srgb, var(--ps-prog) 20%, transparent); color: var(--text-1); }
+.ps-chip-todo { background: var(--ps-track); color: var(--text-2); }
+.ps-chip-warn { background: color-mix(in srgb, var(--ps-warn) 24%, transparent); color: var(--text-1); }
+
+/* ── Expanded epic rows ───────────────────────────────────────────────────── */
+
+.ps-row-epics td { background: var(--bg-app); padding: 0 8px 8px 0; }
+
+.ps-epics { display: flex; flex-direction: column; gap: 2px; padding: 6px 0 2px; }
+
+.ps-epic {
+  display: grid;
+  grid-template-columns: 92px minmax(120px, 1fr) minmax(90px, 150px) 92px 90px 42px;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 4px;
+  border-radius: var(--r-sm);
+}
+
+.ps-epic:hover { background: var(--bg-card-hover); }
+.ps-epic-key { color: var(--accent-1); text-decoration: none; font-size: 11.5px; }
+.ps-epic-key:hover { text-decoration: underline; }
+
+.ps-epic-sum {
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-epic-tasks { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.ps-epic-pct { font-size: 11.5px; color: var(--text-1); text-align: right; font-variant-numeric: tabular-nums; }
+
+.ps-foot { font-size: 11px; color: var(--text-3); line-height: 1.5; margin: 4px 0 0; max-width: 900px; }
+
+@media (max-width: 1100px) {
+  .ps-kpi-hero { grid-column: span 2; }
+  .ps-epic { grid-template-columns: 88px 1fr 100px 70px; }
+  .ps-epic-meter, .ps-epic-tasks { display: none; }
+}
+
+/* ── Health › view switcher (Overview / Risks / Milestones) ────────────────── */
+/* Same sliding liquid-glass pill as the PM switcher and the sidebar nav — see
+   useSlidingPill + the LIQUID GLASS PRIMITIVES block. Short surface, so it keeps
+   its glass track and full rim in both themes (unlike the long rail/switcher). */
+
+.ps-tabs {
+  position: relative;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+  align-self: flex-start;
+  flex: none;
+}
+
+.ps-tabs-pill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 0;
+  border-radius: 999px;
+  pointer-events: none;
+  transition: none;
+}
+
+.ps-tabs-pill.ready { transition: transform 0.34s cubic-bezier(0.34, 1.4, 0.5, 1), width 0.34s cubic-bezier(0.34, 1.4, 0.5, 1); }
+
+.ps-tab {
+  position: relative;
+  z-index: 1;
+  padding: 6px 18px;
+  border: none;
+  background: none;
+  border-radius: 999px;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 560;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.18s;
+}
+
+.ps-tab:hover { color: var(--text-1); }
+.ps-tab.active { color: var(--text-1); }
+[data-theme="light"] .ps-tab.active { color: color-mix(in srgb, var(--accent-1) 72%, var(--accent-ink)); }
+
+/* ── Notices ──────────────────────────────────────────────────────────────── */
+
+.ps-notice {
+  padding: 12px 14px;
+  border: 1px solid var(--border-hi);
+  border-left: 3px solid var(--ps-warn);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.ps-notice b { color: var(--text-1); }
+.ps-notice code, .ps-empty code { font-size: 11.5px; color: var(--text-1); }
+
+.ps-hint-inline { font-size: 11.5px; color: var(--text-3); }
+
+.ps-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.ps-inline-select.select { width: auto; min-width: 150px; font-size: 12.5px; padding: 4px 0; }
+
+.ps-link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-1);
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.ps-link-btn:hover { text-decoration: underline; }
+
+/* ── Risk bands ───────────────────────────────────────────────────────────── */
+/* Severity is an ORDERED scale, so the bands are a single-hue red ramp (darker /
+   more saturated = worse) plus one clearly different hue for `low`. A red /
+   amber / yellow traffic light was tried first and fails hard: amber↔yellow sit
+   at ΔE 1.6 under deuteranopia and ΔE 9.5 even with full colour vision (checked
+   with the dataviz validator). The band colour is always a TINT behind a text
+   label — never the only carrier — and the score is printed inside the chip. */
+.ps-wrap {
+  --ps-band-crit: #FF5A5A;
+  --ps-band-high: #DC4A4A;
+  --ps-band-med:  #A94747;
+  --ps-band-low:  #0EA678;
+}
+
+[data-theme="light"] .ps-wrap {
+  --ps-band-crit: #A61B1B;
+  --ps-band-high: #C64545;
+  --ps-band-med:  #CF6A6A;
+  --ps-band-low:  #15803D;
+}
+
+.ps-band {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--band) 24%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--band) 45%, transparent);
+  color: var(--text-1);
+  font-size: 10.5px;
+  font-weight: 620;
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ps-rstatus { font-size: 11px; white-space: nowrap; }
+.ps-rstatus-open       { color: var(--text-1); }
+.ps-rstatus-mitigating { color: var(--ps-prog); }
+.ps-rstatus-watching   { color: var(--text-2); }
+.ps-rstatus-realized   { color: var(--ps-band-crit); font-weight: 620; }
+.ps-rstatus-closed     { color: var(--text-3); }
+
+/* ── Probability × Impact matrix ───────────────────────────────────────────── */
+/* Impact 5→1 top to bottom, probability 1→5 left to right: the dangerous corner
+   is top-right, which is how every PM already reads this grid. */
+
+.ps-matrix-wrap { display: flex; flex-direction: column; gap: 4px; }
+.ps-matrix { display: flex; align-items: stretch; gap: 6px; }
+
+.ps-matrix-ylabel {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 10.5px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.ps-matrix-grid { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.ps-matrix-row { display: flex; gap: 3px; }
+.ps-matrix-tick { width: 14px; flex: none; font-size: 10px; color: var(--text-3); text-align: center; align-self: center; }
+.ps-matrix-xaxis .ps-matrix-tick { flex: 1; width: auto; }
+.ps-matrix-xlabel { font-size: 10.5px; color: var(--text-3); text-align: center; padding-left: 20px; }
+
+.ps-cell {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--band) 8%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+}
+
+.ps-cell.has {
+  background: color-mix(in srgb, var(--band) 30%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--band) 55%, transparent);
+  color: var(--text-1);
+  font-weight: 620;
+  cursor: pointer;
+}
+
+.ps-cell.has:hover { background: color-mix(in srgb, var(--band) 44%, transparent); }
+.ps-cell.active { box-shadow: inset 0 0 0 2px var(--text-1); }
+
+/* ── Risk graph nodes ─────────────────────────────────────────────────────── */
+
+.ps-gnodes { display: flex; flex-direction: column; gap: 4px; }
+
+.ps-gnode { border: 1px solid var(--border); border-radius: var(--r-md); }
+.ps-gnode.open { border-color: var(--border-hi); }
+
+.ps-gnode-head {
+  display: grid;
+  grid-template-columns: 62px 76px minmax(120px, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ps-gnode-head:hover { background: var(--bg-card-hover); }
+
+.ps-sev {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 1.7;
+  text-align: center;
+  color: var(--text-1);
+}
+
+.ps-sev-critical { background: color-mix(in srgb, var(--ps-band-crit) 26%, transparent); }
+.ps-sev-elevated { background: color-mix(in srgb, var(--ps-warn) 24%, transparent); }
+.ps-sev-watch    { background: var(--ps-track); color: var(--text-2); }
+
+.ps-gnode-id { font-size: 11.5px; color: var(--accent-1); font-variant-numeric: tabular-nums; }
+.ps-gnode-title { font-size: 12.5px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-gnode-meta { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+
+.ps-trend { font-size: 11px; white-space: nowrap; }
+.ps-trend-worsened  { color: var(--ps-band-crit); }
+.ps-trend-improved  { color: var(--ps-done); }
+.ps-trend-unchanged { color: var(--text-3); }
+
+.ps-gnode-body { padding: 2px 12px 10px 74px; display: flex; flex-direction: column; gap: 6px; }
+
+.ps-retro { display: grid; grid-template-columns: 74px 1fr; gap: 10px; font-size: 11.5px; }
+.ps-retro-date { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ps-retro-text { color: var(--text-2); line-height: 1.5; }
+.ps-retro-link { color: var(--accent-1); text-decoration: none; margin-left: 6px; white-space: nowrap; }
+.ps-retro-link:hover { text-decoration: underline; }
+
+/* Risk / blocker tables carry long prose: clamp instead of ellipsising to one
+   line, and keep the full text in `title`. */
+.ps-risk-table { table-layout: auto; }
+.ps-td-risk { max-width: 420px; }
+.ps-td-risk span {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ps-td-ms  { max-width: 180px; font-size: 11.5px; color: var(--text-2); }
+.ps-td-cat { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.ps-since  { color: var(--text-3); }
+
+/* ── Milestones ───────────────────────────────────────────────────────────── */
+
+.ps-ms-list-wrap { display: flex; flex-direction: column; gap: 10px; }
+
+.ps-ms {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+
+.ps-ms.open { border-color: var(--border-hi); }
+
+.ps-ms-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ps-ms-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ps-ms-name { font-size: 13.5px; font-weight: 620; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ps-ms-status {
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.7;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+
+.ps-ms-in-progress { background: color-mix(in srgb, var(--ps-prog) 22%, transparent); }
+.ps-ms-on-hold     { background: var(--ps-track); color: var(--text-2); }
+.ps-ms-done        { background: color-mix(in srgb, var(--ps-done) 22%, transparent); }
+.ps-ms-unknown     { background: var(--ps-track); color: var(--text-3); }
+
+.ps-ms-late {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--ps-band-crit) 26%, transparent);
+  font-size: 10px;
+  font-weight: 620;
+  line-height: 1.7;
+}
+
+.ps-ms-window { font-size: 11.5px; color: var(--text-3); white-space: nowrap; display: flex; gap: 8px; align-items: center; }
+.ps-ms-left { color: var(--text-2); }
+.ps-ms-src  { font-size: 10px; color: var(--text-3); font-style: italic; }
+
+.ps-ms-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+
+.ps-ms-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.ps-ms-metric { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ps-ms-metric-l { font-size: 11px; color: var(--text-3); display: flex; align-items: center; gap: 6px; }
+.ps-ms-metric-row { display: flex; align-items: center; gap: 8px; }
+.ps-ms-metric-row .ps-meter { flex: 1; }
+.ps-ms-metric-row b { font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; }
+.ps-ms-metric-sub { font-size: 11px; color: var(--text-3); line-height: 1.4; }
+
+.ps-ms-how { padding: 0 5px; border-radius: var(--r-sm); background: var(--ps-track); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.ps-ms-how-mapped { color: var(--accent-1); }
+
+.ps-ms-pills { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+
+.ps-pill {
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ps-track);
+}
+.ps-pill b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+.ps-pill-warn { color: var(--ps-warn); }
+
+.ps-ms-goal { font-size: 12px; color: var(--text-2); line-height: 1.5; margin: 0; }
+
+/* Mini Gantt: the milestone's own window, epics as bars, single-day rows as
+   diamonds (that is how the vault's Timeline template marks a milestone). */
+.ps-gantt { position: relative; display: flex; flex-direction: column; gap: 3px; padding: 4px 0; }
+
+.ps-gantt-row { display: grid; grid-template-columns: minmax(90px, 22%) 1fr; align-items: center; gap: 10px; }
+.ps-gantt-label { font-size: 11px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-gantt-track { position: relative; height: 12px; background: var(--ps-track); border-radius: 3px; }
+
+.ps-gantt-bar {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  background: var(--ps-seq);
+  border-radius: 3px;
+  min-width: 3px;
+}
+
+.ps-gantt-diamond {
+  position: absolute;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-left: -4.5px;
+  background: var(--ps-cat-2);
+  transform: translateY(-50%) rotate(45deg);
+  border-radius: 1px;
+}
+
+/* Today marker, drawn across the whole block so a slipping milestone is obvious. */
+.ps-gantt-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--ps-band-crit) 70%, transparent);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.ps-ms-detail { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+.ps-ms-block h5 { margin: 0 0 5px; font-size: 11px; font-weight: 620; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
+.ps-ms-block p  { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.5; }
+
+.ps-ms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ps-ms-list li { font-size: 12px; color: var(--text-2); line-height: 1.45; display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+.ps-ms-list li.done { color: var(--text-3); text-decoration: line-through; }
+.ps-ms-owner { color: var(--text-1); font-weight: 560; }
+.ps-ms-next  { color: var(--text-3); }
+.ps-ms-path  { font-size: 10.5px; color: var(--text-3); margin: 0; word-break: break-all; }
+
+@media (max-width: 1100px) {
+  .ps-gnode-head { grid-template-columns: 58px 70px 1fr; }
+  .ps-gnode-meta, .ps-trend { display: none; }
+  .ps-gnode-body { padding-left: 12px; }
+}
+
+/* ── Fathom › Save call to vault (.stv-*, .tf-call-vault) ─────────────────── */
+/* The "→ Vault" affordance on a call row and its target-picker modal. `.btn-primary`
+   is width:100% globally (see "Known quirks"), hence the explicit width here. */
+
+.tf-call-vault {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--border-hi);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tf-call-vault:hover { color: var(--text-1); border-color: var(--accent-1); }
+.tf-call-vault.saved { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, transparent); }
+
+.stv-modal {
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-card);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.stv-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stv-head h3 { margin: 0; font-size: 14px; font-weight: 620; }
+
+.stv-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+.stv-call { margin: 0; display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.stv-call b { color: var(--text-1); }
+.stv-call span { color: var(--text-3); font-size: 11.5px; }
+
+.stv-field { display: flex; flex-direction: column; gap: 3px; }
+.stv-field > span { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
+
+.stv-check-row { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+
+.stv-target {
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px dashed var(--border-hi);
+  border-radius: var(--r-md);
+  font-size: 11.5px;
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.stv-err  { margin: 0; color: var(--red);      font-size: 12px; }
+.stv-warn { margin: 0; color: var(--yellow);   font-size: 12px; line-height: 1.45; }
+.stv-hint { margin: 0; color: var(--text-3);   font-size: 11.5px; }
+
+.stv-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.stv-btn.btn { width: auto; padding: 9px 18px; flex: none; }
+
+.stv-done { padding: 22px 18px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+
+.stv-check {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--green) 22%, transparent);
+  color: var(--text-1);
+  font-size: 17px;
+}
+
+.stv-done-title { margin: 0; font-size: 14px; font-weight: 620; }
+.stv-path { margin: 0; font-size: 11.5px; color: var(--text-2); word-break: break-all; }
+.stv-done .stv-actions { border-top: none; padding: 8px 0 0; justify-content: center; }
+
+/* Destination fields stack in one column: at 480px a two-column grid left the
+   Project select alone on a half-row while long milestone names still needed the
+   full width. */
+.stv-grid { display: flex; flex-direction: column; gap: 10px; }
+.stv-grid .input { font-size: 12.5px; }
+
+/* ── Fathom › new-call state (.tf-new, .tf-newchip, .tf-call-read) ─────────── */
+/* A call is NEW until it is marked read or archived to the vault. The badge is a
+   filled chip rather than a coloured title, so it survives the row's own hover
+   and active states. */
+
+.tf-new {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  background: var(--accent-1);
+  color: var(--accent-ink);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.6;
+  vertical-align: 1px;
+}
+
+/* Left edge marks the whole row, so a new call is findable while scanning. */
+.tf-call-li.fresh { position: relative; }
+.tf-call-li.fresh::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent-1);
+}
+
+.tf-newchip {
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-1) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-1) 16%, transparent);
+  color: var(--text-1);
+  font-size: 10.5px;
+  font-weight: 620;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tf-newchip:hover { border-color: var(--accent-1); }
+.tf-newchip.active { background: var(--accent-1); color: var(--accent-ink); }
+
+.tf-markall { font-size: 10.5px; }
+
+.tf-call-mark {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--green);
+}
+
+.tf-call-read {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--border-hi);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-3);
+  font-size: 10.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tf-call-read:hover { color: var(--text-1); border-color: var(--accent-1); }
+.tf-call-unread { border-style: dashed; }
+
+/* ── Fathom › multi-select + bulk archive ─────────────────────────────────── */
+
+.tf-selall { display: inline-flex; align-items: center; margin-right: 2px; cursor: pointer; }
+.tf-selall input, .tf-call-pick input { cursor: pointer; }
+
+/* The checkbox sits in the row's left gutter; .tf-call keeps its own padding so
+   the label text never runs under it. */
+.tf-call-pick {
+  position: absolute;
+  left: 7px;
+  top: 9px;
+  z-index: 1;
+  display: inline-flex;
+}
+
+.tf-call-li .tf-call { padding-left: 28px; }
+.tf-call-li.fresh::before { left: 22px; }
+.tf-call-li.picked .tf-call { box-shadow: inset 0 0 0 1px var(--accent-1); }
+
+.tf-bulkbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-1) 35%, transparent);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--accent-1) 8%, transparent);
+}
+
+.tf-bulk-n { font-size: 11.5px; font-weight: 620; color: var(--text-1); margin-right: auto; }
+
+.tf-bulk-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border-hi);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tf-bulk-btn:hover { color: var(--text-1); border-color: var(--accent-1); }
+.tf-bulk-btn.primary {
+  background: color-mix(in srgb, var(--accent-1) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-1) 50%, transparent);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* Per-call progress list inside the modal (batch preview and result). */
+.stv-batch { display: flex; flex-direction: column; gap: 6px; }
+.stv-batch-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-3); }
+
+.stv-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 210px;
+  overflow: auto;
+  width: 100%;
+}
+
+.stv-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) minmax(72px, auto);
+  align-items: baseline;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-align: left;
+}
+
+.stv-row-mark { font-size: 10px; color: var(--text-3); text-align: center; font-variant-numeric: tabular-nums; }
+.stv-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); }
+.stv-row-note  { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+
+.stv-row-saving .stv-row-mark { color: var(--accent-1); }
+.stv-row-done   .stv-row-mark { color: var(--green); }
+.stv-row-already .stv-row-mark { color: var(--text-3); }
+.stv-row-failed .stv-row-mark { color: var(--red); }
+.stv-row-failed .stv-row-note { color: var(--red); }
+
+.stv-progress { margin-right: auto; font-size: 11.5px; color: var(--text-3); }
+
+/* The filter chips must never squeeze the call list out of the column: cap the
+   chip area and let it scroll on its own. With 7 project chips + a sub-row the
+   block ran ~5 rows tall and left a single visible call on a laptop screen. */
+.tf-filterbar { max-height: 34vh; overflow-y: auto; }
+.tf-groups { max-height: 20vh; overflow-y: auto; }
+
+/* Keep the list itself the tallest thing in the column. */
+.tf-col-calls .tf-col-body { padding-top: 10px; }
+
+.tf-selall {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 2px;
+  cursor: pointer;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.tf-selall:hover { color: var(--text-1); }
+
+/* Row actions sit inside the card, bottom-right; .tf-call reserves the space so
+   long titles never run under them. */
+.tf-call-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 7px;
+  display: inline-flex;
+  gap: 6px;
+  z-index: 1;
+}
+
+.tf-call-li .tf-call { padding-bottom: 30px; }

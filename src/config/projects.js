@@ -33,6 +33,17 @@ export const PROJECTS = {
     jiraProjectOptions: ['ABS', 'ABSPO'],
     // ABSPO is only available for these boards
     abspoBoards: ['ABS - Project Operations'],
+    // ── PM Brain (Obsidian vault) ────────────────────────────────────────────
+    // Folder under 02_PROJECTS/ that holds this project's milestones + RBS.
+    vaultProject: 'ABS',
+    // Milestone → Azure Area Path (board leaf name). Health matches milestone
+    // names against the snapshot's Area Paths automatically; this map is for the
+    // cases name matching cannot know. Add a row rather than renaming a board.
+    milestoneBoards: {
+      'Commission Module':          ['ABS - Commission Module'],
+      'Marketing Asset Migration':  ['ABS - Marketing Migration'],
+      'BUREAU — Quote Management Portal': ['ABS. Bureau', 'ABS Bureau and Group Only'],
+    },
     // Only show these boards in the selector
     boardAllowList: ['ABS - Dynamics 365', 'ABS - Customer Service', 'ABS Bureau and Group Only', 'ABS - Marketing Migration', 'ABS - Commission Module', 'ABS - Project Operations'],
   },
@@ -56,6 +67,7 @@ export const PROJECTS = {
     // Shows Sprint (Iteration) + Parent Story selectors; iterations filtered to active + placement
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true, component: true },
     statusUpdates: { excludeStates: ['closed', 'resolved', 'done', 'cancelled', 'removed'] },
+    vaultProject: 'NSMG',
   },
 
   // ── NSMG Marker ────────────────────────────────────────────────────────────
@@ -76,6 +88,7 @@ export const PROJECTS = {
     },
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true, component: true },
     statusUpdates: { excludeStates: ['resolved', 'closed', 'done', 'cancelled', 'removed'] },
+    vaultProject: 'MARKER',
   },
 
   // ── NSMG Case Migration ────────────────────────────────────────────────────
@@ -96,6 +109,9 @@ export const PROJECTS = {
     },
     features: { iteration: true, story: true, board: false, iterationFilter: true, storyIterationFilter: true, component: true },
     statusUpdates: { excludeStates: ['closed', 'resolved', 'done', 'cancelled', 'removed'] },
+    // Case Migration lives inside the NSMG vault folder (its own milestone);
+    // its risk-graph bucket is the NSMGCM slug — see api/pmBrain.js.
+    vaultProject: 'NSMG',
   },
 
   // ── HT — Hydrotec ──────────────────────────────────────────────────────────
@@ -115,6 +131,8 @@ export const PROJECTS = {
       clientRequestIdField: import.meta.env.VITE_JIRA_HT_CUSTOM_FIELD   || 'customfield_10034',
     },
     features: { iteration: false, story: false, board: false, component: true },
+    // HYDROTEC keeps TO DO / Blockers at project level (no Milestones folder).
+    vaultProject: 'HYDROTEC',
   },
 
 };

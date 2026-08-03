@@ -119,6 +119,17 @@ function ReportIcon() {
   );
 }
 
+function ProjectStatusIcon() {
+  return (
+    <Glyph>
+      {/* Progress ring — the "% of the project done" gauge, with the filled
+          arc drawn heavier so it reads at 27px */}
+      <circle cx="12" cy="12" r="8.2" strokeWidth="1.45" />
+      <path d="M12 3.8A8.2 8.2 0 0117.8 17.8" strokeWidth="2.7" />
+    </Glyph>
+  );
+}
+
 function GanttIcon() {
   return (
     <Glyph>
@@ -162,6 +173,7 @@ const ICON_MAP = {
   'email-agent':   EmailAgentIcon,
   'status-updates': StatusUpdatesIcon,
   'report':        ReportIcon,
+  'project-status': ProjectStatusIcon,
   'gantt':         GanttIcon,
   'quarterly-calls': QuarterlyCallsIcon,
   'checklist':     ChecklistIcon,

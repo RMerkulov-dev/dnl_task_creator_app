@@ -10,6 +10,12 @@ import { registerQuarterlyCallsRoutes, checkQuarterlyCallReminders } from './qua
 // precedence over the vercel.json rewrite, so GET /api/checklist would hit
 // that file (no default export → 500) instead of this Express app.
 import { registerChecklistRoutes, checkChecklistReminders } from './checklistRoutes.js';
+import { registerPmBrainRoutes } from './pmBrain.js';
+import {
+  saveFathomToken, getFathomToken, fathomTokenStatus, forgetFathomToken,
+} from './fathomToken.js';
+import { registerFathomVaultSyncRoutes, sweepFathomCalls } from './fathomVaultSync.js';
+import { registerFathomSeenRoutes } from './fathomSeen.js';
 
 dotenv.config();
 
@@ -79,7 +85,13 @@ function verifyAuthToken(token) {
 
 // quarterly-calls/cron and checklist/cron are called by Vercel Cron with its
 // own `Authorization: Bearer $CRON_SECRET` header — the routes verify that themselves.
-const AUTH_EXEMPT = [/^\/api\/login$/, /^\/api\/fathom\/oauth\//, /^\/api\/quarterly-calls\/cron$/, /^\/api\/checklist\/cron$/];
+const AUTH_EXEMPT = [
+  /^\/api\/login$/,
+  /^\/api\/fathom\/oauth\//,
+  /^\/api\/quarterly-calls\/cron$/,
+  /^\/api\/checklist\/cron$/,
+  /^\/api\/fathom\/vault-sync\/cron$/,   // verifies CRON_SECRET itself
+];
 
 app.use('/api', (req, res, next) => {
   const path = (req.originalUrl || '').split('?')[0];
@@ -144,6 +156,9 @@ registerQuarterlyCallsRoutes(app);
 
 // ─── Checklist (per-user weekly TODO plan + daily digest emails) ─────────────
 registerChecklistRoutes(app);
+
+// ─── PM Brain (read-only bridge to the Obsidian PM vault: milestones + risks) ─
+registerPmBrainRoutes(app);
 
 // ─── Generic proxy ────────────────────────────────────────────────────────────
 // Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)
@@ -1219,6 +1234,40 @@ async function getOrRegisterFathomClient(redirectUri) {
   return client;
 }
 
+// A one-time ticket that carries the app user into the OAuth popup.
+// `/api/fathom/oauth/*` has to stay AUTH_EXEMPT (the popup is a top-level
+// navigation and Fathom's redirect back carries no Authorization header), so the
+// only way to know WHOSE token comes back is to mint a short-lived signed ticket
+// from an authenticated request first and fold it into the OAuth `state`.
+// Without this the server could not persist the token per user at all.
+//
+// The path deliberately does NOT start with /api/fathom/oauth/ — that prefix is
+// auth-exempt, so a ticket minted there would carry no `authEmail` at all (and
+// anyone could mint one). This route must be authenticated: the email in the
+// ticket is the whole point.
+app.post('/api/fathom/connect-ticket', (req, res) => {
+  res.json({ ticket: signState({ e: req.authEmail, k: 'connect', t: Date.now() }) });
+});
+
+// Is a server-side token stored for this user (and can it refresh itself)?
+app.get('/api/fathom/token-status', async (req, res) => {
+  try { res.json(await fathomTokenStatus(req.authEmail)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/fathom/disconnect', async (req, res) => {
+  try { res.json({ removed: await forgetFathomToken(req.authEmail) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+const TICKET_TTL_MS = 10 * 60_000;
+function emailFromTicket(ticket) {
+  const parsed = ticket ? verifyState(String(ticket)) : null;
+  if (!parsed || parsed.k !== 'connect') return null;
+  if (Date.now() - parsed.t > TICKET_TTL_MS) return null;
+  return parsed.e || null;
+}
+
 // Step 1: redirect the popup to Fathom's consent screen.
 app.get('/api/fathom/oauth/start', async (req, res) => {
   try {
@@ -1231,7 +1280,13 @@ app.get('/api/fathom/oauth/start', async (req, res) => {
     // Embed the resolved origin so the /callback handler can rebuild the
     // exact same redirect_uri (Fathom requires byte-equal match) and also
     // knows the target origin for window.postMessage.
-    const state     = signState({ v: verifier, c: client.client_id, o: origin, t: Date.now() });
+    // `e` (app user, from the ticket) is what lets /callback store the token
+    // server-side for the unattended sweeps; absent ticket = browser-only token,
+    // exactly the old behaviour.
+    const state     = signState({
+      v: verifier, c: client.client_id, o: origin, t: Date.now(),
+      e: emailFromTicket(req.query.ticket),
+    });
 
     const url = new URL(FATHOM_OAUTH_AUTHORIZE);
     url.searchParams.set('response_type',         'code');
@@ -1324,7 +1379,22 @@ app.get('/api/fathom/oauth/callback', async (req, res) => {
     try { tok = JSON.parse(text); }
     catch { return reply({ ok: false, error: 'Token endpoint returned non-JSON body' }, targetOrigin, 502); }
     if (!tok.access_token) return reply({ ok: false, error: 'Token response missing access_token' }, targetOrigin, 502);
+
+    // Persist for unattended use. Best-effort: a storage hiccup must not break
+    // the interactive connect the user is waiting on.
+    let stored = false;
+    if (parsed.e) {
+      try {
+        await saveFathomToken(parsed.e, tok, { clientId: parsed.c, redirectUri });
+        stored = true;
+      } catch (e) {
+        console.warn('[Fathom OAuth] could not persist token server-side:', e.message);
+      }
+    }
+
     return reply({
+      stored,
+      refreshable: !!tok.refresh_token,
       ok:           true,
       accessToken:  tok.access_token,
       refreshToken: tok.refresh_token || null,
@@ -1336,11 +1406,21 @@ app.get('/api/fathom/oauth/callback', async (req, res) => {
   }
 });
 
+// The token a Fathom route should use: what the browser sent, else the one the
+// server stored for this user at connect time. The fallback is what lets the UI
+// keep working on a fresh browser (and mirrors what the sweep uses).
+async function resolveFathomToken(req) {
+  const fromBody = req.body?.fathomToken;
+  if (fromBody) return fromBody;
+  try { return await getFathomToken(req.authEmail); } catch { return null; }
+}
+
 app.post('/api/fathom-agent', express.json({ limit: '50kb' }), async (req, res) => {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { message, userEmail, confirmedPlan, fathomToken } = req.body ?? {};
+  const { message, userEmail, confirmedPlan } = req.body ?? {};
+  const fathomToken = await resolveFathomToken(req);
   const history = sanitizeHistory(req.body?.history);
   if (!message)      return res.status(400).json({ error: 'message is required' });
   if (!fathomToken)  return res.status(401).json({ error: 'Fathom is not connected. Click "Connect Fathom" to authorize.', reconnect: true });
@@ -1557,7 +1637,7 @@ app.get('/api/fathom/skills', (req, res) => {
 // Cheap by design: one MCP handshake + tools/list, both of which are cached
 // afterwards, so the check also warms the session for the real request.
 app.post('/api/fathom/session-check', express.json({ limit: '4kb' }), async (req, res) => {
-  const { fathomToken } = req.body ?? {};
+  const fathomToken = await resolveFathomToken(req);
   if (!fathomToken) return res.status(401).json({ ok: false, error: 'Fathom is not connected.', reconnect: true });
   try {
     await withFathomSession(fathomToken, sid => ensureFathomTools(fathomToken, sid));
@@ -1581,6 +1661,9 @@ function findFathomRawTool(kind) {
   }
   if (kind === 'transcript') {
     return byName('get_meeting_transcript') || tools.find(t => /transcript/i.test(t.name));
+  }
+  if (kind === 'summary') {
+    return byName('get_meeting_summary') || tools.find(t => /summar/i.test(t.name));
   }
   return null;
 }
@@ -1650,29 +1733,15 @@ function normalizeMeeting(m) {
   };
 }
 
-// List the signed-in user's (or the team's) calls in a date range. Returns
-// { meetings: [{ id, title, date, url, host, attendees }] }. `id` is the Fathom
-// recording_id used later to fetch the transcript.
-//
-// Fast path: call the listing tool directly over MCP — no LLM. The model-driven
-// loop is kept only as a fallback when the result can't be parsed deterministically.
-app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, res) => {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
-
-  const { fathomToken, userEmail, startDate, endDate, scope } = req.body ?? {};
-  if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
-  if (!startDate || !endDate) return res.status(400).json({ error: 'startDate and endDate are required' });
-
-  const isTeam        = scope === 'team';
-  const createdAfter  = `${startDate}T00:00:00Z`;
-  const createdBefore = `${endDate}T23:59:59Z`;
-
-  const toolResults = [];
-  try {
-    // ── Fast path: direct MCP listing call, no LLM (cached session, one retry). ──
-    // Walks the whole range and returns the sorted meetings, or null when the
-    // listing tool is missing or yielded nothing. Read-only → safe to re-run.
+// ── Fathom listing fast path (no LLM) ────────────────────────────────────────
+// Walks a whole date range over MCP and returns the sorted meetings, or null
+// when the listing tool is missing or yielded nothing. Read-only → safe to
+// re-run. Extracted from /api/fathom/my-calls so the unattended vault sync uses
+// the exact same listing behaviour (pagination, window walking, dedupe) instead
+// of a second, subtly different implementation.
+async function listFathomMeetingsFast({
+  fathomToken, userEmail, isTeam = false, createdAfter, createdBefore, toolResults = [],
+}) {
     let sessionId = null;
     let listTool  = null;
     const listAllBatches = async (sid) => {
@@ -1739,9 +1808,40 @@ app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, re
         .sort((a, b) => (Date.parse(b.date) || 0) - (Date.parse(a.date) || 0));
     };
 
+  const meetings = await withFathomSession(fathomToken, listAllBatches);
+  return { meetings, sessionId, listTool };
+}
+
+// List the signed-in user's (or the team's) calls in a date range. Returns
+// { meetings: [{ id, title, date, url, host, attendees }] }. `id` is the Fathom
+// recording_id used later to fetch the transcript.
+//
+// Fast path: call the listing tool directly over MCP — no LLM. The model-driven
+// loop is kept only as a fallback when the result can't be parsed deterministically.
+app.post('/api/fathom/my-calls', express.json({ limit: '20kb' }), async (req, res) => {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+
+  const { userEmail, startDate, endDate, scope } = req.body ?? {};
+  const fathomToken = await resolveFathomToken(req);
+  if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
+  if (!startDate || !endDate) return res.status(400).json({ error: 'startDate and endDate are required' });
+
+  const isTeam        = scope === 'team';
+  const createdAfter  = `${startDate}T00:00:00Z`;
+  const createdBefore = `${endDate}T23:59:59Z`;
+
+  const toolResults = [];
+  try {
+    let sessionId = null;
+    let listTool  = null;
     try {
-      const clean = await withFathomSession(fathomToken, listAllBatches);
-      if (clean) return res.json({ meetings: clean, toolResults });
+      const fast = await listFathomMeetingsFast({
+        fathomToken, userEmail, isTeam, createdAfter, createdBefore, toolResults,
+      });
+      sessionId = fast.sessionId;
+      listTool  = fast.listTool;
+      if (fast.meetings) return res.json({ meetings: fast.meetings, toolResults });
     } catch (err) {
       if (err.reconnect) throw err;
       toolResults.push({ name: listTool?.name || 'list', error: err.message });
@@ -1878,7 +1978,8 @@ app.post('/api/fathom/skill-run', express.json({ limit: '20kb' }), async (req, r
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { fathomToken, recordingId, callTitle, callUrl, skillId, userEmail } = req.body ?? {};
+  const { recordingId, callTitle, callUrl, skillId, userEmail } = req.body ?? {};
+  const fathomToken = await resolveFathomToken(req);
   if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
   if (!recordingId) return res.status(400).json({ error: 'recordingId is required' });
 
@@ -1944,7 +2045,8 @@ app.post('/api/fathom/task-deep-dive', express.json({ limit: '30kb' }), async (r
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
-  const { fathomToken, recordingId, callTitle, callUrl, task, userEmail } = req.body ?? {};
+  const { recordingId, callTitle, callUrl, task, userEmail } = req.body ?? {};
+  const fathomToken = await resolveFathomToken(req);
   if (!fathomToken) return res.status(401).json({ error: 'Fathom is not connected.', reconnect: true });
   if (!recordingId) return res.status(400).json({ error: 'recordingId is required' });
   if (!task?.title && !task?.description) {
@@ -1985,6 +2087,70 @@ app.post('/api/fathom/task-deep-dive', express.json({ limit: '30kb' }), async (r
     res.status(status).json({ error: humaniseFetchError(err), toolResults, ...(err.reconnect ? { reconnect: true } : {}) });
   }
 });
+
+// ─── Fathom → vault sync (transcripts into the PM Brain milestones) ──────────
+// The MCP client, transcript cache and OpenRouter wrapper all live in this file,
+// so the sync module receives them as dependencies rather than importing back
+// into here (which would be a circular import).
+
+// One call's Fathom-authored summary, '' when the tool or the field is missing.
+async function fetchFathomSummary(fathomToken, meeting, toolResults = []) {
+  try {
+    return await withFathomSession(fathomToken, async (sid) => {
+      await ensureFathomTools(fathomToken, sid);
+      const tool = findFathomRawTool('summary');
+      if (!tool) return '';
+      const props = tool.inputSchema?.properties || {};
+      const args = {};
+      if ('recording_id' in props) args.recording_id = Number(meeting.id) || meeting.id;
+      else if ('meeting_id' in props) args.meeting_id = Number(meeting.id) || meeting.id;
+      if ('url' in props && meeting.url) args.url = meeting.url;
+      const raw = await mcpCallTool(fathomToken, sid, tool.name, args);
+      const { text, summary } = summariseMcpResult(tool.name, raw);
+      toolResults.push({ name: tool.name, args, result: summary });
+      return String(text || '').trim();
+    });
+  } catch (err) {
+    if (err.reconnect) throw err;
+    toolResults.push({ name: 'summary', error: err.message });
+    return '';
+  }
+}
+
+const VAULT_SYNC_DEPS = {
+  listFathomMeetingsFast,
+  fetchFathomTranscript,
+  fetchFathomSummary,
+  resolveFathomToken,
+  // Text-in/text-out LLM wrapper over callOpenRouter, so the sync module never
+  // has to know about OpenRouter's envelope or the API key.
+  // NOTE: the executor model is a reasoning model. With a tight max_tokens it
+  // spends the entire budget on reasoning tokens and returns `content: null`
+  // with finish_reason 'length' — which made the classifier fail silently and
+  // route every call to the Inbox. Hence `reasoning: { effort: 'low' }` by
+  // default and a budget that leaves room for the answer.
+  llm: async ({ model, messages, maxTokens = 800, temperature = 0.2, reasoning = { effort: 'low' } }) => {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error('OPENROUTER_API_KEY not configured');
+    const data = await callOpenRouter(apiKey, {
+      model: model || OPENROUTER_EXECUTOR,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      ...(reasoning ? { reasoning } : {}),
+    });
+    const msg = data?.choices?.[0]?.message;
+    const text = extractReply(msg);
+    if (!text) throw new Error(`LLM returned no content (finish_reason: ${data?.choices?.[0]?.finish_reason ?? 'unknown'})`);
+    return text;
+  },
+};
+
+registerFathomVaultSyncRoutes(app, VAULT_SYNC_DEPS);
+
+// ─── Fathom call read-state (new / read / moved badges) ──────────────────────
+registerFathomSeenRoutes(app);
+
 
 // ─── Extract tasks from dictated text (Voice tab) ─────────────────────────────
 // Body: { text, userEmail }. Runs the same "Tasks Follow-up" skill used by the
@@ -2329,6 +2495,19 @@ if (process.env.NODE_ENV !== 'production') {
     .catch(err => console.warn('[Checklist] digest sweep failed:', err.message));
   setTimeout(checklistSweep, 20_000);
   setInterval(checklistSweep, 15 * 60_000);
+
+  // Fathom → vault sweep: every 20 minutes, so a finished call lands in the
+  // right milestone folder while it is still fresh. No-ops without a stored
+  // Fathom token or PM_BRAIN_GITHUB_TOKEN. On Vercel this block never runs —
+  // Vercel Cron hits /api/fathom/vault-sync/cron.
+  const vaultSweep = () => sweepFathomCalls(VAULT_SYNC_DEPS, {})
+    .then((r) => {
+      if (r?.saved?.length) console.log(`[Fathom vault sync] archived ${r.saved.length} call(s)`);
+      else if (r && !r.ok) console.warn('[Fathom vault sync]', r.reason);
+    })
+    .catch(err => console.warn('[Fathom vault sync] sweep failed:', err.message));
+  setTimeout(vaultSweep, 25_000);
+  setInterval(vaultSweep, 20 * 60_000);
 }
 
 // Обязательно экспортируем app для бессерверной среды Vercel

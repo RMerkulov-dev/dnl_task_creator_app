@@ -36,6 +36,7 @@ SIDEBAR_APPS = [
     ("Fathom", '[class*="ba-"], [class*="fathom"]'),
     ("Email",  '[class*="ea-"], [class*="ba-"]'),
     ("Report", '[class*="rp-"], .project-picker'),
+    ("Health", ".ps-wrap"),
     ("Gantt",  ".gantt-app"),
 ]
 

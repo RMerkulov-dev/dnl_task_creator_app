@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import TaskCreateModal from '../../components/TaskCreateModal.jsx';
 import AddToParentModal, { CreateTargetChoice } from '../../components/AddToParentModal.jsx';
+import SaveToVaultModal from './SaveToVaultModal.jsx';
 
 // ─── Skill output parser ──────────────────────────────────────────────────────
 // Turns the strict "Tasks Follow-Up" markdown into structured task objects so we
@@ -118,12 +119,100 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
   const [loadingCalls, setLoadingCalls] = useState(false);
   const [callsError,   setCallsError]  = useState('');
   const [selectedCall, setSelectedCall] = useState(null);
+  // Archiving a call into the PM Brain vault (the copy-paste replacement).
+  // The vault is private to its owner (PM_BRAIN_ALLOWED server-side), so the
+  // affordance is hidden for everyone else rather than 403-ing on click.
+  const [vaultCall,    setVaultCall]   = useState(null);   // call being saved
+  const [vaultSaved,   setVaultSaved]  = useState({});     // id → ledger entry
+  const [vaultAllowed, setVaultAllowed] = useState(false);
+
+  // ── New / read / moved state (server-side, api/fathomSeen.js) ──
+  // A call is NEW when it happened after the baseline and has not been marked
+  // read or archived. The baseline is stamped by the server on first read, so
+  // switching this on does not light up the whole account.
+  // Multi-select for bulk actions (archive several calls into one folder,
+  // mark several read). Kept as a Set of recording ids — the call objects come
+  // from `calls`, so a stale id simply drops out after a reload.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [vaultBatch,  setVaultBatch]  = useState(null);   // calls being archived
+
+  const [seen,        setSeen]        = useState(null);   // { id: {at, via} }
+  const [baselineAt,  setBaselineAt]  = useState(null);
+  const [newOnly,     setNewOnly]     = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/fathom/seen')
+      .then(r => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setSeen(d.seen ?? {});
+        setBaselineAt(d.baselineAt ?? null);
+      })
+      .catch(() => { if (!cancelled) setSeen({}); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const isNew = useCallback((c) => {
+    if (!baselineAt || !c?.id) return false;
+    if (seen && seen[c.id]) return false;
+    const t = c.date ? Date.parse(c.date) : NaN;
+    return Number.isFinite(t) && t > Date.parse(baselineAt);
+  }, [seen, baselineAt]);
+
+  const markSeen = useCallback(async (ids, via = 'read') => {
+    const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+    if (!list.length) return;
+    const at = new Date().toISOString();
+    // Optimistic: the badge is a read-state, not a transaction.
+    setSeen(prev => ({ ...(prev ?? {}), ...Object.fromEntries(list.map(id => [id, { at, via }])) }));
+    try {
+      await fetch('/api/fathom/seen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: list, via }),
+      });
+    } catch { /* keep the optimistic state; the next load re-syncs */ }
+  }, []);
+
+  const unmarkSeen = useCallback(async (id) => {
+    setSeen((prev) => {
+      const next = { ...(prev ?? {}) };
+      delete next[id];
+      return next;
+    });
+    try {
+      await fetch('/api/fathom/seen', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id] }),
+      });
+    } catch { /* noop */ }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/fathom/vault-status')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled) setVaultAllowed(d?.allowed !== false); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Client-side filtering of the already-loaded calls.
   const [groupFilter, setGroupFilter] = useState('all'); // 'all' | a group label
   const [subFilter,   setSubFilter]   = useState('all'); // 'all' | a sub-group label (within the group)
   const [callSearch,  setCallSearch]  = useState('');
-  const [filtersOpen, setFiltersOpen] = useState(true);  // group/sub chips collapse
+  // Collapsed by default: with 7 project chips plus a sub-row the block runs ~5
+  // rows tall and pushes the call list off a laptop screen. The choice is
+  // remembered, so opening it once keeps it open.
+  const [filtersOpen, setFiltersOpen] = useState(() => {
+    try { return localStorage.getItem('tf_filters_open') === '1'; } catch { return false; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('tf_filters_open', filtersOpen ? '1' : '0'); } catch { /* private mode */ }
+  }, [filtersOpen]);
 
   const [skills,        setSkills]       = useState([]);
   const [selectedSkill, setSelectedSkill] = useState('');
@@ -298,13 +387,54 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
     return calls.filter(c => {
       if (groupFilter !== 'all' && callGroup(c.title) !== groupFilter) return false;
       if (groupFilter !== 'all' && subFilter !== 'all' && callSubGroup(c.title) !== subFilter) return false;
+      if (newOnly && !isNew(c)) return false;
       if (q) {
         const hay = `${c.title || ''} ${c.host || ''} ${(c.attendees || []).join(' ')}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [calls, groupFilter, subFilter, callSearch]);
+  }, [calls, groupFilter, subFilter, callSearch, newOnly, isNew]);
+
+  const newCount = useMemo(() => (calls ?? []).filter(isNew).length, [calls, isNew]);
+
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Selection is intentionally scoped to what is VISIBLE: "select all" after a
+  // filter must not quietly pick up calls the user cannot see.
+  const selectedCalls = useMemo(
+    () => (calls ?? []).filter(c => selectedIds.has(c.id)),
+    [calls, selectedIds],
+  );
+  const visibleIds = useMemo(() => (filteredCalls ?? []).map(c => c.id), [filteredCalls]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
+
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const every = visibleIds.length > 0 && visibleIds.every(id => next.has(id));
+      for (const id of visibleIds) { if (every) next.delete(id); else next.add(id); }
+      return next;
+    });
+  }, [visibleIds]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  // A call that leaves the list (new range / scope) must not stay selected.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (!prev.size || !calls) return prev.size ? new Set() : prev;
+      const alive = new Set((calls ?? []).map(c => c.id));
+      const next = new Set([...prev].filter(id => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [calls]);
 
   // Selecting a group resets the sub-filter (its sub-labels are group-specific).
   function pickGroup(label) {
@@ -385,12 +515,66 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
         <section className="tf-col tf-col-calls">
           <div className="tf-col-head">
             <span className="tf-col-title">{scope === 'team' ? 'Team calls' : 'My calls'}</span>
+            {calls !== null && calls.length > 0 && (
+              <label className="tf-selall" title={allVisibleSelected ? 'Deselect all shown' : 'Select all shown'}>
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
+                <span>{allVisibleSelected ? 'none' : 'all'}</span>
+              </label>
+            )}
+            {calls !== null && newCount > 0 && (
+              <button
+                type="button"
+                className={`tf-newchip${newOnly ? ' active' : ''}`}
+                onClick={() => setNewOnly(v => !v)}
+                title={newOnly ? 'Show all calls' : 'Show only new calls'}
+              >
+                {newCount} new
+              </button>
+            )}
+            {calls !== null && newCount > 0 && (
+              <button
+                type="button"
+                className="tf-linkbtn tf-markall"
+                onClick={() => markSeen((calls ?? []).filter(isNew).map(c => c.id), 'bulk')}
+                title="Mark every new call as read"
+              >
+                mark all read
+              </button>
+            )}
             {calls !== null && (
               <span className="tf-count">
                 {filteredCalls.length === calls.length ? calls.length : `${filteredCalls.length} / ${calls.length}`}
               </span>
             )}
           </div>
+
+          {selectedCalls.length > 0 && (
+            <div className="tf-bulkbar">
+              <span className="tf-bulk-n">{selectedCalls.length} selected</span>
+              {!allVisibleSelected && (
+                <button type="button" className="tf-bulk-btn" onClick={toggleSelectAllVisible}>
+                  select all {visibleIds.length}
+                </button>
+              )}
+              {newCount > 0 && (
+                <button type="button" className="tf-bulk-btn"
+                  onClick={() => setSelectedIds(new Set((filteredCalls ?? []).filter(isNew).map(c => c.id)))}>
+                  select new {(filteredCalls ?? []).filter(isNew).length}
+                </button>
+              )}
+              {vaultAllowed && (
+                <button type="button" className="tf-bulk-btn primary"
+                  onClick={() => setVaultBatch(selectedCalls)}>
+                  → Vault
+                </button>
+              )}
+              <button type="button" className="tf-bulk-btn"
+                onClick={() => { markSeen(selectedCalls.map(c => c.id), 'bulk'); clearSelection(); }}>
+                Mark read
+              </button>
+              <button type="button" className="tf-linkbtn" onClick={clearSelection}>clear</button>
+            </div>
+          )}
 
           {calls !== null && calls.length > 0 && (
             <div className="tf-filterbar">
@@ -486,15 +670,69 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
                   const active = selectedCall && selectedCall.id === c.id;
                   const sub = [prettyDate(c.date), scope === 'team' ? c.host : null, c.attendees?.slice(0, 3).join(', ')]
                     .filter(Boolean).join(' · ');
+                  const fresh = isNew(c);
+                  const mark = seen?.[c.id];
                   return (
-                    <li key={c.id || i} className="tf-call-li">
+                    <li key={c.id || i} className={`tf-call-li${fresh ? ' fresh' : ''}${selectedIds.has(c.id) ? ' picked' : ''}`}>
+                      <label className="tf-call-pick" title="Select for a bulk action"
+                        onClick={e => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(c.id)}
+                          onChange={() => toggleSelect(c.id)}
+                        />
+                      </label>
                       <button
                         className={`tf-call${active ? ' active' : ''}`}
                         onClick={() => { setSelectedCall(c); setResult(''); setRunError(''); }}
                       >
-                        <span className="tf-call-title">{c.title}</span>
+                        <span className="tf-call-title">
+                          {fresh && <span className="tf-new" title={`New since ${prettyDate(baselineAt)}`}>NEW</span>}
+                          {c.title}
+                        </span>
                         {sub && <span className="tf-call-meta">{sub}</span>}
+                        {mark && (
+                          <span className="tf-call-mark">
+                            {mark.via === 'moved' ? '✓ moved to vault' : '✓ read'}
+                            {mark.at ? ` · ${prettyDate(mark.at)}` : ''}
+                          </span>
+                        )}
                       </button>
+                      {/* Row actions live INSIDE the card (pinned bottom-right);
+                          as loose siblings they straddled its border. */}
+                      <span className="tf-call-actions" onClick={e => e.stopPropagation()}>
+                        {fresh ? (
+                          <button
+                            type="button"
+                            className="tf-call-read"
+                            title="Mark this call as read"
+                            onClick={(e) => { e.stopPropagation(); markSeen(c.id, 'read'); }}
+                          >
+                            Mark read
+                          </button>
+                        ) : mark ? (
+                          <button
+                            type="button"
+                            className="tf-call-read tf-call-unread"
+                            title="Mark as new again"
+                            onClick={(e) => { e.stopPropagation(); unmarkSeen(c.id); }}
+                          >
+                            Undo
+                          </button>
+                        ) : null}
+                        {vaultAllowed && (
+                          <button
+                            type="button"
+                            className={`tf-call-vault${vaultSaved[c.id] ? ' saved' : ''}`}
+                            title={vaultSaved[c.id]
+                              ? `In the vault: ${vaultSaved[c.id].path}`
+                              : 'Save the transcript into the PM Brain vault'}
+                            onClick={(e) => { e.stopPropagation(); setVaultCall(c); }}
+                          >
+                            {vaultSaved[c.id] ? '✓ Vault' : '→ Vault'}
+                          </button>
+                        )}
+                      </span>
                       {c.url && (
                         <a
                           className="tf-call-open"
@@ -592,6 +830,27 @@ export default function TasksFollowUp({ user, allowedProjects, fathomToken, onRe
           initialDescription={buildTaskDescription(taskModal.task, selectedCall, details[taskKey(taskModal.task)]?.text)}
           onClose={() => setTaskModal(null)}
           onCreated={res => setCreated(prev => ({ ...prev, [taskKey(taskModal.task)]: res }))}
+        />
+      )}
+
+      {(vaultCall || vaultBatch) && (
+        <SaveToVaultModal
+          calls={vaultBatch ?? [vaultCall]}
+          fathomToken={fathomToken}
+          onClose={() => { setVaultCall(null); setVaultBatch(null); }}
+          onSaved={(entry) => {
+            if (!entry?.recordingId) return;
+            setVaultSaved(prev => ({ ...prev, [entry.recordingId]: entry }));
+            // The server stamps this too (so it agrees on other devices); this
+            // just keeps the badge from lagging behind the click.
+            setSeen(prev => ({ ...(prev ?? {}), [entry.recordingId]: { at: new Date().toISOString(), via: 'moved' } }));
+            setSelectedIds((prev) => {
+              if (!prev.has(entry.recordingId)) return prev;
+              const next = new Set(prev);
+              next.delete(entry.recordingId);
+              return next;
+            });
+          }}
         />
       )}
     </div>
@@ -812,6 +1071,6 @@ function ResultView({ parsed, rawResult, created, details, onCreate, onDeepDive 
           )}
         </div>
       )}
-    </div>
+      </div>
   );
 }

@@ -288,13 +288,28 @@ export function workItemWebUrl(apiUrl, project) {
  * their stored Jira key.
  *
  * Returns: [{ id, title, type, state, assignedTo, parentId, jiraKey, jiraRaw, url }]
+ *
+ * `opts` narrows the WIQL *before* the 200-item detail batches, which matters
+ * for a whole-project load (Project Status) where the unfiltered list can run
+ * into thousands of items:
+ *   - excludeStates: string[] — `[System.State] NOT IN (...)`, drops terminal
+ *     work. WIQL string comparison is case-insensitive, but callers should
+ *     still filter client-side: a state that slips through only costs payload.
+ *   - changedSince: 'YYYY-MM-DD' — `[System.ChangedDate] >=`, drops the archive.
+ *   - onProgress({ stage, ids, fetched }) — 'wiql' once with the id count, then
+ *     'batch' after each detail batch.
  */
-export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath = null, iterationPath = null) {
+export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath = null, iterationPath = null, opts = {}) {
+  const { excludeStates, changedSince, onProgress } = opts;
   const wiqlUrl = `${BASE}/${proxyKey}/${encodeURIComponent(project)}/_apis/wit/wiql?api-version=7.0`;
-  const esc = v => v.replace(/'/g, "''");
+  const esc = v => String(v).replace(/'/g, "''");
   const clauses = [];
   if (areaPath)      clauses.push(`[System.AreaPath] UNDER '${esc(areaPath)}'`);
   if (iterationPath) clauses.push(`[System.IterationPath] UNDER '${esc(iterationPath)}'`);
+  if (excludeStates?.length) {
+    clauses.push(`[System.State] NOT IN (${excludeStates.map(s => `'${esc(s)}'`).join(',')})`);
+  }
+  if (changedSince) clauses.push(`[System.ChangedDate] >= '${esc(changedSince)}'`);
   const where = clauses.length ? ` AND ${clauses.join(' AND ')}` : '';
   const wiqlRes = await fetch(wiqlUrl, {
     method: 'POST',
@@ -305,6 +320,7 @@ export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath
   });
   const wiql = await parse(wiqlRes, 'getBoardWorkItems-wiql');
   const ids = (wiql.workItems || []).map(w => w.id);
+  onProgress?.({ stage: 'wiql', ids: ids.length, fetched: 0 });
   if (!ids.length) return [];
 
   // Fetch the full field set (no `fields` filter) rather than a fixed list: the
@@ -332,6 +348,7 @@ export async function getBoardWorkItems(proxyKey, project, jiraIdField, areaPath
         fields:     f,   // full field map — release/custom fields read off this
       });
     }
+    onProgress?.({ stage: 'batch', ids: ids.length, fetched: items.length });
   }
   return items;
 }

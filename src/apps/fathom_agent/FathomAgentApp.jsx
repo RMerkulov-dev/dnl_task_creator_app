@@ -197,7 +197,15 @@ function ThinkingBubble({ startedAt, onCancel }) {
 
 // Per-user Fathom MCP access token lives in localStorage. The token is obtained
 // by opening /api/fathom/oauth/start in a popup; the popup posts the token back
-// via window.postMessage. There's no server-side token store.
+// via window.postMessage.
+//
+// It is ALSO stored server-side now (api/fathomToken.js), which is what lets the
+// unattended call→vault sweep reach Fathom at all. The popup is a top-level
+// navigation and cannot carry the app's bearer token, so the connect flow first
+// asks for a short-lived signed "ticket" (POST /api/fathom/oauth/ticket) and
+// passes it to /start; the OAuth state carries it to /callback, which then knows
+// whose token came back. Fetched ahead of the click because Safari only honours
+// window.open inside the user gesture — no await may happen before it.
 const FATHOM_TOKEN_KEY = 'fathom_oauth_token';
 
 function readStoredFathomToken() {
@@ -221,7 +229,21 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
   // revoked or expired since. Verified on mount (below) so the Connect screen
   // appears the moment the app is opened, not after the first Load calls.
   const [checking,     setChecking]     = useState(() => !!readStoredFathomToken());
+  const [connectTicket, setConnectTicket] = useState('');
   const popupRef = useRef(null);
+
+  // Keep a fresh connect ticket ready (10-min TTL server-side; re-minted every
+  // 5 minutes while the app is open).
+  useEffect(() => {
+    let cancelled = false;
+    const mint = () => fetch('/api/fathom/connect-ticket', { method: 'POST' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (!cancelled && d?.ticket) setConnectTicket(d.ticket); })
+      .catch(() => { /* connect still works, just browser-only */ });
+    mint();
+    const id = setInterval(mint, 5 * 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
 
   function persistToken(token) {
     try {
@@ -241,7 +263,9 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
     const left = Math.max(0, (window.screen.width  - w) / 2);
     const top  = Math.max(0, (window.screen.height - h) / 2);
     popupRef.current = window.open(
-      '/api/fathom/oauth/start',
+      connectTicket
+        ? `/api/fathom/oauth/start?ticket=${encodeURIComponent(connectTicket)}`
+        : '/api/fathom/oauth/start',
       'fathom-oauth',
       `width=${w},height=${h},left=${left},top=${top}`,
     );
@@ -592,7 +616,8 @@ export default function FathomAgentApp({ user, allowedProjects, onLogout }) {
               <p className="ba-empty-title">Connect your Fathom account</p>
               <p className="ba-empty-sub">
                 Fathom Agent reads your meetings through Fathom's official MCP server.<br/>
-                Authorize once — your token stays on this device.
+                Authorize once — the token is kept on this device <em>and</em> on the server,
+                so the scheduled call→vault archiving can use it too.
               </p>
               <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 <button

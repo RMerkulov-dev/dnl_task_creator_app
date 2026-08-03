@@ -755,12 +755,35 @@ export function getJiraUrl(issueKey) {
  * Returns a Map<key, { key, summary, status, statusCategory, assignee, type, priority }>.
  * Keys that don't exist (or aren't visible) are simply absent from the map.
  */
-export async function getIssuesStatusByKeys(cloudId, keys) {
+// Copy the optional analytics fields onto an issue row, but ONLY the ones the
+// caller actually asked for — an absent key must stay absent rather than
+// becoming a fake `null`/`[]`, so a consumer can tell "not requested" from
+// "empty". Shared by getIssuesStatusByKeys and getChildIssuesTreesBulk; the
+// camelCase names are what Project Status' metrics read.
+const EXTRA_FIELD_MAP = {
+  resolutiondate:            ['resolutionDate', v => v ?? null],
+  updated:                   ['updated',        v => v ?? ''],
+  statuscategorychangedate:  ['statusChanged',  v => v ?? ''],
+  duedate:                   ['dueDate',        v => v ?? null],
+  components:                ['components',     v => (v ?? []).map(c => c?.name).filter(Boolean)],
+  labels:                    ['labels',         v => v ?? []],
+};
+
+function applyExtraFields(row, f, requested) {
+  for (const name of requested) {
+    const spec = EXTRA_FIELD_MAP[name];
+    if (spec) row[spec[0]] = spec[1](f[name]);
+    else if (f[name] !== undefined) row[name] = f[name];   // raw custom field
+  }
+  return row;
+}
+
+export async function getIssuesStatusByKeys(cloudId, keys, { fields: extraFields = [] } = {}) {
   const unique = [...new Set((keys || []).filter(Boolean))];
   const out = new Map();
   if (!unique.length) return out;
 
-  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority'];
+  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority', ...extraFields];
   // JQL `key in (...)` — chunk to keep the query string well under Jira's
   // limit; the chunks are independent, so run them concurrently.
   const chunks = [];
@@ -775,7 +798,7 @@ export async function getIssuesStatusByKeys(cloudId, keys) {
     const data = await parseJira(res, 'getIssuesStatusByKeys');
     for (const issue of data.issues ?? []) {
       const f = issue.fields ?? {};
-      out.set(issue.key, {
+      out.set(issue.key, applyExtraFields({
         key:            issue.key,
         summary:        f.summary ?? '',
         status:         f.status?.name ?? '',
@@ -783,7 +806,7 @@ export async function getIssuesStatusByKeys(cloudId, keys) {
         assignee:       f.assignee?.displayName ?? null,
         type:           f.issuetype?.name ?? '',
         priority:       f.priority?.name ?? '',
-      });
+      }, f, extraFields));
     }
   }));
   return out;
@@ -1293,17 +1316,27 @@ export async function getChildIssuesTree(cloudId, parentKey, maxDepth = 5, _visi
  * Children attach via the returned `parent` field (Jira Cloud populates it for
  * both subtasks and epic children); an issue whose parent isn't in the current
  * level is ignored, and a `visited` set guards against link cycles.
+ *
+ * `fields` adds analytics fields to every node (see EXTRA_FIELD_MAP) — Project
+ * Status asks for resolutiondate/updated/statuscategorychangedate/components,
+ * which is what makes burn-up, throughput and aging computable without any
+ * changelog request. `onProgress({ depth, nodes })` fires after each level.
  */
-export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5) {
+export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5, { fields: extraFields = [], onProgress } = {}) {
   const roots = [...new Set((parentKeys || []).filter(Boolean))];
   const out = new Map(roots.map(k => [k, []]));
   if (!roots.length) return out;
 
-  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority', 'parent', 'created'];
+  const fields = ['summary', 'status', 'assignee', 'issuetype', 'priority', 'parent', 'created', ...extraFields];
   const clauses = [
     list => `parent in (${list})`,
     list => `"Epic Link" in (${list})`,   // legacy fallback; may not exist → ignored
   ];
+  // A clause variant that Jira rejects (typically "Epic Link" — the field is
+  // gone on modern Cloud sites) is rejected for EVERY chunk on EVERY level, so
+  // remember it after the first failure instead of paying a doomed round trip
+  // per chunk per level. On ABS this halves the query count of the deep levels.
+  const deadClauses = new Set();
 
   // All children of the given parent keys: one paginated search per chunk×clause,
   // all in parallel. A failing clause variant is skipped, mirroring
@@ -1312,7 +1345,8 @@ export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5)
     const found = [];
     const chunks = [];
     for (let i = 0; i < keys.length; i += 50) chunks.push(keys.slice(i, i + 50));
-    await Promise.all(chunks.flatMap(chunk => clauses.map(async (clause) => {
+    await Promise.all(chunks.flatMap(chunk => clauses.map(async (clause, clauseIdx) => {
+      if (deadClauses.has(clauseIdx)) return;
       const jql = `${clause(chunk.join(','))} ORDER BY created ASC`;
       try {
         let nextPageToken;
@@ -1326,7 +1360,9 @@ export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5)
           found.push(...(data.issues ?? []));
           nextPageToken = data.nextPageToken;
         } while (nextPageToken);
-      } catch { /* ignore failing JQL variant */ }
+      } catch {
+        deadClauses.add(clauseIdx);   // ignore this JQL variant from here on
+      }
     })));
     return found;
   }
@@ -1344,7 +1380,7 @@ export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5)
       if (!parentKey || !levelSet.has(parentKey)) continue;
       visited.add(issue.key);
       const f = issue.fields ?? {};
-      const node = {
+      const node = applyExtraFields({
         key:            issue.key,
         summary:        f.summary ?? '',
         status:         f.status?.name ?? '',
@@ -1353,13 +1389,15 @@ export async function getChildIssuesTreesBulk(cloudId, parentKeys, maxDepth = 5)
         type:           f.issuetype?.name ?? '',
         priority:       f.priority?.name ?? '',
         created:        f.created ?? '',
+        parentKey,
         children:       [],
-      };
+      }, f, extraFields);
       nodeByKey.set(issue.key, node);
       (out.get(parentKey) ?? nodeByKey.get(parentKey).children).push(node);
       next.push(issue.key);
     }
     level = next;
+    onProgress?.({ depth: depth + 1, nodes: nodeByKey.size });
   }
 
   // Chunk/clause queries resolve in arbitrary order — restore per-parent
