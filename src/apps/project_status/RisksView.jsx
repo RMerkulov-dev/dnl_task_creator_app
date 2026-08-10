@@ -5,15 +5,18 @@ import {
   SEVERITY_LABEL, TREND_MARK, TREND_LABEL,
 } from './pmBrainData.js';
 
-// ─── Health › Risks ───────────────────────────────────────────────────────────
+// ─── Risks › the hand-maintained part of the vault ────────────────────────────
 // Three blocks over the PM Brain vault, kept separate on purpose:
 //   1. RBS register (02_PROJECTS/<P>/RBS.md) — the scored weekly table: P×I
-//      matrix, bands, categories, one row per risk per milestone.
+//      matrix, bands, categories, one row per risk per milestone. This is the
+//      only place risks carry a P/I assessment, which is why it survives next to
+//      the machine register.
 //   2. Risk Graph (00_DASHBOARD/Risks/Risk Graph.md) — the canonical nodes with
-//      a dated retrospective, so a risk carries a TREND (worsened / improved /
-//      unchanged) and its Fathom call links.
+//      a dated retrospective. Rendered only when `hideGraph` is off: once the
+//      graph has been imported into the register it is seed history, and showing
+//      both lists side by side would make one risk look like two.
 //   3. Active blockers (per-milestone Blockers.md) — what is stopping work now.
-// Read-only: the vault is edited in Obsidian, never from here.
+// Read-only: these files are edited in Obsidian, never from here.
 
 const fmtDate = d => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—');
 
@@ -117,7 +120,7 @@ function GraphNode({ node, open, onToggle }) {
   );
 }
 
-export default function RisksView({ brain, onOpenMilestone }) {
+export default function RisksView({ brain, onOpenMilestone, hideGraph = false }) {
   const rep = useMemo(() => buildRiskReport(brain), [brain]);
   const [cell,       setCell]       = useState(null);   // {p, i} from the matrix
   const [band,       setBand]       = useState(null);
@@ -149,12 +152,12 @@ export default function RisksView({ brain, onOpenMilestone }) {
   const clear = () => { setCell(null); setBand(null); setMilestone(null); setSearch(''); };
   const k = rep.kpi;
 
-  if (!rep.risks.length && !rep.graph.length && !rep.blockers.length) {
+  if (!rep.risks.length && !rep.blockers.length && (hideGraph || !rep.graph.length)) {
     return (
       <p className="ps-empty">
-        No risk data in PM Brain for this project — expected
-        {' '}<code>02_PROJECTS/{brain.vaultProject}/RBS.md</code> or nodes under
-        {' '}<code>00_DASHBOARD/Risks/Risk Graph.md</code>.
+        No hand-maintained risk data in PM Brain for this project — expected
+        {' '}<code>02_PROJECTS/{brain.vaultProject}/RBS.md</code>
+        {hideGraph ? '' : <> or nodes under <code>00_DASHBOARD/Risks/Risk Graph.md</code></>}.
       </p>
     );
   }
@@ -173,8 +176,13 @@ export default function RisksView({ brain, onOpenMilestone }) {
         <div className="ps-kpi"><span className="ps-kpi-n" style={{ color: BAND_VAR.high }}>{k.high}</span><span className="ps-kpi-l">high (10–14)</span></div>
         <div className="ps-kpi"><span className="ps-kpi-n">{k.realized}</span><span className="ps-kpi-l">realized</span></div>
         <div className="ps-kpi"><span className="ps-kpi-n">{k.blockers}</span><span className="ps-kpi-l">active blockers</span></div>
-        <div className="ps-kpi"><span className="ps-kpi-n">{k.graphActive}</span><span className="ps-kpi-l">active risk-graph nodes</span></div>
-        <div className="ps-kpi"><span className="ps-kpi-n">{k.worsened}</span><span className="ps-kpi-l">worsened at last review</span></div>
+        {/* Graph KPIs belong to the graph card: with the card hidden they would
+            be counting a list the user cannot see (and the register above already
+            reports the same risks under its own statuses). */}
+        {!hideGraph && <>
+          <div className="ps-kpi"><span className="ps-kpi-n">{k.graphActive}</span><span className="ps-kpi-l">active risk-graph nodes</span></div>
+          <div className="ps-kpi"><span className="ps-kpi-n">{k.worsened}</span><span className="ps-kpi-l">worsened at last review</span></div>
+        </>}
         <div className="ps-kpi"><span className="ps-kpi-n">{fmtDate(k.lastReview)}</span><span className="ps-kpi-l">RBS last review{k.nextReview ? ` · next ${fmtDate(k.nextReview)}` : ''}</span></div>
       </div>
 
@@ -264,7 +272,7 @@ export default function RisksView({ brain, onOpenMilestone }) {
       </ChartCard>
 
       {/* ── Canonical risk graph ──────────────────────────────────────────── */}
-      <ChartCard
+      {!hideGraph && <ChartCard
         title="Risk graph — canonical nodes with retrospective"
         hint={`${graphNodes.length} shown · ${rep.graph.length} total`}
         note="Built by the daily fathom-risk-review over call transcripts; each node keeps its own dated history, so the trend is the change since the previous review."
@@ -286,7 +294,7 @@ export default function RisksView({ brain, onOpenMilestone }) {
           ))}
           {!graphNodes.length && <p className="ps-none">No nodes for this project.</p>}
         </div>
-      </ChartCard>
+      </ChartCard>}
 
       {/* ── Active blockers ───────────────────────────────────────────────── */}
       <ChartCard title="Active blockers" hint={`${rep.blockers.length} blocking now`} wide>

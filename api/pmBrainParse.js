@@ -388,7 +388,12 @@ export function parseRiskGraph(text, slugs = null) {
       section: currentProject,
       title: cleanText(idm[3]),
       severity: SEVERITY.find(([re]) => re.test(meta))?.[1] ?? null,
-      status: /dormant/i.test(meta) ? 'dormant' : /resolved/i.test(meta) ? 'resolved' : 'active',
+      // Order matters: "Resolving" must not be read as "Resolved" (it is still
+      // open work), and neither must fall through to "active" — the graph really
+      // uses all four words, and collapsing Resolving into active hid 6 nodes.
+      status: /dormant/i.test(meta) ? 'dormant'
+        : /resolving/i.test(meta) ? 'resolving'
+        : /resolved/i.test(meta) ? 'resolved' : 'active',
       first: firstDate(/\*\*First:\*\*\s*([^\s*·]+)/i.exec(meta)?.[1] ?? '') || retro[0]?.date || null,
       last: firstDate(/\*\*Last:\*\*\s*([^\s*·]+)/i.exec(meta)?.[1] ?? '') || last?.date || null,
       trend: last?.trend ?? null,

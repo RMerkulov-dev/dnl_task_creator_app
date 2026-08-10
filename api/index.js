@@ -11,6 +11,7 @@ import { registerQuarterlyCallsRoutes, checkQuarterlyCallReminders } from './qua
 // that file (no default export → 500) instead of this Express app.
 import { registerChecklistRoutes, checkChecklistReminders } from './checklistRoutes.js';
 import { registerPmBrainRoutes } from './pmBrain.js';
+import { registerRiskRoutes } from './riskRoutes.js';
 import {
   saveFathomToken, getFathomToken, fathomTokenStatus, forgetFathomToken,
 } from './fathomToken.js';
@@ -159,6 +160,9 @@ registerChecklistRoutes(app);
 
 // ─── PM Brain (read-only bridge to the Obsidian PM vault: milestones + risks) ─
 registerPmBrainRoutes(app);
+
+// ─── Risks app (machine-owned risk register in the vault) ─────────────────────
+registerRiskRoutes(app);
 
 // ─── Generic proxy ────────────────────────────────────────────────────────────
 // Читаем сырое тело запроса (чтобы проксировать создание тасков POST/PATCH)

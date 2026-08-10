@@ -13,6 +13,42 @@ export async function fetchPmBrain(projectId) {
   return data;
 }
 
+// ─── Risk register (machine-owned, in the vault) ───────────────────────────────
+// Separate from `fetchPmBrain` on purpose: the register is written by the app and
+// changes on every analysis run, while the vault payload is a read of files a
+// human edits. They also fail independently — a missing GitHub token makes the
+// register read-only without affecting the Milestones tab at all.
+
+export async function fetchRiskRegister(projectId) {
+  const res = await fetch(`/api/risks/${encodeURIComponent(projectId)}`);
+  const data = await res.json().catch(() => null);
+  if (res.status === 503) return data ?? { available: false, reason: 'The vault is not configured.' };
+  if (!res.ok) throw new Error(data?.error || `Risk register request failed (${res.status})`);
+  return data;
+}
+
+export async function seedRiskRegister(projectId) {
+  const res = await fetch(`/api/risks/${encodeURIComponent(projectId)}/seed`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || data?.reason || `Seeding failed (${res.status})`);
+  return data;
+}
+
+export async function overrideRiskStatus(projectId, riskId, status, why) {
+  const res = await fetch(`/api/risks/${encodeURIComponent(projectId)}/override`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ riskId, status, why }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error || `Could not set the status (${res.status})`);
+  return data.risk;
+}
+
 // ─── Risk bands / statuses ────────────────────────────────────────────────────
 
 export const BANDS = ['critical', 'high', 'medium', 'low'];

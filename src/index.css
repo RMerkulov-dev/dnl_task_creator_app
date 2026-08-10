@@ -9686,3 +9686,122 @@ button.rel-ev { width: 100%; text-align: left; cursor: pointer; font-family: inh
 }
 
 .tf-call-li .tf-call { padding-bottom: 30px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RISKS › REGISTER  (.ps-reg-*)
+   The machine-owned register, grouped per milestone. Deliberately reuses the
+   app's existing risk vocabulary — `.ps-sev-*` for severity, `.ps-trend-*` for
+   the trend, `.ps-retro*` for the dated history — so a risk looks the same
+   whether it comes from the register or from the RBS table below it.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.ps-reg-bar { flex-wrap: wrap; gap: 8px; }
+.ps-reg-statuses { display: flex; gap: 4px; flex-wrap: wrap; }
+.ps-reg-bar .ps-search { flex: 1; min-width: 220px; }
+.ps-filter-chip.active {
+  color: var(--text-1);
+  border-color: var(--accent-1);
+  background: color-mix(in srgb, var(--accent-1) 14%, transparent);
+}
+
+.ps-reg-list { display: flex; flex-direction: column; gap: 4px; }
+.ps-reg-group-bar { display: flex; justify-content: flex-end; margin: -4px 0 6px; }
+
+.ps-reg-risk { border: 1px solid var(--border); border-radius: var(--r-md); }
+.ps-reg-risk.open { border-color: var(--border-hi); }
+
+.ps-reg-head {
+  display: grid;
+  grid-template-columns: 62px 76px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--r-md);
+}
+.ps-reg-head:hover { background: var(--bg-card-hover); }
+
+.ps-reg-id { font-size: 11.5px; color: var(--accent-1); font-variant-numeric: tabular-nums; }
+.ps-reg-title {
+  font-size: 12.5px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ps-reg-meta { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+
+/* Status is a word, not a colour: the tint only reinforces it, and `dormant`
+   stays deliberately grey — silence is not an outcome. */
+.ps-reg-st {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.ps-reg-st-active    { color: var(--text-1); border-color: var(--ps-band-crit); background: color-mix(in srgb, var(--ps-band-crit) 14%, transparent); }
+.ps-reg-st-resolving { color: var(--text-1); border-color: var(--ps-prog);      background: color-mix(in srgb, var(--ps-prog) 16%, transparent); }
+.ps-reg-st-resolved  { color: var(--text-2); border-color: var(--ps-done);      background: color-mix(in srgb, var(--ps-done) 16%, transparent); }
+.ps-reg-st-dormant   { color: var(--text-3); border-color: var(--border); }
+
+.ps-reg-body {
+  padding: 2px 12px 10px 74px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ps-reg-res  { font-size: 11.5px; color: var(--text-2); margin: 0; line-height: 1.5; }
+.ps-reg-res b { color: var(--ps-done); }
+.ps-reg-note { font-size: 11px; color: var(--text-3); margin: 0; }
+.ps-reg-quote { display: block; color: var(--text-3); margin: 2px 0 0; }
+
+.ps-reg-actions { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.ps-reg-ovr {
+  font-size: 11px;
+  color: var(--accent-1);
+  border: 1px dashed var(--accent-1);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* Not `.btn`: these sit inside a flex row, and `.btn-primary` is width:100% —
+   see the "Known quirks" note in CLAUDE.md. */
+.ps-reg-btn {
+  width: auto;
+  font-size: 11.5px;
+  padding: 5px 11px;
+  color: var(--text-2);
+  background: var(--glass-btn);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.ps-reg-btn:hover:not(:disabled) { color: var(--text-1); border-color: var(--accent-1); }
+.ps-reg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ps-reg-btn-ghost { background: none; border-color: transparent; color: var(--text-3); }
+
+.ps-reg-empty-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.ps-reg-seed { width: auto; }
+
+@media (max-width: 1100px) {
+  .ps-reg-head { grid-template-columns: 62px 70px minmax(0, 1fr) auto; }
+  .ps-reg-head .ps-reg-meta { display: none; }
+  .ps-reg-body { padding-left: 12px; }
+}
+
+/* Boundary between the machine register and the hand-maintained RBS block. */
+.ps-section-h {
+  margin: 22px 0 -2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--text-2);
+  letter-spacing: 0.01em;
+}
+.ps-section-h span { font-weight: 400; color: var(--text-3); }

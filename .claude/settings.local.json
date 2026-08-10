@@ -226,7 +226,10 @@
       "Bash(git check-ignore *)",
       "Bash(node --check api/pmBrainWrite.js)",
       "Bash(node --check api/fathomSeen.js)",
-      "Bash(node -e \"1\")"
+      "Bash(node -e \"1\")",
+      "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/ae3281a3-41d0-4d7b-ac81-865034bf0075/scratchpad/probe_risks.mjs\")",
+      "Bash(sed -i '' \"s|.split\\(','\\)\\\\[0\\\\].trim\\(\\)|.split\\(','\\).map\\(s=>s.trim\\(\\)\\).find\\(s=>/roman.merkulov/.test\\(s\\)\\)|\" /tmp/probe_http.mjs)",
+      "Bash(node /tmp/probe_http.mjs)"
     ]
   }
 }

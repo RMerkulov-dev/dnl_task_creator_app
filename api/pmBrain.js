@@ -22,7 +22,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   parseMilestoneHub, parseTimeline, parseTodo, parseBlockers,
-  parseRbs, parseRiskGraph, parseRiskDossier,
+  parseRbs, parseRiskGraph, parseRiskDossier, parseFrontmatter,
 } from './pmBrainParse.js';
 
 const PROJECTS_DIR = '02_PROJECTS';
@@ -155,6 +155,25 @@ function fsSource() {
         return entries.filter(e => e.isFile() && e.name.endsWith('.md')).map(e => e.name).sort();
       } catch { return []; }
     },
+    // Every .md below `dir`, at any depth, as paths relative to `dir`.
+    // Needed because call notes are nested 1–3 levels deep under `Calls/`
+    // ("Calls/External/Weekly Calls/July 6-10/…md") — `listFiles` only sees the
+    // top level, which is fine for a milestone hub and wrong for calls.
+    async listTree(dir) {
+      const out = [];
+      const walk = async (rel) => {
+        let entries;
+        try { entries = await fsp.readdir(abs(rel), { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          if (e.name.startsWith('.')) continue;
+          const next = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) await walk(next);
+          else if (e.isFile() && e.name.endsWith('.md')) out.push(next.slice(dir.length + 1));
+        }
+      };
+      await walk(dir);
+      return out.sort();
+    },
     async read(file) {
       try { return await fsp.readFile(abs(file), 'utf8'); } catch { return NotFound; }
     },
@@ -211,6 +230,15 @@ function githubSource() {
         .filter(t => t.type === 'blob' && t.path.startsWith(prefix)
           && !t.path.slice(prefix.length).includes('/') && t.path.endsWith('.md'))
         .map(t => t.path.slice(prefix.length))
+        .sort();
+    },
+    // Recursive counterpart of listFiles — see the fs source for why.
+    async listTree(dir) {
+      const prefix = `${dir}/`;
+      return (await tree())
+        .filter(t => t.type === 'blob' && t.path.startsWith(prefix) && t.path.endsWith('.md'))
+        .map(t => t.path.slice(prefix.length))
+        .filter(p => !p.split('/').some(seg => seg.startsWith('.')))
         .sort();
     },
     async read(file) {
@@ -403,6 +431,102 @@ export async function loadPmBrainProject(projectId) {
         + (projBlockText ? parseBlockers(projBlockText).filter(b => b.active).length : 0),
       openTodos: milestones.reduce((s, m) => s + m.todoCounts.open, 0),
     },
+  };
+}
+
+// ─── Call notes (raw material for the risk engine) ────────────────────────────
+
+/** App project id → its vault folder + risk-graph slugs, with a safe default. */
+export const vaultProjectOf = projectId =>
+  VAULT_PROJECTS[projectId] ?? { dir: projectId, slugs: [projectId] };
+
+/** The live source, for modules that read the vault beyond one project payload. */
+export const vaultSource = () => pickSource();
+
+export const GRAPH_PATH = GRAPH_FILE;
+
+/** One file, or null when it does not exist. Used by the risk engine. */
+export async function readVaultFile(file) {
+  const src = await pickSource();
+  if (!src) return null;
+  return read(src, file);
+}
+
+/**
+ * Every archived call note of a project, grouped by milestone.
+ *
+ * **The milestone comes from the PATH, not from frontmatter.** Measured on the
+ * real vault: 63 call notes live under `Milestones/<M>/Calls/**`, but only 17
+ * carry a `milestone:` key and only 11 hold a full transcript — the folder is the
+ * one attribution that is always there and always right.
+ *
+ * This deliberately reads NOTHING: on the GitHub source the recursive tree is
+ * already cached, so listing is free, while reading 63 notes would be 63 API
+ * calls. Dates and bodies come from `readCallNote` for the notes the engine
+ * actually needs to process.
+ */
+export async function listMilestoneCalls(projectId) {
+  const src = await pickSource();
+  if (!src) return { available: false, calls: [] };
+
+  const { dir } = vaultProjectOf(projectId);
+  const projDir = `${PROJECTS_DIR}/${dir}`;
+  const msDir = `${projDir}/Milestones`;
+  const msNames = await src.listDirs(msDir);
+
+  const calls = [];
+  for (const name of msNames) {
+    const base = `${msDir}/${name}/Calls`;
+    for (const rel of await src.listTree(base)) {
+      const segs = rel.split('/');
+      calls.push({
+        path: `${base}/${rel}`,
+        milestone: name,
+        folder: segs.slice(0, -1).join('/'),      // '' = loose in Calls/
+        name: segs[segs.length - 1].replace(/\.md$/, ''),
+      });
+    }
+  }
+  return {
+    available: true,
+    source: src.kind,
+    project: projectId,
+    vaultProject: dir,
+    milestones: msNames,        // every folder, incl. the ones with no calls yet
+    calls,
+  };
+}
+
+/**
+ * One call note, with its frontmatter and the body split into "head" (summary,
+ * topics, action items) and "transcript".
+ *
+ * The split matters for cost: a full transcript runs to 100 KB, while the head
+ * is a few KB and already carries the decisions with Fathom timestamps. Only 11
+ * of 63 notes have a `## Transcript` section at all, so `transcript` is usually
+ * empty and `head` is the whole note.
+ */
+export async function readCallNote(file) {
+  const text = await readVaultFile(file);
+  if (text === null) return null;
+  const { data, body } = parseFrontmatter(text);
+  const cut = body.search(/^##\s+Transcript\s*$/im);
+  const head = cut === -1 ? body : body.slice(0, cut);
+  const transcript = cut === -1 ? '' : body.slice(cut).replace(/^##\s+Transcript\s*$/im, '').trim();
+  // A note written by hand keeps its Fathom link in the body ("VIEW RECORDING"),
+  // not in frontmatter — take whichever is present.
+  const fathomId = /fathom\.video\/calls\/(\d+)/.exec(`${data.fathom_url ?? ''} ${body}`)?.[1] ?? null;
+  return {
+    path: file,
+    date: /(\d{4}-\d{2}-\d{2})/.exec(String(data.date ?? ''))?.[1] ?? null,
+    title: String(data.title ?? '').trim() || /^#\s+(.+)$/m.exec(body)?.[1]?.trim() || null,
+    kind: String(data.kind ?? data.call_type ?? '').trim() || null,
+    milestoneField: String(data.milestone ?? '').trim() || null,
+    fathomId,
+    fathomUrl: fathomId ? `https://fathom.video/calls/${fathomId}` : null,
+    head: head.trim(),
+    transcript,
+    bytes: text.length,
   };
 }
 

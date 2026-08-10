@@ -36,7 +36,7 @@ SIDEBAR_APPS = [
     ("Fathom", '[class*="ba-"], [class*="fathom"]'),
     ("Email",  '[class*="ea-"], [class*="ba-"]'),
     ("Report", '[class*="rp-"], .project-picker'),
-    ("Health", ".ps-wrap"),
+    ("Risks",  ".ps-wrap"),
     ("Gantt",  ".gantt-app"),
 ]
 
@@ -59,7 +59,11 @@ def read_credentials():
             continue
         k, v = line.split("=", 1)
         env[k.strip()] = v.strip().strip('"').strip("'")
-    email = (env.get("VITE_ALLOWED_EMAILS") or env.get("ALLOWED_EMAILS", "")).split(",")[0].strip()
+    # Prefer the vault owner: apps with `allowedEmails` (Risks) are absent from the
+    # sidebar for anyone else, so a non-owner login would fail SIDEBAR_APPS with a
+    # missing entry rather than a real regression.
+    emails = [e.strip() for e in (env.get("VITE_ALLOWED_EMAILS") or env.get("ALLOWED_EMAILS", "")).split(",") if e.strip()]
+    email = next((e for e in emails if "roman.merkulov" in e), emails[0] if emails else "")
     password = env.get("VITE_APP_PASSWORD") or env.get("APP_PASSWORD", "")
     if not email or not password:
         raise SystemExit("No login credentials in .env (VITE_ALLOWED_EMAILS / VITE_APP_PASSWORD).")

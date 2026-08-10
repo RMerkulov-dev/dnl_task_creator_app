@@ -30,12 +30,22 @@ export const APP_REGISTRY = [
     glow: 'rgba(16, 185, 129, 0.5)',
   },
   {
+    // Id stays `project-status`: it is the sidebar key, the lazy-import key and
+    // what a returning user has in localStorage — renaming it would only move the
+    // churn somewhere invisible. The folder and the `.ps-*` CSS prefix keep the
+    // old name for the same reason.
     id: 'project-status',
-    name: 'Project Status',
-    shortName: 'Health',
+    name: 'Risks',
+    shortName: 'Risks',
     gradient: 'linear-gradient(135deg, #6366f1 0%, #22c55e 100%)',
     glow: 'rgba(99, 102, 241, 0.5)',
     beta: true,
+    // Owner-only, because EVERY tab here now reads the PM vault, and that vault is
+    // restricted server-side to PM_BRAIN_ALLOWED. It used to open on the Azure
+    // "Overview" tab, which any teammate could read — with that tab gone, a
+    // teammate would land on nothing but a "PM Brain is private to the vault
+    // owner" banner. Mirror of the server gate; keep the two in sync.
+    allowedEmails: ['roman.merkulov@dynamicalabs.com'],
   },
   {
     id: 'report',

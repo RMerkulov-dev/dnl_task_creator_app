@@ -149,6 +149,55 @@ export async function ledgerAdd(entries) {
   }, `calls: archived ${entries.length} call${entries.length === 1 ? '' : 's'}`);
 }
 
+// ─── Machine-owned JSON documents ─────────────────────────────────────────────
+// The create-only invariant above protects files a HUMAN edits. A document the
+// app is the sole author of (the call ledger, the risk register) is different: it
+// has to be updated in place, and `ghUpdate`'s sha check is what makes that safe
+// against a concurrent writer. These two helpers are the only sanctioned way to
+// do it — anything hand-written in Obsidian must still go through ghCreate.
+//
+// Reading goes through the SAME API as writing on purpose. pmBrain.js may be
+// reading a local vault directory that obsidian-git only refreshes every ~10 min,
+// so a register read from there right after a write could still be the old file.
+
+export async function readVaultJson(path) {
+  const file = await ghGet(path);
+  if (!file) return null;
+  try {
+    return JSON.parse(b64decode(file.content));
+  } catch {
+    throw new Error(`${path} is not valid JSON — fix or delete it in the vault`);
+  }
+}
+
+/**
+ * Read-modify-write one JSON document. `mutate` receives the parsed document (or
+ * null when the file does not exist yet) and returns the next one; returning
+ * `null` aborts the write.
+ */
+export async function updateVaultJson(path, mutate, message) {
+  return ghUpdate(path, (text) => {
+    let db = null;
+    if (text) {
+      try { db = JSON.parse(text); } catch {
+        throw new Error(`${path} is not valid JSON — fix or delete it in the vault`);
+      }
+    }
+    const next = mutate(db);
+    return next === null ? null : `${JSON.stringify(next, null, 2)}\n`;
+  }, message);
+}
+
+/**
+ * A generated markdown mirror: create-or-update, because the app owns the file.
+ * Callers must stamp a "generated, do not edit" header into `text` — the point of
+ * the mirror is that Obsidian stays useful, and a reader has to know that their
+ * edits here will be overwritten by the next run.
+ */
+export async function writeGeneratedNote(path, text, message) {
+  return ghUpdate(path, () => text, message);
+}
+
 // ─── Call file ────────────────────────────────────────────────────────────────
 
 // Filename shape follows what is already in the vault: "<Title> - July 29".
