@@ -25,7 +25,7 @@ import { sendEmail } from './taskNotify.js';
 // GET /api/checklist/cron (AUTH_EXEMPT, verified against CRON_SECRET). Both
 // pass { atHour: 11 }; sentLog.lastDate dedupes ticks inside the hour.
 
-const DATA_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+const DATA_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'checklist.json');
 const BLOB_PATH = 'checklist/db.json';
 const useBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);

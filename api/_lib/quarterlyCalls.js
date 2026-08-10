@@ -39,7 +39,7 @@ const SEED_PROJECTS = [
 ];
 const QC_STATUSES = ['scheduled', 'completed', 'cancelled'];
 
-const DATA_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+const DATA_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'quarterly-calls.json');
 
 // Imported from "DNL+FW. Management call with a customer. Schedule.xlsx",

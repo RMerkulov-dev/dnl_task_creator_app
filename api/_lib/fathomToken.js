@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { put, get } from '@vercel/blob';
 import { pmBrainAllowed } from './pmBrain.js';
 
-const DATA_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data');
+const DATA_DIR  = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'fathom-tokens.json');
 const BLOB_PATH = 'fathom/tokens.json';
 const useBlob = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);

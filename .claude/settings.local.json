@@ -229,7 +229,10 @@
       "Bash(node -e \"1\")",
       "Bash(node \"/private/tmp/claude-501/-Users-romario-Library-Mobile-Documents-com-apple-CloudDocs-DYNAMICA-LABS-cowork-apps-task-creator-app/ae3281a3-41d0-4d7b-ac81-865034bf0075/scratchpad/probe_risks.mjs\")",
       "Bash(sed -i '' \"s|.split\\(','\\)\\\\[0\\\\].trim\\(\\)|.split\\(','\\).map\\(s=>s.trim\\(\\)\\).find\\(s=>/roman.merkulov/.test\\(s\\)\\)|\" /tmp/probe_http.mjs)",
-      "Bash(node /tmp/probe_http.mjs)"
+      "Bash(node /tmp/probe_http.mjs)",
+      "Bash(perl -0pi -e \"s{from '\\\\./\\(followupSkills|taskNotify|quarterlyCalls|checklistRoutes|pmBrain|riskRoutes|fathomToken|fathomVaultSync|fathomSeen\\)\\\\.js'}{from './_lib/\\\\$1.js'}g\" api/index.js)",
+      "Bash(perl -0pi -e \"s{path\\\\.join\\\\\\(path\\\\.dirname\\\\\\(fileURLToPath\\\\\\(import\\\\.meta\\\\.url\\\\\\)\\\\\\), 'data'\\\\\\)}{path.join\\(path.dirname\\(fileURLToPath\\(import.meta.url\\)\\), '..', 'data'\\)}g\" api/_lib/*.js)",
+      "Bash(perl -0pi -e \"s{\\(?<!_lib/\\)\\\\bapi/\\(checklistRoutes|fathomSeen|fathomToken|fathomVaultSync|followupSkills|pmBrainParse|pmBrainWrite|pmBrain|quarterlyCalls|riskRegister|riskRoutes|taskNotify\\)\\\\.js}{api/_lib/\\\\$1.js}g\" CLAUDE.md)"
     ]
   }
 }
