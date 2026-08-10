@@ -28,7 +28,7 @@ const STATUS_LABEL = {
   active: 'Active', resolving: 'Resolving', resolved: 'Resolved', dormant: 'Dormant',
 };
 
-const UNATTRIBUTED = '__none__';
+export const UNATTRIBUTED = '__none__';
 
 const fmtDate = d => (d ? new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : '—');
 
@@ -135,20 +135,30 @@ function RiskRow({ risk, open, onToggle, busy, writable, onOverride }) {
 // ─── The view ─────────────────────────────────────────────────────────────────
 
 export default function RegisterView({
-  register, milestones, busyRisk, seeding, onSeed, onOverride, onOpenMilestone,
+  register, milestones, focusMilestone, busyRisk, seeding,
+  onSeed, onOverride, onOpenMilestone, onClearMilestone,
 }) {
   const [status, setStatus] = useState('open');
   const [search, setSearch] = useState('');
   const [openRisk, setOpenRisk] = useState(null);
 
+  // A milestone picked in the toolbar narrows the register to that one bucket.
+  // `UNATTRIBUTED` is a legitimate choice — the seeded graph nodes nobody has
+  // attributed yet — so the scope test is on the key, not on truthiness.
+  const scoped = useMemo(() => {
+    if (!focusMilestone) return register.risks ?? [];
+    return (register.risks ?? []).filter(r =>
+      (r.milestone || UNATTRIBUTED) === focusMilestone);
+  }, [register.risks, focusMilestone]);
+
   const rows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return (register.risks ?? []).filter(r => {
+    return scoped.filter(r => {
       if (!matchesStatus(r, status)) return false;
       if (q && !`${r.id} ${r.title} ${r.milestone ?? ''}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [register.risks, status, search]);
+  }, [scoped, status, search]);
 
   // Group by milestone, in the vault's own folder order, with the unattributed
   // bucket last — those are the seeded graph nodes whose milestone nobody has
@@ -174,8 +184,25 @@ export default function RegisterView({
     return out;
   }, [rows, milestones]);
 
-  const c = register.counts;
+  // Scoped to one milestone the server's project-wide counts would be a lie, so
+  // they are recomputed over that bucket (same shape, minus `unattributed` —
+  // inside a milestone every risk is attributed by definition).
+  const c = useMemo(() => {
+    if (!focusMilestone) return register.counts;
+    const by = s => scoped.filter(r => r.statusEffective === s).length;
+    return {
+      total: scoped.length,
+      open: scoped.filter(r => r.open).length,
+      active: by('active'), resolving: by('resolving'),
+      resolved: by('resolved'), dormant: by('dormant'),
+      unattributed: null,
+    };
+  }, [focusMilestone, register.counts, scoped]);
+
   const calls = register.calls;
+  const scopedCalls = focusMilestone && focusMilestone !== UNATTRIBUTED
+    ? (calls.byMilestone[focusMilestone] ?? 0)
+    : calls.total;
 
   // Nothing imported and nothing extracted yet: the one action that makes sense
   // is bringing in the canonical graph as history.
@@ -202,20 +229,49 @@ export default function RegisterView({
     );
   }
 
+  // A milestone with no risks yet is the common case (attribution only happens
+  // when a call raises the risk again), and six zero tiles plus a status filter
+  // over an empty list is noise — the one explanatory line below says it all.
+  if (focusMilestone && !scoped.length) {
+    return (
+      <div className="ps-report">
+        <p className="ps-none">
+          {focusMilestone === UNATTRIBUTED
+            ? 'Nothing unattributed left in the register.'
+            : 'No risks in the register for this milestone yet — a risk is attributed to a '
+              + 'milestone by the call that raises it, and this one has none so far.'}
+          {' '}
+          <button type="button" className="ps-link-btn" onClick={onClearMilestone}>
+            see all milestones
+          </button>
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="ps-report">
       <div className="ps-kpis">
         <div className="ps-kpi ps-kpi-hero">
           <span className="ps-kpi-n">{c.open}</span>
-          <span className="ps-kpi-l">open risks<br />of {c.total} in the register</span>
+          <span className="ps-kpi-l">
+            open risk{c.open === 1 ? '' : 's'}<br />of {c.total} {focusMilestone ? 'in this milestone' : 'in the register'}
+          </span>
         </div>
         <div className="ps-kpi"><span className="ps-kpi-n">{c.active}</span><span className="ps-kpi-l">active</span></div>
         <div className="ps-kpi"><span className="ps-kpi-n">{c.resolving}</span><span className="ps-kpi-l">resolving</span></div>
         <div className="ps-kpi"><span className="ps-kpi-n">{c.resolved}</span><span className="ps-kpi-l">resolved</span></div>
         <div className="ps-kpi"><span className="ps-kpi-n">{c.dormant}</span><span className="ps-kpi-l">dormant · not re-raised</span></div>
-        <div className="ps-kpi"><span className="ps-kpi-n">{c.unattributed}</span><span className="ps-kpi-l">no milestone yet</span></div>
-        <div className="ps-kpi"><span className="ps-kpi-n">{calls.total}</span><span className="ps-kpi-l">call notes in the vault</span></div>
-        <div className="ps-kpi"><span className="ps-kpi-n">{register.processed}</span><span className="ps-kpi-l">calls analysed</span></div>
+        {c.unattributed !== null && (
+          <div className="ps-kpi"><span className="ps-kpi-n">{c.unattributed}</span><span className="ps-kpi-l">no milestone yet</span></div>
+        )}
+        <div className="ps-kpi">
+          <span className="ps-kpi-n">{scopedCalls}</span>
+          <span className="ps-kpi-l">call note{scopedCalls === 1 ? '' : 's'}{focusMilestone ? ' in this milestone' : ' in the vault'}</span>
+        </div>
+        {!focusMilestone && (
+          <div className="ps-kpi"><span className="ps-kpi-n">{register.processed}</span><span className="ps-kpi-l">calls analysed</span></div>
+        )}
       </div>
 
       <div className="ps-table-bar ps-reg-bar">
@@ -242,7 +298,23 @@ export default function RegisterView({
         </button>
       </div>
 
-      {groups.map(g => (
+      {/* Scoped to one milestone the group card is pure chrome — the milestone's
+          own header already sits above this block — so the rows render flat. */}
+      {focusMilestone ? (
+        <div className="ps-reg-list">
+          {rows.map(r => (
+            <RiskRow
+              key={r.id}
+              risk={r}
+              open={openRisk === r.id}
+              onToggle={() => setOpenRisk(openRisk === r.id ? null : r.id)}
+              busy={busyRisk === r.id}
+              writable={register.writable}
+              onOverride={onOverride}
+            />
+          ))}
+        </div>
+      ) : groups.map(g => (
         <ChartCard
           key={g.name ?? UNATTRIBUTED}
           title={g.name ?? 'No milestone determined'}
@@ -257,7 +329,7 @@ export default function RegisterView({
           {g.name && onOpenMilestone && (
             <div className="ps-reg-group-bar">
               <button type="button" className="ps-link-btn" onClick={() => onOpenMilestone(g.name)}>
-                open milestone ↗
+                show only this milestone
               </button>
             </div>
           )}
@@ -279,12 +351,14 @@ export default function RegisterView({
 
       {!rows.length && (
         <p className="ps-none">
-          No risks match “{STATUSES.find(s => s.id === status)?.label}”
-          {search ? ` and “${search}”` : ''}.
+          {focusMilestone && !scoped.length
+            ? 'No risks in the register for this milestone yet — the analysis pass attributes a risk '
+              + 'to a milestone from the calls that raise it.'
+            : `No risks match “${STATUSES.find(s => s.id === status)?.label}”${search ? ` and “${search}”` : ''}.`}
         </p>
       )}
 
-      <p className="ps-foot">
+      {!focusMilestone && <p className="ps-foot">
         Register: <code>{register.registerPath}</code>
         {' '}· read from the {register.registerSource === 'fs' ? 'local vault' : 'git mirror'}
         {register.registerSource !== register.source
@@ -293,7 +367,7 @@ export default function RegisterView({
         {register.updatedAt ? ` · last written ${fmtDate(register.updatedAt)}` : ''}
         {register.seededFrom ? ` · seeded from ${register.seededFrom.file} (${register.seededFrom.nodes} nodes)` : ''}.
         {' '}A manual status always wins over the engine’s and survives the next run.
-      </p>
+      </p>}
     </div>
   );
 }

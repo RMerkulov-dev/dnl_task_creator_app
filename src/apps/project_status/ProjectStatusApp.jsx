@@ -7,9 +7,10 @@ import { useSlidingPill } from '../../platform/useSlidingPill.js';
 import {
   fetchPmBrain, fetchRiskRegister, seedRiskRegister, overrideRiskStatus,
 } from './pmBrainData.js';
-import RegisterView from './RegisterView.jsx';
+import RegisterView, { UNATTRIBUTED } from './RegisterView.jsx';
 import RisksView from './RisksView.jsx';
 import MilestonesView from './MilestonesView.jsx';
+import { MilestoneHeader, MilestoneWork } from './MilestoneFocus.jsx';
 
 // ─── Risks ────────────────────────────────────────────────────────────────────
 // Risk report over the PM Brain Obsidian vault, per project and per milestone.
@@ -26,6 +27,7 @@ import MilestonesView from './MilestonesView.jsx';
 // closed"), which is why the picker stays in the app at all.
 
 const ALL_BOARDS = '__all__';
+const ALL_MS     = '__all_ms__';
 
 const TABS = [
   { id: 'risks',      name: 'Risks' },
@@ -39,6 +41,11 @@ const HEAD = {
        + 'unique risk with its dated history and call links. A risk that gets solved moves '
        + 'to “resolved” and leaves the open list — nothing is ever deleted. Below the '
        + 'register: the hand-scored RBS table and everything currently blocking work.',
+    // Picking one milestone turns the tab into that milestone's working screen:
+    // its risks and its TO DO, nothing from the rest of the project.
+    subFocused: 'One milestone: the risks its calls raised, and the TO DO, blockers and '
+       + 'acceptance criteria kept by hand in Obsidian. Switch to “All milestones” for the '
+       + 'whole project.',
   },
   milestones: {
     title: 'Risks — milestones',
@@ -55,6 +62,8 @@ const PHASE_LABEL = {
   trees:    'Jira: epics and tasks',
   done:     'Done',
 };
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function progressText(p) {
   if (!p) return '';
@@ -109,6 +118,7 @@ export default function ProjectStatusApp({ allowedProjects }) {
 
   const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
   const [tab, setTab] = useState('risks');
+  const [msFilter, setMsFilter] = useState(ALL_MS);   // Risks tab: which milestone
 
   // Azure snapshot — only the Milestones tab uses it (delivery progress).
   const [boards,        setBoards]        = useState([]);
@@ -218,7 +228,7 @@ export default function ProjectStatusApp({ allowedProjects }) {
   // carries the project it belongs to and is matched against the selection at
   // render time (`brainData` / `regData`) — a stale project's data can then never
   // be displayed, without a reset racing the fetch.
-  useEffect(() => { setBrainError(''); setRegError(''); setSeeding(''); }, [projectId]);
+  useEffect(() => { setBrainError(''); setRegError(''); setSeeding(''); setMsFilter(ALL_MS); }, [projectId]);
 
   const load = useCallback(async () => {
     if (!proj) return;
@@ -289,11 +299,36 @@ export default function ProjectStatusApp({ allowedProjects }) {
   const brainData = brain?.project === projectId ? brain : null;
   const regData   = register?.project === projectId ? register : null;
 
+  // ── Milestone scope of the Risks tab ──────────────────────────────────────
+  // The options are the vault's milestone folders, each carrying its own risk /
+  // TODO counts so the choice is informed, plus the unattributed bucket when the
+  // register actually has one (the seeded graph nodes no call has placed yet).
+  const msOptions = useMemo(() => {
+    const risksOf = name => (regData?.risks ?? []).filter(r => r.milestone === name && r.open).length;
+    const opts = (brainData?.milestones ?? []).map(m => ({
+      value: m.name,
+      // Kept short on purpose: the counts have to survive the CLOSED select,
+      // which truncates, and "3 · 19" next to the name reads at a glance once
+      // the field label spells out what the two numbers are.
+      label: `${m.name}  ·  ${plural(risksOf(m.name), 'risk')} · ${m.todoCounts.open + m.todoCounts.progress} TODO`,
+    }));
+    const orphans = (regData?.risks ?? []).filter(r => !r.milestone).length;
+    if (orphans) opts.push({ value: UNATTRIBUTED, label: `No milestone determined  ·  ${plural(orphans, 'risk')}` });
+    return opts;
+  }, [brainData?.milestones, regData?.risks]);
+
+  // A milestone that vanished (project switch, vault edit) must not leave the tab
+  // showing an empty scope with no way back — fall back to "all".
+  const msScope = msFilter !== ALL_MS && msOptions.some(o => o.value === msFilter) ? msFilter : null;
+  const focusedMs = msScope && msScope !== UNATTRIBUTED
+    ? (brainData?.milestones ?? []).find(m => m.name === msScope) ?? null
+    : null;
+
   return (
     <div className="ps-wrap">
       <div className="ps-head">
         <h2 className="ps-title">{HEAD[tab].title}</h2>
-        <p className="ps-sub">{HEAD[tab].sub}</p>
+        <p className="ps-sub">{(msScope && HEAD[tab].subFocused) || HEAD[tab].sub}</p>
       </div>
 
       <Tabs tab={tab} onPick={setTab} />
@@ -306,6 +341,17 @@ export default function ProjectStatusApp({ allowedProjects }) {
             {projects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
         </label>
+
+        {!isMilestones && <label className="ps-field ps-field-ms">
+          <span className="ps-field-label">Milestone — open risks · open TODO</span>
+          <select className="select" value={msFilter} disabled={brainLoading || regLoading}
+            onChange={e => setMsFilter(e.target.value)}>
+            <option value={ALL_MS}>
+              {brainLoading ? 'Loading milestones…' : `All milestones${msOptions.length ? ` (${msOptions.length})` : ''}`}
+            </option>
+            {msOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>}
 
         {isMilestones && <label className="ps-field ps-field-board">
           <span className="ps-field-label">Board (Area Path) — for delivery progress</span>
@@ -362,32 +408,62 @@ export default function ProjectStatusApp({ allowedProjects }) {
 
       {tab === 'risks' && (
         <>
+          {/* Scoped to one milestone the header comes FIRST: the risk list below
+              is then read against a window, a goal and a status. */}
+          {focusedMs && !brainLoading && (
+            <MilestoneHeader
+              m={focusedMs}
+              riskCount={(regData?.risks ?? []).filter(r => r.milestone === focusedMs.name).length}
+              callCount={regData?.calls?.byMilestone?.[focusedMs.name] ?? null}
+              onOpenCard={() => { setFocusMs(focusedMs.name); setTab('milestones'); }}
+            />
+          )}
+
           {regData && !regLoading && (
             <RegisterView
               register={regData}
               milestones={(brainData?.milestones ?? []).map(m => m.name)}
+              focusMilestone={msScope}
               busyRisk={busyRisk}
               seeding={seeding === 'run'}
               onSeed={onSeed}
               onOverride={onOverride}
-              onOpenMilestone={name => { setFocusMs(name); setTab('milestones'); }}
+              onOpenMilestone={setMsFilter}
+              onClearMilestone={() => setMsFilter(ALL_MS)}
             />
           )}
+
           {/* The two blocks come from different places and one is scored by hand,
               so the boundary has to be visible — without it the RBS KPI row reads
               as if it were counting the register above it. */}
-          {brainData && !brainLoading && (
+          {brainData && !brainLoading && (focusedMs || !msScope) && (
             <h3 className="ps-section-h">
               Hand-maintained in Obsidian
-              <span> · RBS scoring (probability × impact) and active blockers</span>
+              <span>
+                {focusedMs
+                  ? ' · TO DO, blockers and acceptance criteria of this milestone'
+                  : ' · RBS scoring (probability × impact) and active blockers'}
+              </span>
             </h3>
           )}
-          {brainData && !brainLoading && (
+
+          {/* One milestone → its own TO DO / blockers / AC / RBS rows. All
+              milestones → the project-wide RBS matrix and blocker tables. */}
+          {focusedMs && !brainLoading && <MilestoneWork m={focusedMs} />}
+
+          {brainData && !brainLoading && !msScope && (
             <RisksView
               brain={brainData}
               hideGraph
-              onOpenMilestone={name => { setFocusMs(name); setTab('milestones'); }}
+              onOpenMilestone={setMsFilter}
             />
+          )}
+
+          {msScope === UNATTRIBUTED && (
+            <p className="ps-none">
+              These risks were seeded from <code>Risk Graph.md</code>, which records no milestone,
+              so there is no TO DO list to show. They get attributed as calls raise them again.
+            </p>
           )}
         </>
       )}
