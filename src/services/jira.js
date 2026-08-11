@@ -360,6 +360,9 @@ function rgbToHex(color) {
 
 function toAdfWithLink(html, epicId, epicUrl, mediaMap = null) {
   const adf = htmlToAdf(html, mediaMap);
+  // A Jira-only task (create target "Jira") has no Azure counterpart — there is
+  // nothing to link to, and "Epic ID: null" must never land in a description.
+  if (epicId == null || !epicUrl) return adf;
   // Append Azure DevOps link block
   adf.content.push(
     { type: 'paragraph', content: [{ type: 'text', text: `Azure DevOps Epic ID: ${epicId}`, marks: [{ type: 'strong' }] }] },
@@ -575,7 +578,9 @@ export async function createIssue(cloudId, projectKey, issueTypeId, summary, des
       issuetype: { id: issueTypeId },
       summary,
       description: toAdfWithLink(description, epicId, epicUrl),
-      [clientRequestIdField]: epicId,
+      // Jira-only creation passes no Azure id — the link field stays untouched
+      // (sending null makes Jira reject the whole payload on a number field).
+      ...(epicId != null && clientRequestIdField ? { [clientRequestIdField]: epicId } : {}),
       ...(componentId ? { components: [{ id: String(componentId) }] } : {}),
     },
   };

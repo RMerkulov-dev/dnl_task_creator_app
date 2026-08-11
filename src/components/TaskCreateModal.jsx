@@ -5,6 +5,7 @@ import { createTask, getCreateStepCount } from '../services/taskSync.js';
 import { getProjectComponents } from '../services/jira.js';
 import RichTextEditor from './RichTextEditor.jsx';
 import SyncModal from './SyncModal.jsx';
+import CreateTargetToggle, { ConfirmCreateModal, targetLabel } from './CreateTargetToggle.jsx';
 
 // ─── Task Create Modal ────────────────────────────────────────────────────────
 //
@@ -143,6 +144,11 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
   // Effective Jira key: ABS switches ABS/ABSPO at runtime, others use a fixed key.
   const effectiveJiraKey = proj.jira ? (selectedJiraProj || proj.jira.projectKey) : null;
 
+  // Create target: 'both' | 'azure' | 'jira'. Always starts at 'both' (the
+  // modal is mounted per task, so there is no state to carry over).
+  const [target,      setTarget]      = useState('both');
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
   const [syncing,  setSyncing]  = useState(false);
   const [steps,    setSteps]    = useState([]);
   const [showSync, setShowSync] = useState(false);
@@ -260,8 +266,9 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
       jiraProjectKey: selectedJiraProj || undefined,
       componentId:    selectedComponent || undefined,
       attachments:    attachments.length ? attachments : undefined,
+      target,
     };
-    setSteps(Array(getCreateStepCount(proj)).fill({ status: 'idle' }));
+    setSteps(Array(getCreateStepCount(proj, target)).fill({ status: 'idle' }));
     setResult(null);
     setSyncing(true);
     setShowSync(true);
@@ -277,6 +284,9 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
     if (!title.trim())                 { setFormError('Title is required'); return; }
     if (isDescriptionEmpty(description)) { setFormError('Description is required'); return; }
     setFormError('');
+    // Confirm the destination first (see CreateTargetToggle) — nothing is
+    // written before the target has been shown.
+    if (proj.jira) { setConfirmOpen(true); return; }
     runSync();
   }
 
@@ -299,6 +309,8 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
               {visibleProjects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
           </div>
+
+          <CreateTargetToggle project={proj} value={target} onChange={setTarget} disabled={syncing} />
 
           {showExtras && (
             <div className="extras-section">
@@ -396,11 +408,21 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
               aria-disabled={!canSubmit} disabled={syncing}>
               {syncing
                 ? <><span className="spinner" style={{ borderTopColor: '#fff', borderColor: 'rgba(255,255,255,.25)' }} /> Creating…</>
-                : `Create in ${proj.azure.workItemType}${proj.jira ? ' + Jira' : ''} ↗`}
+                : `Create in ${targetLabel(proj, target)} ↗`}
             </button>
           </div>
         </form>
       </div>
+
+      {confirmOpen && (
+        <ConfirmCreateModal
+          project={proj}
+          target={target}
+          title={title.trim()}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => { setConfirmOpen(false); runSync(); }}
+        />
+      )}
 
       {showSync && (
         <SyncModal
@@ -408,6 +430,7 @@ export default function TaskCreateModal({ user, allowedProjects, callTitle, init
           project={proj}
           steps={steps}
           result={result}
+          target={target}
           onClose={() => {
             setShowSync(false);
             setSteps([]);

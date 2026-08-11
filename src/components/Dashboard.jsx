@@ -6,6 +6,7 @@ import { getJiraIssueByKey, getJiraUrl, getProjectComponents } from '../services
 import SyncModal from './SyncModal.jsx';
 import ToastContainer from './Toast.jsx';
 import RichTextEditor from './RichTextEditor.jsx';
+import CreateTargetToggle, { ConfirmCreateModal, targetSummary } from './CreateTargetToggle.jsx';
 
 const LOGO = 'https://dynamicalabs.com/wp-content/uploads/2024/06/dynamica-white.svg';
 
@@ -144,6 +145,15 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
   // Effective Jira project key drives which components to load: ABS lets the user
   // switch between ABS/ABSPO at runtime, other projects use their fixed key.
   const effectiveJiraKey = proj.jira ? (selectedJiraProj || proj.jira.projectKey) : null;
+
+  // ── Create target ─────────────────────────────────────────────────────────
+  // 'both' | 'azure' | 'jira'. Never persisted and reset by resetForm(), so
+  // every page load — and every finished task — starts from "both" again.
+  const [target,       setTarget]       = useState('both');
+  const [confirmOpen,  setConfirmOpen]  = useState(false);
+  // The target the RUNNING sync was started with — resetForm() puts `target`
+  // back to 'both' on success, which would otherwise relabel the open modal.
+  const [syncTarget,   setSyncTarget]   = useState('both');
 
   // ── Sync state ────────────────────────────────────────────────────────────
   const [syncing,   setSyncing]   = useState(false);
@@ -345,6 +355,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
     setIdMode('azure');
     setCreateFromJira(false);
     setFormError('');
+    setTarget('both');
   }
 
   function handleModeChange(m) {
@@ -456,6 +467,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
   // `resume` carries ids from a previous failed run ({ epicId, epicUrl, jiraKey })
   // so retrying skips the steps that already succeeded instead of duplicating them.
   async function runSync(resume = null) {
+    setSyncTarget(mode === 'create' ? target : 'both');
     const extras = {
       iterationPath:  selectedIteration || undefined,
       storyUrl:       selectedStory?.url || undefined,
@@ -464,6 +476,8 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
       componentId:    selectedComponent || undefined,
       attachments:    attachments.length ? attachments : undefined,
       resume:         resume || undefined,
+      // Only creation has a choice of target; edit follows whatever exists.
+      target:         mode === 'create' ? target : undefined,
     };
 
     // createFromJira: Jira issue exists, Azure doesn't — create Azure + link back
@@ -483,7 +497,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
     }
 
     const count = mode === 'create'
-      ? getCreateStepCount(proj)
+      ? getCreateStepCount(proj, target)
       : getEditStepCount(proj, jiraKey);
     setSteps(Array(count).fill({ status: 'idle' }));
     setResult(null);
@@ -533,6 +547,13 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
       return;
     }
     setFormError('');
+    // Creating goes through the confirmation step so the chosen target is always
+    // seen before anything is written. Edits (and the Jira→Azure backfill) have
+    // no target choice, so they run straight away.
+    if (mode === 'create' && !createFromJira && proj.jira) {
+      setConfirmOpen(true);
+      return;
+    }
     runSync();
   }
 
@@ -578,7 +599,7 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                 </h2>
                 <p className="card-sub">
                   {mode === 'create'
-                    ? `Creates Azure DevOps ${proj.azure.workItemType}${proj.jira ? ' + Jira Request' : ''}`
+                    ? targetSummary(proj, target)
                     : `Updates the existing ${proj.azure.workItemType}${proj.jira ? ' and Jira Request' : ''}`}
                 </p>
               </div>
@@ -642,6 +663,16 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
                 </button>
                 {formError && (
                   <p className="error-msg" style={{ marginBottom: 24 }}>⚠ {formError}</p>
+                )}
+
+                {/* Create target — Azure / Jira / both (create mode only) */}
+                {mode === 'create' && !createFromJira && (
+                  <CreateTargetToggle
+                    project={proj}
+                    value={target}
+                    onChange={setTarget}
+                    disabled={syncing}
+                  />
                 )}
 
                 {/* Project */}
@@ -819,12 +850,23 @@ export default function Dashboard({ user, allowedProjects, expiresAt, onLogout }
         </div>
       </main>
 
+      {confirmOpen && (
+        <ConfirmCreateModal
+          project={proj}
+          target={target}
+          title={title.trim()}
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={() => { setConfirmOpen(false); runSync(); }}
+        />
+      )}
+
       {showModal && (
         <SyncModal
           mode={createFromJira ? 'createFromJira' : mode}
           project={proj}
           steps={steps}
           result={result}
+          target={syncTarget}
           onClose={handleCloseModal}
           onRetry={handleRetry}
         />

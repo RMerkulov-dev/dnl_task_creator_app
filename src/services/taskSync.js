@@ -1,11 +1,26 @@
 import { createWorkItem, updateWorkItem, getWorkItem, uploadAttachment } from './azureDevops.js';
 import { createIssue, updateIssue, findIssueByEpicId, getJiraUrl, uploadJiraAttachments, embedAttachmentImages, setJiraAzureId } from './jira.js';
 
+// ─── Create targets (Azure / Jira / both) ─────────────────────────────────────
+// The create forms expose a 3-way toggle — 'both' (the default on every load),
+// 'azure', 'jira'. This is the ONE place that turns a choice into what actually
+// happens, because the choice is not free: a project without Jira can only ever
+// create in Azure, so 'jira' there must degrade instead of creating nothing.
+export function resolveTargets(project, target = 'both') {
+  const hasJira = !!project?.jira;
+  if (target === 'azure')           return { azure: true,  jira: false };
+  if (target === 'jira' && hasJira) return { azure: false, jira: true  };
+  return { azure: true, jira: hasJira };
+}
+
 // ─── Image processing ────────────────────────────────────────────────────────
 // Extracts base64 images from HTML, uploads them as Azure DevOps attachments,
 // and replaces the src with hosted URLs so both Azure and Jira can display them.
+// `toAzure: false` (Jira-only creation) skips the Azure upload but still names
+// and collects the blobs — the ADF converter matches them by
+// `data-jira-filename` against the Jira attachments, never by src.
 
-async function processImages(html, proxyKey, project) {
+async function processImages(html, proxyKey, project, toAzure = true) {
   if (!html) return { html, files: [] };
 
   const parser = new DOMParser();
@@ -25,14 +40,15 @@ async function processImages(html, proxyKey, project) {
 
     try {
       const blob = await (await fetch(dataUrl)).blob();
-      const result = await uploadAttachment(proxyKey, project, fileName, blob);
-
-      // Replace base64 with hosted Azure DevOps URL
-      img.setAttribute('src', result.url);
       // Tag the img so the Jira ADF converter can later map it to the matching
       // Jira attachment (uploaded under the same fileName) and embed it inline.
       img.setAttribute('data-jira-filename', fileName);
-      relations.push({ rel: 'AttachedFile', url: result.url, attributes: { comment: '' } });
+      if (toAzure) {
+        const result = await uploadAttachment(proxyKey, project, fileName, blob);
+        // Replace base64 with hosted Azure DevOps URL
+        img.setAttribute('src', result.url);
+        relations.push({ rel: 'AttachedFile', url: result.url, attributes: { comment: '' } });
+      }
       files.push({ name: fileName, blob });
     } catch (err) {
       console.warn(`Image upload failed for ${fileName}:`, err.message);
@@ -47,13 +63,15 @@ async function processImages(html, proxyKey, project) {
 // Uploads each file to Azure (returns an AttachedFile relation) and returns the
 // blobs so they can also be pushed to Jira as attachments. Unlike images these
 // are not embedded inline — they live in both systems' attachment panels.
-async function uploadExtraAttachments(attachments, azure) {
+// `toAzure: false` (Jira-only creation) hands the blobs straight to Jira.
+async function uploadExtraAttachments(attachments, azure, toAzure = true) {
   const relations = [];
   const jiraFiles = [];
   for (const att of attachments || []) {
     const blob = att.file ?? att.blob;
     if (!blob) continue;
     const name = att.name || blob.name || `attachment-${Date.now()}`;
+    if (!toAzure) { jiraFiles.push({ name, blob }); continue; }
     try {
       const result = await uploadAttachment(azure.proxyKey, azure.project, name, blob);
       relations.push({ rel: 'AttachedFile', url: result.url, attributes: { comment: '' } });
@@ -122,9 +140,11 @@ export function insertIdAfterTitlePrefix(title, id) {
 // ─── Step counting ────────────────────────────────────────────────────────────
 // Centralised so Dashboard and SyncModal always agree on step count.
 
-export function getCreateStepCount(project) {
+export function getCreateStepCount(project, target = 'both') {
+  const t = resolveTargets(project, target);
+  if (!t.azure) return 1;                            // Jira only
   const titleStep = project.features?.azureIdInTitle ? 1 : 0;
-  if (!project.jira) return 1 + titleStep;           // Azure only
+  if (!t.jira) return 1 + titleStep;                 // Azure only
   if (!project.azure.jiraIdField) return 2 + titleStep; // Azure + Jira (no link-back field)
   return 3 + titleStep;                               // Azure + Jira + link-back
 }
@@ -165,7 +185,8 @@ function notifyTaskCreated(project, title, result) {
  * @param {object} project  - from projects.js
  * @param {string} title
  * @param {string} description
- * @param {object} extras   - { iterationPath?, storyUrl?, areaPath? }
+ * @param {object} extras   - { iterationPath?, storyUrl?, areaPath?, target? }
+ *                            target: 'both' (default) | 'azure' | 'jira'
  * @param {function} onStep - (stepIndex, status, errorMsg, data) => void
  */
 export async function createTask(project, title, description, extras = {}, onStep) {
@@ -174,82 +195,92 @@ export async function createTask(project, title, description, extras = {}, onSte
   const jira = extras.jiraProjectKey && project.jira
     ? { ...project.jira, projectKey: extras.jiraProjectKey }
     : project.jira;
+  // Which systems this run writes to (see resolveTargets).
+  const targets = resolveTargets(project, extras.target);
   // Resume support: when a previous run already created the Azure item (and
   // possibly the Jira issue) but a later step failed, the caller passes the
   // ids back so a retry never creates duplicates.
   const resume = extras.resume || {};
 
-  // Steps are numbered dynamically: the azureIdInTitle feature inserts an
-  // extra "number the title" step between the Azure create and the Jira create
-  // (getCreateStepCount and SyncModal's buildStepDefs mirror this).
-  let stepIdx = 0;
-
-  // ── Step: Azure work item ────────────────────────────────────────────────
-  onStep(stepIdx, 'pending');
+  // Steps are numbered dynamically: a skipped target drops its steps entirely
+  // and the azureIdInTitle feature inserts an extra "number the title" step
+  // between the Azure create and the Jira create — hence the running counter
+  // instead of fixed indices (getCreateStepCount and SyncModal's buildStepDefs
+  // mirror this).
+  let stepIdx = -1;
 
   // Upload embedded images as Azure DevOps attachments and replace data URIs
   const { html: processedDesc, files: imageFiles, relations: imageRelations } =
-    await processImages(description, azure.proxyKey, azure.project);
+    await processImages(description, azure.proxyKey, azure.project, targets.azure);
   // Upload user-attached files (any type) as Azure + Jira attachments.
   const { relations: attachRelations, jiraFiles: extraJiraFiles } =
-    await uploadExtraAttachments(extras.attachments, azure);
+    await uploadExtraAttachments(extras.attachments, azure, targets.azure);
 
-  let itemId, itemUrl;
-  if (resume.epicId) {
-    itemId  = resume.epicId;
-    itemUrl = resume.epicUrl ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
-  } else {
-    const fields = {
-      'System.Title':       title,
-      'System.Description': processedDesc,
-    };
-    if (extras.iterationPath) fields['System.IterationPath'] = extras.iterationPath;
-    if (extras.areaPath)      fields['System.AreaPath']      = extras.areaPath;
-
-    const relations = [
-      ...(extras.storyUrl
-        ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
-        : []),
-      ...(imageRelations || []),
-      ...attachRelations,
-    ];
-
-    let item;
-    try {
-      item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
-    } catch (err) {
-      onStep(stepIdx, 'error', err.message);
-      throw err;
-    }
-    itemId  = item.id;
-    itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
-  }
-  onStep(stepIdx, 'done', null, { epicId: itemId, epicUrl: itemUrl });
-
-  // ── Step (azureIdInTitle only): insert the Azure #id into the title ──────
-  // Recomputed from the original title, so a resumed retry never double-inserts.
+  let itemId = null, itemUrl = null;
   let finalTitle = title;
-  if (project.features?.azureIdInTitle) {
+
+  if (targets.azure) {
+    // ── Step: Azure work item ──────────────────────────────────────────────
     stepIdx++;
     onStep(stepIdx, 'pending');
-    finalTitle = insertIdAfterTitlePrefix(title, itemId);
-    try {
-      await updateWorkItem(azure.proxyKey, azure.project, itemId, { 'System.Title': finalTitle });
-    } catch (err) {
-      onStep(stepIdx, 'error', err.message);
-      throw err;
+
+    if (resume.epicId) {
+      itemId  = resume.epicId;
+      itemUrl = resume.epicUrl ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
+    } else {
+      const fields = {
+        'System.Title':       title,
+        'System.Description': processedDesc,
+      };
+      if (extras.iterationPath) fields['System.IterationPath'] = extras.iterationPath;
+      if (extras.areaPath)      fields['System.AreaPath']      = extras.areaPath;
+
+      const relations = [
+        ...(extras.storyUrl
+          ? [{ rel: 'System.LinkTypes.Hierarchy-Reverse', url: extras.storyUrl, attributes: { comment: '' } }]
+          : []),
+        ...(imageRelations || []),
+        ...attachRelations,
+      ];
+
+      let item;
+      try {
+        item = await createWorkItem(azure.proxyKey, azure.project, azure.workItemType, fields, relations);
+      } catch (err) {
+        onStep(stepIdx, 'error', err.message);
+        throw err;
+      }
+      itemId  = item.id;
+      itemUrl = item._links?.html?.href ?? `https://dev.azure.com/${azure.project}/_workitems/edit/${itemId}`;
     }
-    onStep(stepIdx, 'done');
+    onStep(stepIdx, 'done', null, { epicId: itemId, epicUrl: itemUrl });
+
+    // ── Step (azureIdInTitle only): insert the Azure #id into the title ────
+    // Recomputed from the original title, so a resumed retry never double-inserts.
+    if (project.features?.azureIdInTitle) {
+      stepIdx++;
+      onStep(stepIdx, 'pending');
+      finalTitle = insertIdAfterTitlePrefix(title, itemId);
+      try {
+        await updateWorkItem(azure.proxyKey, azure.project, itemId, { 'System.Title': finalTitle });
+      } catch (err) {
+        onStep(stepIdx, 'error', err.message);
+        throw err;
+      }
+      onStep(stepIdx, 'done');
+    }
   }
 
-  // If no Jira configured for this project — we're done
-  if (!jira) {
+  // No Jira configured for this project, or the user chose "Azure only"
+  if (!targets.jira) {
     const result = { epicId: itemId, epicUrl: itemUrl, jiraKey: null, jiraUrl: null };
     notifyTaskCreated(project, finalTitle, result);
     return result;
   }
 
   // ── Step: Jira issue (created with the numbered title) ───────────────────
+  // itemId/itemUrl are null on a Jira-only run — createIssue then skips both
+  // the Azure-id field and the Azure link block.
   stepIdx++;
   onStep(stepIdx, 'pending');
   let jiraKey;
@@ -271,12 +302,15 @@ export async function createTask(project, title, description, extras = {}, onSte
   const jiraUrl = getJiraUrl(jiraKey);
 
   if (!resume.jiraKey) {
-    await pushJiraAttachments(jira, jiraKey, processedDesc, imageFiles, extraJiraFiles, { epicId: itemId, epicUrl: itemUrl });
+    await pushJiraAttachments(
+      jira, jiraKey, processedDesc, imageFiles, extraJiraFiles,
+      itemId ? { epicId: itemId, epicUrl: itemUrl } : null
+    );
   }
 
   onStep(stepIdx, 'done', null, { jiraKey, jiraUrl });
 
-  if (!azure.jiraIdField) {
+  if (!targets.azure || !azure.jiraIdField) {
     const result = { epicId: itemId, epicUrl: itemUrl, jiraKey, jiraUrl };
     notifyTaskCreated(project, finalTitle, result);
     return result;

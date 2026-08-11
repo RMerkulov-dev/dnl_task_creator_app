@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getWorkItem, getWorkItemStates, updateWorkItemState } from '../services/azureDevops.js';
 import { getIssuesStatusByKeys, getTransitions, transitionIssue } from '../services/jira.js';
+import { resolveTargets } from '../services/taskSync.js';
 
 // Azure DevOps state categories → chip colour buckets (mirrors StatusUpdatesApp).
 const AZURE_STATE_TONE = {
@@ -25,7 +26,9 @@ function useCloseOnScroll(open, close) {
 }
 
 // ─── Step definitions — derived from project config ───────────────────────────
-function buildStepDefs(mode, project, stepCount) {
+// `target` only applies to create mode ('both' | 'azure' | 'jira') — edit and
+// createFromJira always touch whatever already exists.
+function buildStepDefs(mode, project, stepCount, target = 'both') {
   const type = project?.azure?.workItemType ?? 'Item';
   const hasJira = !!project?.jira;
   const hasLinkBack = !!project?.azure?.jiraIdField;
@@ -45,11 +48,13 @@ function buildStepDefs(mode, project, stepCount) {
       ...(isNewJira && hasLinkBack ? [{ label: 'Linking records' }] : []),
     ];
   }
+  const t = resolveTargets(project, target);
+  if (!t.azure) return [{ label: 'Creating Jira Request' }];
   return [
     { label: `Creating Azure DevOps ${type}` },
     ...(project?.features?.azureIdInTitle ? [{ label: 'Adding Azure ID to title' }] : []),
-    ...(hasJira ? [{ label: 'Creating Jira Request' }] : []),
-    ...(hasJira && hasLinkBack ? [{ label: 'Linking records' }] : []),
+    ...(t.jira ? [{ label: 'Creating Jira Request' }] : []),
+    ...(t.jira && hasLinkBack ? [{ label: 'Linking records' }] : []),
   ];
 }
 
@@ -335,8 +340,8 @@ function SuccessPanel({ project, result, onClose }) {
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function SyncModal({ mode, project, steps, result, onClose, onRetry }) {
-  const defs   = buildStepDefs(mode, project, steps.length);
+export default function SyncModal({ mode, project, steps, result, target = 'both', onClose, onRetry }) {
+  const defs   = buildStepDefs(mode, project, steps.length, target);
   const hasErr = steps.some(s => s?.status === 'error');
   const isDone = !!result && !hasErr;
 
